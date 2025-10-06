@@ -1,0 +1,9 @@
+[package]
+name = "brc721"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitcoincore-rpc = "0.19"
+bitcoin = { version = "0.32", features = ["serde"] }
+dotenvy = "0.15"
