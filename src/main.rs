@@ -20,6 +20,20 @@ fn main() {
         _ => Auth::None,
     };
 
+    let auth_mode = match (
+        env::var("BITCOIN_RPC_USER").ok(),
+        env::var("BITCOIN_RPC_PASS").ok(),
+        env::var("BITCOIN_RPC_COOKIE").ok(),
+    ) {
+        (Some(_), Some(_), _) => "user/pass",
+        (_, _, Some(_)) => "cookie",
+        _ => "none",
+    };
+
+    println!("🚀 Starting brc721");
+    println!("🔗 RPC URL: {}", rpc_url);
+    println!("🔐 Auth: {}", auth_mode);
+
     let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
 
     let mut current_height: u64 = 0;
