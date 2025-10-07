@@ -7,3 +7,4 @@ edition = "2021"
 bitcoincore-rpc = "0.19"
 bitcoin = { version = "0.32", features = ["serde"] }
 dotenvy = "0.15"
+hex = "0.4"
