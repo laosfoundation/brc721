@@ -1,26 +1,28 @@
 services:
-  # bitcoind:
-  #   image: bitcoin/bitcoin:latest
-  #   container_name: bitcoind-regtest
-  #   command: ["bitcoind", "-conf=/home/bitcoin/.bitcoin/bitcoin.conf"]
-  #   ports:
-  #     - "127.0.0.1:18443:18443"  # RPC
-  #     - "127.0.0.1:18444:18444"  # P2P
-  #   volumes:
-  #     - ./docker/bitcoin:/home/bitcoin/.bitcoin
-  #   restart: unless-stopped
-  #
-  bitcoind-mainnet:
+  bitcoin-mainnet:
     image: bitcoin/bitcoin:latest
     container_name: bitcoind-mainnet
     command: ["bitcoind", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
     ports:
-      - "127.0.0.1:8332:8332"  # RPC
-      - "8333:8333"            # P2P
+      - "127.0.0.1:8332:8332"
+      - "8333:8333"
     volumes:
       - bitcoind-mainnet-data:/home/bitcoin/.bitcoin
     restart: unless-stopped
 
+  bitcoind-testnet:
+    image: bitcoin/bitcoin:latest
+    container_name: bitcoind-testnet
+    command: ["bitcoind", "-regtest=1", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
+    ports:
+      - "127.0.0.1:18445:18445"
+      - "18333:18333"
+    volumes:
+      - bitcoind-testnet-data:/home/bitcoin/.bitcoin
+    restart: unless-stopped
+
 volumes:
   bitcoind-mainnet-data:
+    driver: local
+  bitcoind-testnet-data:
     driver: local
