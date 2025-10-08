@@ -5,6 +5,7 @@ use dotenvy::dotenv;
 use bitcoin::Block;
 mod cli;
 mod scanner;
+mod parser;
 
 fn format_block_scripts(block: &Block) -> String {
     let mut out = String::new();
@@ -36,7 +37,7 @@ fn process_block(block: &Block, debug: bool, height: u64, block_hash_str: &str) 
         let s = format_block_scripts(block);
         print!("{}", s);
     } else {
-        println!("🧱 {} {}", height, block_hash_str);
+        parser::parse(height, block, block_hash_str);
     }
 }
 
