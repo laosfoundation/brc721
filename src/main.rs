@@ -1,12 +1,10 @@
 use std::env;
-use std::thread;
-use std::time::Duration;
 
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
 use bitcoin::Block;
 mod cli;
-
+mod scanner;
 
 fn format_block_scripts(block: &Block) -> String {
     let mut out = String::new();
@@ -79,49 +77,10 @@ fn main() {
 
     let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
 
-    let mut current_height: u64 = 0;
-
-    loop {
-        match client.get_block_count() {
-            Ok(tip) => {
-                if tip >= confirmations {
-                    let target = tip - confirmations;
-                    while current_height <= target {
-                        match client.get_block_hash(current_height) {
-                        Ok(hash) => match client.get_block(&hash) {
-                            Ok(block) => {
-                                if debug {
-                                    println!("🧱 {} {} ({} txs)", current_height, hash, block.txdata.len());
-                                }
-                                process_block(&block, debug, current_height, &hash.to_string());
-                                current_height += 1;
-                            }
-                            Err(e) => {
-                                eprintln!("error get_block at height {}: {}", current_height, e);
-                                thread::sleep(Duration::from_millis(500));
-                            }
-                        },
-                        Err(e) => {
-                            eprintln!("error get_block_hash at height {}: {}", current_height, e);
-                            thread::sleep(Duration::from_millis(500));
-                        }
-                    }
-                }
-            }
-
-                match client.wait_for_new_block(60) {
-                    Ok(_br) => {}
-                    Err(_e) => {
-                        thread::sleep(Duration::from_secs(1));
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("error get_block_count: {}", e);
-                thread::sleep(Duration::from_secs(1));
-            }
-        }
-    }
+    let mut scanner = scanner::Scanner::new(&client, confirmations, debug);
+    scanner.run(|height, block, hash| {
+        process_block(block, debug, height, hash);
+    });
 }
 
 #[cfg(test)]
