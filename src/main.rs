@@ -5,6 +5,8 @@ use std::time::Duration;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use dotenvy::dotenv;
 use bitcoin::Block;
+mod cli;
+
 
 fn format_block_scripts(block: &Block) -> String {
     let mut out = String::new();
@@ -40,61 +42,12 @@ fn process_block(block: &Block, debug: bool, height: u64, block_hash_str: &str) 
     }
 }
 
-fn print_usage(prog: &str) {
-    println!("Usage: {} [OPTIONS]", prog);
-    println!();
-    println!("Options:");
-    println!("  -d, --debug                 Print transaction scripts and details");
-    println!("  -c, --confirmations <N>     Only process up to tip - N (default 0)");
-    println!("  -h, --help                  Show this help message and exit");
-    println!();
-    println!("Environment:");
-    println!("  BITCOIN_RPC_URL           RPC URL (default http://127.0.0.1:8332)");
-    println!("  BITCOIN_RPC_USER          RPC username");
-    println!("  BITCOIN_RPC_PASS          RPC password");
-    println!("  BITCOIN_RPC_COOKIE        Path to cookie file");
-    println!();
-    println!("Output:");
-    println!("  default: 🧱 <height> <hash>");
-    println!("  --debug: 🧱 <height> <hash> (<n> txs) + transaction scripts");
-}
-
 fn main() {
     dotenv().ok();
 
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        let prog = args.get(0).map(|s| s.as_str()).unwrap_or("brc721");
-        print_usage(prog);
-        return;
-    }
-    let debug = args.iter().any(|a| a == "--debug" || a == "-d");
-
-    let mut confirmations: u64 = 0;
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "-c" || arg == "--confirmations" {
-            if let Some(v) = args.get(i + 1) {
-                match v.parse::<u64>() {
-                    Ok(n) => confirmations = n,
-                    Err(_) => {
-                        eprintln!("invalid value for --confirmations: {}", v);
-                        return;
-                    }
-                }
-            } else {
-                eprintln!("--confirmations requires a value");
-                return;
-            }
-        } else if let Some(v) = arg.strip_prefix("--confirmations=") {
-            match v.parse::<u64>() {
-                Ok(n) => confirmations = n,
-                Err(_) => {
-                    eprintln!("invalid value for --confirmations: {}", v);
-                    return;
-                }
-            }
-        }
-    }
+    let cli = cli::parse();
+    let debug = cli.debug;
+    let confirmations = cli.confirmations;
 
     let rpc_url = env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8332".to_string());
 

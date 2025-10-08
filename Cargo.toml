@@ -8,3 +8,4 @@ bitcoincore-rpc = "0.19"
 bitcoin = { version = "0.32", features = ["serde"] }
 dotenvy = "0.15"
 hex = "0.4"
+clap = { version = "4", features = ["derive"] }
