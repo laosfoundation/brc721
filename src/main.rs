@@ -31,13 +31,43 @@ fn format_block_scripts(block: &Block) -> String {
     out
 }
 
-fn process_block(block: &Block) {
-    let s = format_block_scripts(block);
-    print!("{}", s);
+fn process_block(block: &Block, debug: bool, height: u64, block_hash_str: &str) {
+    if debug {
+        let s = format_block_scripts(block);
+        print!("{}", s);
+    } else {
+        println!("🧱 {} {}", height, block_hash_str);
+    }
+}
+
+fn print_usage(prog: &str) {
+    println!("Usage: {} [OPTIONS]", prog);
+    println!();
+    println!("Options:");
+    println!("  -d, --debug    Print transaction scripts and details");
+    println!("  -h, --help     Show this help message and exit");
+    println!();
+    println!("Environment:");
+    println!("  BITCOIN_RPC_URL           RPC URL (default http://127.0.0.1:8332)");
+    println!("  BITCOIN_RPC_USER          RPC username");
+    println!("  BITCOIN_RPC_PASS          RPC password");
+    println!("  BITCOIN_RPC_COOKIE        Path to cookie file");
+    println!();
+    println!("Output:");
+    println!("  default: 🧱 <height> <hash>");
+    println!("  --debug: 🧱 <height> <hash> (<n> txs) + transaction scripts");
 }
 
 fn main() {
     dotenv().ok();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        let prog = args.get(0).map(|s| s.as_str()).unwrap_or("brc721");
+        print_usage(prog);
+        return;
+    }
+    let debug = args.iter().any(|a| a == "--debug" || a == "-d");
 
     let rpc_url = env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8332".to_string());
 
@@ -64,6 +94,7 @@ fn main() {
     println!("🚀 Starting brc721");
     println!("🔗 RPC URL: {}", rpc_url);
     println!("🔐 Auth: {}", auth_mode);
+    println!("🛠️ Debug: {}", if debug { "on" } else { "off" });
 
     let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
 
@@ -76,8 +107,10 @@ fn main() {
                     match client.get_block_hash(current_height) {
                         Ok(hash) => match client.get_block(&hash) {
                             Ok(block) => {
-                                println!("{} {}", hash, block.txdata.len());
-                                process_block(&block);
+                                if debug {
+                                    println!("🧱 {} {} ({} txs)", current_height, hash, block.txdata.len());
+                                }
+                                process_block(&block, debug, current_height, &hash.to_string());
                                 current_height += 1;
                             }
                             Err(e) => {
