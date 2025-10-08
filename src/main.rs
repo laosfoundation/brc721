@@ -44,8 +44,9 @@ fn print_usage(prog: &str) {
     println!("Usage: {} [OPTIONS]", prog);
     println!();
     println!("Options:");
-    println!("  -d, --debug    Print transaction scripts and details");
-    println!("  -h, --help     Show this help message and exit");
+    println!("  -d, --debug                 Print transaction scripts and details");
+    println!("  -c, --confirmations <N>     Only process up to tip - N (default 0)");
+    println!("  -h, --help                  Show this help message and exit");
     println!();
     println!("Environment:");
     println!("  BITCOIN_RPC_URL           RPC URL (default http://127.0.0.1:8332)");
@@ -68,6 +69,32 @@ fn main() {
         return;
     }
     let debug = args.iter().any(|a| a == "--debug" || a == "-d");
+
+    let mut confirmations: u64 = 0;
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "-c" || arg == "--confirmations" {
+            if let Some(v) = args.get(i + 1) {
+                match v.parse::<u64>() {
+                    Ok(n) => confirmations = n,
+                    Err(_) => {
+                        eprintln!("invalid value for --confirmations: {}", v);
+                        return;
+                    }
+                }
+            } else {
+                eprintln!("--confirmations requires a value");
+                return;
+            }
+        } else if let Some(v) = arg.strip_prefix("--confirmations=") {
+            match v.parse::<u64>() {
+                Ok(n) => confirmations = n,
+                Err(_) => {
+                    eprintln!("invalid value for --confirmations: {}", v);
+                    return;
+                }
+            }
+        }
+    }
 
     let rpc_url = env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8332".to_string());
 
@@ -95,6 +122,7 @@ fn main() {
     println!("🔗 RPC URL: {}", rpc_url);
     println!("🔐 Auth: {}", auth_mode);
     println!("🛠️ Debug: {}", if debug { "on" } else { "off" });
+    println!("🧮 Confirmations: {}", confirmations);
 
     let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
 
@@ -103,8 +131,10 @@ fn main() {
     loop {
         match client.get_block_count() {
             Ok(tip) => {
-                while current_height <= tip {
-                    match client.get_block_hash(current_height) {
+                if tip >= confirmations {
+                    let target = tip - confirmations;
+                    while current_height <= target {
+                        match client.get_block_hash(current_height) {
                         Ok(hash) => match client.get_block(&hash) {
                             Ok(block) => {
                                 if debug {
@@ -124,6 +154,7 @@ fn main() {
                         }
                     }
                 }
+            }
 
                 match client.wait_for_new_block(60) {
                     Ok(_br) => {}
