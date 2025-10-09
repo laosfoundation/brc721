@@ -6,6 +6,8 @@ use bitcoin::Block;
 mod cli;
 mod scanner;
 mod parser;
+mod storage;
+use crate::storage::Storage;
 
 fn format_block_scripts(block: &Block) -> String {
     let mut out = String::new();
@@ -78,9 +80,24 @@ fn main() {
 
     let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
 
+    let state_path = env::var("BRC721_STATE_PATH").unwrap_or_else(|_| "./.brc721/last_height".to_string());
+    let store = storage::FileStorage::new(state_path);
+
+    if let Ok(Some(h)) = store.load_last_height() {
+        println!("📦 Resuming from height {}", h + 1);
+    }
+
     let mut scanner = scanner::Scanner::new(&client, confirmations, debug);
+    if let Ok(Some(h)) = store.load_last_height() {
+        scanner.start_from(h + 1);
+    }
+
+    let store2 = store.clone();
     scanner.run(|height, block, hash| {
         process_block(block, debug, height, hash);
+        if let Err(e) = store2.save_last_height(height) {
+            eprintln!("warning: failed to save last height {}: {}", height, e);
+        }
     });
 }
 
