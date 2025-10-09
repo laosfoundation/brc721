@@ -2,9 +2,15 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LastBlock {
+    pub height: u64,
+    pub hash: String,
+}
+
 pub trait Storage {
-    fn load_last_height(&self) -> io::Result<Option<u64>>;
-    fn save_last_height(&self, height: u64) -> io::Result<()>;
+    fn load_last(&self) -> io::Result<Option<LastBlock>>;
+    fn save_last(&self, height: u64, hash: &str) -> io::Result<()>;
 }
 
 #[derive(Clone, Debug)]
@@ -19,13 +25,19 @@ impl FileStorage {
 }
 
 impl Storage for FileStorage {
-    fn load_last_height(&self) -> io::Result<Option<u64>> {
+    fn load_last(&self) -> io::Result<Option<LastBlock>> {
         match fs::read_to_string(&self.path) {
             Ok(s) => {
                 let t = s.trim();
-                match t.parse::<u64>() {
-                    Ok(n) => Ok(Some(n)),
-                    Err(_) => Ok(None),
+                let mut it = t.split_whitespace();
+                let h = it.next();
+                let hh = it.next();
+                match (h, hh) {
+                    (Some(hs), Some(hash)) => match hs.parse::<u64>() {
+                        Ok(height) => Ok(Some(LastBlock { height, hash: hash.to_string() })),
+                        Err(_) => Ok(None),
+                    },
+                    _ => Ok(None),
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -33,14 +45,15 @@ impl Storage for FileStorage {
         }
     }
 
-    fn save_last_height(&self, height: u64) -> io::Result<()> {
+    fn save_last(&self, height: u64, hash: &str) -> io::Result<()> {
         let dir = self.path.parent();
         if let Some(d) = dir {
             if !d.as_os_str().is_empty() {
                 fs::create_dir_all(d)?;
             }
         }
-        fs::write(&self.path, height.to_string().as_bytes())
+        let s = format!("{} {}\n", height, hash);
+        fs::write(&self.path, s.as_bytes())
     }
 }
 
@@ -60,7 +73,7 @@ mod tests {
     fn load_returns_none_when_missing() {
         let path = unique_temp_file();
         let store = FileStorage::new(&path);
-        let v = store.load_last_height().unwrap();
+        let v = store.load_last().unwrap();
         assert!(v.is_none());
     }
 
@@ -68,8 +81,8 @@ mod tests {
     fn save_and_load_roundtrip() {
         let path = unique_temp_file();
         let store = FileStorage::new(&path);
-        store.save_last_height(42).unwrap();
-        let v = store.load_last_height().unwrap();
-        assert_eq!(v, Some(42));
+        store.save_last(42, "deadbeef").unwrap();
+        let v = store.load_last().unwrap();
+        assert_eq!(v, Some(LastBlock { height: 42, hash: "deadbeef".to_string() }));
     }
 }

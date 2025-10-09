@@ -9,6 +9,10 @@ mod parser;
 mod storage;
 use crate::storage::Storage;
 
+fn is_orphan(prev: &storage::LastBlock, block: &Block) -> bool {
+    block.header.prev_blockhash.to_string() != prev.hash
+}
+
 fn format_block_scripts(block: &Block) -> String {
     let mut out = String::new();
     for tx in &block.txdata {
@@ -83,20 +87,31 @@ fn main() {
     let state_path = env::var("BRC721_STATE_PATH").unwrap_or_else(|_| "./.brc721/last_height".to_string());
     let store = storage::FileStorage::new(state_path);
 
-    if let Ok(Some(h)) = store.load_last_height() {
-        println!("📦 Resuming from height {}", h + 1);
+    if let Ok(Some(last)) = store.load_last() {
+        println!("📦 Resuming from height {}", last.height + 1);
     }
 
     let mut scanner = scanner::Scanner::new(&client, confirmations, debug);
-    if let Ok(Some(h)) = store.load_last_height() {
-        scanner.start_from(h + 1);
+    if let Ok(Some(last)) = store.load_last() {
+        scanner.start_from(last.height + 1);
     }
 
     let store2 = store.clone();
     scanner.run(|height, block, hash| {
+        if let Ok(Some(prev)) = store2.load_last() {
+            if is_orphan(&prev, block) {
+                eprintln!(
+                    "error: detected orphan branch at height {}: parent {} != last processed {}",
+                    height,
+                    block.header.prev_blockhash,
+                    prev.hash
+                );
+                std::process::exit(1);
+            }
+        }
         process_block(block, debug, height, hash);
-        if let Err(e) = store2.save_last_height(height) {
-            eprintln!("warning: failed to save last height {}: {}", height, e);
+        if let Err(e) = store2.save_last(height, hash) {
+            eprintln!("warning: failed to save last block {} ({}): {}", height, hash, e);
         }
     });
 }
@@ -145,4 +160,35 @@ mod tests {
         assert!(out.contains(&hex::encode(script_sig.as_bytes())));
         assert!(out.contains(&hex::encode(script_pubkey.as_bytes())));
     }
+
+    fn make_block_with_prev(prev: bitcoin::BlockHash) -> Block {
+        let header = bitcoin::block::Header {
+            version: bitcoin::block::Version::TWO,
+            prev_blockhash: prev,
+            merkle_root: bitcoin::TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: bitcoin::CompactTarget::from_consensus(0),
+            nonce: 0,
+        };
+        Block { header, txdata: vec![] }
+    }
+
+    #[test]
+    fn orphan_detection_matches_parent() {
+        let b0 = make_block_with_prev(bitcoin::BlockHash::all_zeros());
+        let b0_hash = b0.header.block_hash();
+        let b1 = make_block_with_prev(b0_hash);
+        let last = crate::storage::LastBlock { height: 0, hash: b0_hash.to_string() };
+        assert_eq!(is_orphan(&last, &b1), false);
+    }
+
+    #[test]
+    fn orphan_detection_flags_mismatch() {
+        let b0 = make_block_with_prev(bitcoin::BlockHash::all_zeros());
+        let b0_hash = b0.header.block_hash();
+        let b1 = make_block_with_prev(b0_hash);
+        let last = crate::storage::LastBlock { height: 0, hash: "deadbeef".to_string() };
+        assert_eq!(is_orphan(&last, &b1), true);
+    }
 }
+
