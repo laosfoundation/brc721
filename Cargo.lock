@@ -186,6 +186,8 @@ dependencies = [
  "dotenvy",
  "hex",
  "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

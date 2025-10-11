@@ -1,4 +1,30 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    WalletInit {
+        #[arg(long)]
+        name: String,
+    },
+    WalletNewAddress {
+        #[arg(long)]
+        name: String,
+    },
+    WalletBalance {
+        #[arg(long)]
+        name: String,
+    },
+    CollectionCreate {
+        #[arg(long, value_name = "HEX20")]
+        laos_hex: String,
+        #[arg(long, default_value_t = false)]
+        rebaseable: bool,
+        #[arg(long)]
+        fee_rate: Option<f64>,
+        #[arg(long)]
+        name: String,
+    },
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -35,6 +61,9 @@ pub struct Cli {
         help = "Reset all persisted state (delete the SQLite database) before starting"
     )]
     pub reset: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
 }
 
 pub fn parse() -> Cli {

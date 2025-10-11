@@ -8,6 +8,7 @@ mod db;
 mod parser;
 mod scanner;
 mod storage;
+mod wallet;
 use crate::storage::Storage;
 use std::sync::Arc;
 
@@ -94,7 +95,53 @@ fn main() {
     println!("🛠️ Debug: {}", if debug { "on" } else { "off" });
     println!("🧮 Confirmations: {}", confirmations);
 
-    let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
+    let client = Client::new(&rpc_url, auth.clone()).expect("failed to create RPC client");
+
+    if let Some(cmd) = &cli.command {
+        match cmd {
+            crate::cli::Command::WalletInit { name } => {
+                let _ = wallet::Wallet::create_wallet(&client, name);
+                println!("wallet {} ready", name);
+                return;
+            }
+            crate::cli::Command::WalletNewAddress { name } => {
+                let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
+                let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
+                let addr = wallet::Wallet::new_address(&wclient).expect("new address");
+                println!("{}", addr);
+                return;
+            }
+            crate::cli::Command::WalletBalance { name } => {
+                let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
+                let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
+                let b = wallet::Wallet::balance(&wclient).expect("balance");
+                println!("{}", b);
+                return;
+            }
+            crate::cli::Command::CollectionCreate {
+                laos_hex,
+                rebaseable,
+                fee_rate,
+                name,
+            } => {
+                let mut laos = [0u8; 20];
+                let bytes = hex::decode(laos_hex).expect("hex");
+                assert_eq!(bytes.len(), 20, "laos hex must be 20 bytes");
+                laos.copy_from_slice(&bytes);
+                let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
+                let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
+                let txid = wallet::Wallet::create_and_broadcast_collection(
+                    &wclient,
+                    laos,
+                    *rebaseable,
+                    *fee_rate,
+                )
+                .expect("broadcast");
+                println!("{}", txid);
+                return;
+            }
+        }
+    }
 
     let default_db = "./.brc721/brc721.sqlite".to_string();
     let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
