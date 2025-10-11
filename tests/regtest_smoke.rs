@@ -1,5 +1,5 @@
-use std::env;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
+use std::env;
 
 fn rpc_client() -> Client {
     dotenvy::from_filename(".env.test").ok();
@@ -22,6 +22,8 @@ fn can_read_tip_and_header() {
     let client = rpc_client();
     let tip = client.get_block_count().expect("get_block_count");
     let hash = client.get_block_hash(tip).expect("get_block_hash");
-    let header = client.get_block_header_info(&hash).expect("get_block_header_info");
+    let header = client
+        .get_block_header_info(&hash)
+        .expect("get_block_header_info");
     assert!(header.time > 0);
 }

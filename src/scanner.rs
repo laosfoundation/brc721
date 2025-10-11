@@ -35,7 +35,12 @@ pub struct Scanner<'a, C: BitcoinRpc + ?Sized> {
 
 impl<'a, C: BitcoinRpc + ?Sized> Scanner<'a, C> {
     pub fn new(client: &'a C, confirmations: u64, debug: bool) -> Self {
-        Self { client, confirmations, debug, current_height: 0 }
+        Self {
+            client,
+            confirmations,
+            debug,
+            current_height: 0,
+        }
     }
 
     pub fn start_from(&mut self, height: u64) {
@@ -87,13 +92,53 @@ impl<'a, C: BitcoinRpc + ?Sized> Scanner<'a, C> {
             }
         }
     }
+
+    pub fn drain_batch(&mut self, max: usize) -> Result<Vec<(u64, Block, String)>, RpcError> {
+        let mut out = Vec::with_capacity(max);
+        for _ in 0..max {
+            match self.step()? {
+                Some((h, b, hs)) => out.push((h, b, hs)),
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn run_batch<F>(&mut self, batch_size: usize, mut on_batch: F) -> !
+    where
+        F: FnMut(&[(u64, Block, String)]),
+    {
+        loop {
+            let mut got_any = false;
+            loop {
+                match self.drain_batch(batch_size) {
+                    Ok(items) if items.is_empty() => break,
+                    Ok(items) => {
+                        got_any = true;
+                        on_batch(&items);
+                    }
+                    Err(e) => {
+                        eprintln!("scanner batch error: {}", e);
+                        thread::sleep(Duration::from_millis(500));
+                        break;
+                    }
+                }
+            }
+            if !got_any {
+                match self.client.wait_for_new_block(60) {
+                    Ok(()) => {}
+                    Err(_e) => thread::sleep(Duration::from_secs(1)),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{block::Header, block::Version, BlockHash, CompactTarget, TxMerkleNode};
     use bitcoin::hashes::Hash;
+    use bitcoin::{block::Header, block::Version, BlockHash, CompactTarget, TxMerkleNode};
     use std::cell::RefCell;
 
     fn make_block(prev: BlockHash, time: u32) -> Block {
@@ -105,7 +150,10 @@ mod tests {
             bits: CompactTarget::from_consensus(0),
             nonce: time,
         };
-        Block { header, txdata: vec![] }
+        Block {
+            header,
+            txdata: vec![],
+        }
     }
 
     struct MockRpc {
@@ -121,7 +169,9 @@ mod tests {
                 prev = b.header.block_hash();
                 blocks.push(b);
             }
-            Self { blocks: RefCell::new(blocks) }
+            Self {
+                blocks: RefCell::new(blocks),
+            }
         }
         fn append_block(&self) {
             let prev = self.blocks.borrow().last().unwrap().header.block_hash();
@@ -159,11 +209,8 @@ mod tests {
         let rpc = MockRpc::new(5);
         let mut scanner = Scanner::new(&rpc, 2, false);
         let mut heights = Vec::new();
-        loop {
-            match scanner.step().unwrap() {
-                Some((h, _b, _hs)) => heights.push(h),
-                None => break,
-            }
+        while let Some((h, _b, _hs)) = scanner.step().unwrap() {
+            heights.push(h)
         }
         assert_eq!(heights, vec![0, 1, 2]);
     }
@@ -182,11 +229,8 @@ mod tests {
         let rpc = MockRpc::new(4);
         let mut scanner = Scanner::new(&rpc, 1, false);
         let mut heights = Vec::new();
-        loop {
-            match scanner.step().unwrap() {
-                Some((h, _b, _hs)) => heights.push(h),
-                None => break,
-            }
+        while let Some((h, _b, _hs)) = scanner.step().unwrap() {
+            heights.push(h)
         }
         assert_eq!(heights, vec![0, 1, 2]);
         rpc.append_block();

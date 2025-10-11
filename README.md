@@ -2,6 +2,23 @@ brc721
 
 A simple Rust app that connects to a Bitcoin Core node and streams blocks.
 
+Storage
+
+- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically.
+- No CSV or legacy fallback.
+- Use --reset to delete the database file before starting.
+
+Environment
+
+- BITCOIN_RPC_URL, BITCOIN_RPC_USER/PASS or BITCOIN_RPC_COOKIE
+- BRC721_DB_PATH (optional, default ./.brc721/brc721.sqlite)
+
+CLI
+
+- --confirmations N: process up to tip - N (default 3)
+- --batch-size SIZE: batch processing size (default 100)
+- --reset: delete DB before start
+
 Local testing with Bitcoin Core (regtest)
 
 Option A: Native install

@@ -1,13 +1,10 @@
-use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::{Block, Script};
 
-fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
+use crate::db::Repository;
+
+pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
     let mut it = script.instructions();
     match it.next()? {
         Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
@@ -51,41 +48,54 @@ fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
     Some((laos_bytes, rebaseable))
 }
 
-fn collections_file_path() -> PathBuf {
-    let state_path = env::var("BRC721_STATE_PATH").unwrap_or_else(|_| "./.brc721/last_height".to_string());
-    let p = PathBuf::from(state_path);
-    let dir = p.parent().map(|d| d.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
-    dir.join("collections.csv")
-}
-
-fn store_collection_mapping(id: &str, laos_addr: &[u8; 20]) {
-    let path = collections_file_path();
-    if let Some(dir) = path.parent() {
-        if let Err(e) = fs::create_dir_all(dir) {
-            eprintln!("warning: failed to create data dir {}: {}", dir.display(), e);
-            return;
-        }
-    }
-    let mut f = match OpenOptions::new().create(true).append(true).open(&path) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("warning: failed to open {}: {}", path.display(), e);
-            return;
-        }
-    };
-    let line = format!("{} {}\n", id, hex::encode(laos_addr));
-    let _ = f.write_all(line.as_bytes());
-}
-
-pub fn parse(height: u64, block: &Block, block_hash_str: &str) {
+pub fn parse_with_repo(repo: &dyn Repository, height: u64, block: &Block, block_hash_str: &str) {
     println!("🧱 {} {}", height, block_hash_str);
+    let mut rows: Vec<crate::db::CollectionRow> = Vec::new();
     for (tx_index, tx) in block.txdata.iter().enumerate() {
-        if let Some(out0) = tx.output.get(0) {
-            if let Some((laos, _rebaseable)) = parse_register_output0(out0.script_pubkey.as_script()) {
+        if let Some(out0) = tx.output.first() {
+            if let Some((laos, rebaseable)) = parse_register_output0(out0.script_pubkey.as_script())
+            {
                 let id = format!("{}:{}", block_hash_str, tx_index);
-                store_collection_mapping(&id, &laos);
+                rows.push((
+                    id,
+                    laos,
+                    rebaseable,
+                    height,
+                    block_hash_str.to_string(),
+                    tx_index as u32,
+                ));
             }
         }
+    }
+    if !rows.is_empty() {
+        let _ = repo.insert_collections_batch(&rows);
+    }
+}
+
+pub fn parse_blocks_batch(repo: &dyn Repository, items: &[(u64, &Block, &str)]) {
+    let mut rows: Vec<crate::db::CollectionRow> = Vec::new();
+    for &(height, block, block_hash_str) in items.iter() {
+        println!("🧱 {} {}", height, block_hash_str);
+        for (tx_index, tx) in block.txdata.iter().enumerate() {
+            if let Some(out0) = tx.output.first() {
+                if let Some((laos, rebaseable)) =
+                    parse_register_output0(out0.script_pubkey.as_script())
+                {
+                    let id = format!("{}:{}", block_hash_str, tx_index);
+                    rows.push((
+                        id,
+                        laos,
+                        rebaseable,
+                        height,
+                        block_hash_str.to_string(),
+                        tx_index as u32,
+                    ));
+                }
+            }
+        }
+    }
+    if !rows.is_empty() {
+        let _ = repo.insert_collections_batch(&rows);
     }
 }
 

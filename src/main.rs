@@ -1,13 +1,15 @@
 use std::env;
 
+use bitcoin::Block;
 use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
-use bitcoin::Block;
 mod cli;
-mod scanner;
+mod db;
 mod parser;
+mod scanner;
 mod storage;
 use crate::storage::Storage;
+use std::sync::Arc;
 
 fn is_orphan(prev: &storage::LastBlock, block: &Block) -> bool {
     block.header.prev_blockhash.to_string() != prev.hash
@@ -22,28 +24,37 @@ fn format_block_scripts(block: &Block) -> String {
             let script_sig_hex = hex::encode(input.script_sig.as_bytes());
             out.push_str(&format!("  vin[{}] scriptSig: {}\n", i, script_sig_hex));
             if !input.witness.is_empty() {
-                let wit_items: Vec<String> = input
-                    .witness
-                    .iter()
-                    .map(|w| hex::encode(w.as_ref()))
-                    .collect();
-                out.push_str(&format!("  vin[{}] witness: [{}]\n", i, wit_items.join(", ")));
+                let wit_items: Vec<String> = input.witness.iter().map(hex::encode).collect();
+                out.push_str(&format!(
+                    "  vin[{}] witness: [{}]\n",
+                    i,
+                    wit_items.join(", ")
+                ));
             }
         }
         for (j, output) in tx.output.iter().enumerate() {
             let script_pubkey_hex = hex::encode(output.script_pubkey.as_bytes());
-            out.push_str(&format!("  vout[{}] scriptPubKey: {}\n", j, script_pubkey_hex));
+            out.push_str(&format!(
+                "  vout[{}] scriptPubKey: {}\n",
+                j, script_pubkey_hex
+            ));
         }
     }
     out
 }
 
-fn process_block(block: &Block, debug: bool, height: u64, block_hash_str: &str) {
+fn process_block(
+    repo: Arc<dyn db::Repository + Send + Sync>,
+    block: &Block,
+    debug: bool,
+    height: u64,
+    block_hash_str: &str,
+) {
     if debug {
         let s = format_block_scripts(block);
         print!("{}", s);
     } else {
-        parser::parse(height, block, block_hash_str);
+        parser::parse_with_repo(repo.as_ref(), height, block, block_hash_str)
     }
 }
 
@@ -54,7 +65,8 @@ fn main() {
     let debug = cli.debug;
     let confirmations = cli.confirmations;
 
-    let rpc_url = env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8332".to_string());
+    let rpc_url =
+        env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8332".to_string());
 
     let auth = match (
         env::var("BITCOIN_RPC_USER").ok(),
@@ -84,8 +96,23 @@ fn main() {
 
     let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
 
-    let state_path = env::var("BRC721_STATE_PATH").unwrap_or_else(|_| "./.brc721/last_height".to_string());
-    let store = storage::FileStorage::new(state_path);
+    let default_db = "./.brc721/brc721.sqlite".to_string();
+    let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
+
+    let (store, repo): (
+        Arc<dyn Storage + Send + Sync>,
+        Arc<dyn db::Repository + Send + Sync>,
+    ) = {
+        let sqlite = db::SqliteRepo::new(db_path);
+        if cli.reset {
+            let _ = sqlite.reset_all();
+        }
+        let _ = sqlite.import_if_needed();
+        (
+            Arc::new(sqlite.clone()) as Arc<dyn Storage + Send + Sync>,
+            Arc::new(sqlite) as Arc<dyn db::Repository + Send + Sync>,
+        )
+    };
 
     if let Ok(Some(last)) = store.load_last() {
         println!("📦 Resuming from height {}", last.height + 1);
@@ -97,30 +124,64 @@ fn main() {
     }
 
     let store2 = store.clone();
-    scanner.run(|height, block, hash| {
-        if let Ok(Some(prev)) = store2.load_last() {
-            if is_orphan(&prev, block) {
-                eprintln!(
-                    "error: detected orphan branch at height {}: parent {} != last processed {}",
-                    height,
-                    block.header.prev_blockhash,
-                    prev.hash
-                );
-                std::process::exit(1);
+    let repo2 = repo.clone();
+    let batch_size = cli.batch_size;
+    if batch_size <= 1 {
+        scanner.run(|height, block, hash| {
+            if let Ok(Some(prev)) = store2.load_last() {
+                if is_orphan(&prev, block) {
+                    eprintln!(
+                        "error: detected orphan branch at height {}: parent {} != last processed {}",
+                        height, block.header.prev_blockhash, prev.hash
+                    );
+                    std::process::exit(1);
+                }
             }
-        }
-        process_block(block, debug, height, hash);
-        if let Err(e) = store2.save_last(height, hash) {
-            eprintln!("warning: failed to save last block {} ({}): {}", height, hash, e);
-        }
-    });
+            process_block(repo2.clone(), block, debug, height, hash);
+            if let Err(e) = store2.save_last(height, hash) {
+                eprintln!(
+                    "warning: failed to save last block {} ({}): {}",
+                    height, hash, e
+                );
+            }
+        });
+    } else {
+        scanner.run_batch(batch_size, |items| {
+            if let Ok(Some(prev)) = store2.load_last() {
+                let mut expected = prev.hash.clone();
+                for (h, b, hs) in items.iter() {
+                    if b.header.prev_blockhash.to_string() != expected {
+                        eprintln!(
+                            "error: detected orphan branch at height {}: parent {} != last processed {}",
+                            h, b.header.prev_blockhash, expected
+                        );
+                        std::process::exit(1);
+                    }
+                    expected = hs.clone();
+                }
+            }
+            let refs: Vec<(u64, &Block, &str)> = items
+                .iter()
+                .map(|(h, b, hs)| (*h, b, hs.as_str()))
+                .collect();
+            parser::parse_blocks_batch(repo2.as_ref(), &refs);
+            if let Some((last_h, _b, last_hash)) = items.last() {
+                if let Err(e) = store2.save_last(*last_h, last_hash) {
+                    eprintln!(
+                        "warning: failed to save last block {} ({}): {}",
+                        last_h, last_hash, e
+                    );
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{Transaction, TxIn, TxOut, OutPoint};
     use bitcoin::hashes::Hash;
+    use bitcoin::{OutPoint, Transaction, TxIn, TxOut};
 
     #[test]
     fn format_block_scripts_includes_scripts() {
@@ -170,7 +231,10 @@ mod tests {
             bits: bitcoin::CompactTarget::from_consensus(0),
             nonce: 0,
         };
-        Block { header, txdata: vec![] }
+        Block {
+            header,
+            txdata: vec![],
+        }
     }
 
     #[test]
@@ -178,8 +242,11 @@ mod tests {
         let b0 = make_block_with_prev(bitcoin::BlockHash::all_zeros());
         let b0_hash = b0.header.block_hash();
         let b1 = make_block_with_prev(b0_hash);
-        let last = crate::storage::LastBlock { height: 0, hash: b0_hash.to_string() };
-        assert_eq!(is_orphan(&last, &b1), false);
+        let last = crate::storage::LastBlock {
+            height: 0,
+            hash: b0_hash.to_string(),
+        };
+        assert!(!is_orphan(&last, &b1));
     }
 
     #[test]
@@ -187,8 +254,10 @@ mod tests {
         let b0 = make_block_with_prev(bitcoin::BlockHash::all_zeros());
         let b0_hash = b0.header.block_hash();
         let b1 = make_block_with_prev(b0_hash);
-        let last = crate::storage::LastBlock { height: 0, hash: "deadbeef".to_string() };
-        assert_eq!(is_orphan(&last, &b1), true);
+        let last = crate::storage::LastBlock {
+            height: 0,
+            hash: "deadbeef".to_string(),
+        };
+        assert!(is_orphan(&last, &b1));
     }
 }
-

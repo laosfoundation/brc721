@@ -19,6 +19,22 @@ pub struct Cli {
         help = "Only process up to tip - N confirmations"
     )]
     pub confirmations: u64,
+
+    #[arg(
+        short = 'b',
+        long,
+        default_value_t = 100usize,
+        value_name = "SIZE",
+        help = "Process blocks in batches of SIZE"
+    )]
+    pub batch_size: usize,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Reset all persisted state (delete the SQLite database) before starting"
+    )]
+    pub reset: bool,
 }
 
 pub fn parse() -> Cli {

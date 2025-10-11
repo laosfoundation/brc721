@@ -19,8 +19,11 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
+    #[allow(dead_code)]
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        Self { path: path.as_ref().to_path_buf() }
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
     }
 }
 
@@ -34,7 +37,10 @@ impl Storage for FileStorage {
                 let hh = it.next();
                 match (h, hh) {
                     (Some(hs), Some(hash)) => match hs.parse::<u64>() {
-                        Ok(height) => Ok(Some(LastBlock { height, hash: hash.to_string() })),
+                        Ok(height) => Ok(Some(LastBlock {
+                            height,
+                            hash: hash.to_string(),
+                        })),
                         Err(_) => Ok(None),
                     },
                     _ => Ok(None),
@@ -64,7 +70,10 @@ mod tests {
 
     fn unique_temp_file() -> PathBuf {
         let mut p = std::env::temp_dir();
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         p.push(format!("brc721_state_{}.txt", nanos));
         p
     }
@@ -83,6 +92,12 @@ mod tests {
         let store = FileStorage::new(&path);
         store.save_last(42, "deadbeef").unwrap();
         let v = store.load_last().unwrap();
-        assert_eq!(v, Some(LastBlock { height: 42, hash: "deadbeef".to_string() }));
+        assert_eq!(
+            v,
+            Some(LastBlock {
+                height: 42,
+                hash: "deadbeef".to_string()
+            })
+        );
     }
 }
