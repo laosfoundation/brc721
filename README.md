@@ -1,6 +1,6 @@
 brc721
 
-A simple Rust app that connects to a Bitcoin Core node and streams blocks.
+A simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
 
 Storage
 
@@ -12,12 +12,67 @@ Environment
 
 - BITCOIN_RPC_URL, BITCOIN_RPC_USER/PASS or BITCOIN_RPC_COOKIE
 - BRC721_DB_PATH (optional, default ./.brc721/brc721.sqlite)
+- BRC721_API_BIND (optional, default 127.0.0.1:8080)
+- BRC721_API_TOKEN (optional auth token; if set, requests must send x-api-key: <token> or Authorization: Bearer <token>)
 
 CLI
 
 - --confirmations N: process up to tip - N (default 3)
 - --batch-size SIZE: batch processing size (default 100)
 - --reset: delete DB before start
+- Subcommands:
+  - wallet-init --name <wallet>
+  - wallet-newaddress --name <wallet>
+  - wallet-balance --name <wallet>
+  - collection-create --name <wallet> --laos-hex <20-byte-hex> [--rebaseable] [--fee-rate <sat/vB>]
+  - serve [--bind <addr:port>]  Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
+
+HTTP API
+
+Start the server (scanner runs concurrently, persisting to SQLite):
+
+```
+# start API and the background scanner together
+cargo run -- serve --bind 127.0.0.1:8080
+# pass debug and confirmations flags to control scanner verbosity/lag
+cargo run -- -d -c 3 serve --bind 127.0.0.1:8080
+# or via env
+BRC721_API_BIND=0.0.0.0:8080 cargo run -- serve
+# optional auth
+export BRC721_API_TOKEN=secret123
+```
+
+Endpoints:
+
+- POST /wallet/init
+
+  Request body:
+  {"name":"default"}
+
+  Response:
+  {"ok":true,"name":"default"}
+
+- GET /wallet/{name}/address
+
+  Response:
+  {"address":"bcrt1..."}
+
+- GET /wallet/{name}/balance
+
+  Response:
+  {"balance_btc": 12.345}
+
+- POST /collections
+
+  Request body:
+  {"wallet":"default","laos_hex":"<40-hex>","rebaseable":false,"fee_rate":1.0}
+
+  Response:
+  {"txid":"<txid>"}
+
+If BRC721_API_TOKEN is set, include either header:
+- x-api-key: <token>
+- Authorization: Bearer <token>
 
 Local testing with Bitcoin Core (regtest)
 
@@ -46,10 +101,13 @@ BITCOIN_RPC_PASS=dev
 bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcport=18443 -generate 101
 ```
 
-- Run the app:
+- Run the scanner or API:
 
 ```
+# scanner
 cargo run
+# API server
+cargo run -- serve --bind 127.0.0.1:8080
 ```
 
 Option B: Docker (recommended for quick setup)
@@ -82,8 +140,11 @@ docker compose exec bitcoind bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev 
 - Run the app/tests against Docker node:
 
 ```
+# scanner
 cargo run
-# Tests will read .env.test automatically
+# api
+cargo run -- serve
+# tests
 cargo test -- --nocapture
 ```
 

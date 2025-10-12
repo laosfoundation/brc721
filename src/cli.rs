@@ -24,6 +24,10 @@ pub enum Command {
         #[arg(long)]
         name: String,
     },
+    Serve {
+        #[arg(long)]
+        bind: Option<String>,
+    },
 }
 
 #[derive(Parser, Debug)]

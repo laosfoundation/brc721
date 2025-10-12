@@ -3,6 +3,7 @@ use std::env;
 use bitcoin::Block;
 use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
+mod api;
 mod cli;
 mod db;
 mod parser;
@@ -59,7 +60,8 @@ fn process_block(
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     dotenv().ok();
 
     let cli = cli::parse();
@@ -138,6 +140,100 @@ fn main() {
                 )
                 .expect("broadcast");
                 println!("{}", txid);
+                return;
+            }
+            crate::cli::Command::Serve { bind } => {
+                let bind_addr = bind
+                    .clone()
+                    .or_else(|| env::var("BRC721_API_BIND").ok())
+                    .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+                let token = env::var("BRC721_API_TOKEN").ok();
+
+                let default_db = "./.brc721/brc721.sqlite".to_string();
+                let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
+                let sqlite = db::SqliteRepo::new(db_path);
+                if cli.reset {
+                    let _ = sqlite.reset_all();
+                }
+                let _ = sqlite.import_if_needed();
+                let store: Arc<dyn Storage + Send + Sync> = Arc::new(sqlite.clone());
+                let repo: Arc<dyn db::Repository + Send + Sync> = Arc::new(sqlite);
+
+                if let Ok(Some(last)) = store.load_last() {
+                    println!("📦 Resuming from height {}", last.height + 1);
+                }
+
+                let rpc_url2 = rpc_url.clone();
+                let auth2 = auth.clone();
+                let store2 = store.clone();
+                let repo2 = repo.clone();
+                let debug2 = debug;
+                let confirmations2 = confirmations;
+                let batch_size2 = cli.batch_size;
+
+                std::thread::spawn(move || {
+                    let client2 = Client::new(&rpc_url2, auth2).expect("failed to create RPC client");
+                    let mut scanner = scanner::Scanner::new(&client2, confirmations2, debug2);
+                    if let Ok(Some(last)) = store2.load_last() {
+                        scanner.start_from(last.height + 1);
+                    }
+                    let st = store2.clone();
+                    let rp = repo2.clone();
+                    if batch_size2 <= 1 {
+                        scanner.run(|height, block, hash| {
+                            if let Ok(Some(prev)) = st.load_last() {
+                                if is_orphan(&prev, block) {
+                                    eprintln!(
+                                        "error: detected orphan branch at height {}: parent {} != last processed {}",
+                                        height, block.header.prev_blockhash, prev.hash
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                            process_block(rp.clone(), block, debug2, height, hash);
+                            if let Err(e) = st.save_last(height, hash) {
+                                eprintln!(
+                                    "warning: failed to save last block {} ({}): {}",
+                                    height, hash, e
+                                );
+                            }
+                        });
+                    } else {
+                        scanner.run_batch(batch_size2, |items| {
+                            if let Ok(Some(prev)) = st.load_last() {
+                                let mut expected = prev.hash.clone();
+                                for (h, b, hs) in items.iter() {
+                                    if b.header.prev_blockhash.to_string() != expected {
+                                        eprintln!(
+                                            "error: detected orphan branch at height {}: parent {} != last processed {}",
+                                            h, b.header.prev_blockhash, expected
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                    expected = hs.clone();
+                                }
+                            }
+                            let refs: Vec<(u64, &Block, &str)> = items
+                                .iter()
+                                .map(|(h, b, hs)| (*h, b, hs.as_str()))
+                                .collect();
+                            parser::parse_blocks_batch(rp.as_ref(), &refs);
+                            if let Some((last_h, _b, last_hash)) = items.last() {
+                                if let Err(e) = st.save_last(*last_h, last_hash) {
+                                    eprintln!(
+                                        "warning: failed to save last block {} ({}): {}",
+                                        last_h, last_hash, e
+                                    );
+                                }
+                            }
+                        });
+                    }
+                });
+
+                if let Err(e) = api::serve(bind_addr, rpc_url.clone(), auth.clone(), token).await {
+                    eprintln!("api server error: {}", e);
+                    std::process::exit(1);
+                }
                 return;
             }
         }
