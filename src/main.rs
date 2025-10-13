@@ -131,6 +131,14 @@ fn main() {
                 laos.copy_from_slice(&bytes);
                 let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
                 let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
+                println!(
+                    "creating BRC-721 collection: laos=0x{} rebaseable={} fee_rate={}",
+                    hex::encode(laos),
+                    rebaseable,
+                    fee_rate
+                        .map(|v| format!("{} sat/vB", v))
+                        .unwrap_or_else(|| "default".to_string())
+                );
                 let txid = wallet::Wallet::create_and_broadcast_collection(
                     &wclient,
                     laos,
@@ -138,7 +146,7 @@ fn main() {
                     *fee_rate,
                 )
                 .expect("broadcast");
-                println!("{}", txid);
+                println!("collection txid: {}", txid);
                 return;
             }
 
