@@ -4,7 +4,7 @@ use clap::Parser;
     author,
     version,
     about = "Stream Bitcoin Core blocks and print summaries or detailed scripts",
-    long_about = "A simple Rust app that connects to a Bitcoin Core node via RPC and streams blocks.\n\nEnvironment:\n  BITCOIN_RPC_URL       RPC URL (default http://127.0.0.1:8332)\n  BITCOIN_RPC_USER      RPC username\n  BITCOIN_RPC_PASS      RPC password\n  BITCOIN_RPC_COOKIE    Path to cookie file\n"
+    long_about = "A simple Rust app that connects to a Bitcoin Core node via RPC and streams blocks."
 )]
 pub struct Cli {
     #[arg(short, long, help = "Print transaction scripts and details")]
@@ -34,6 +34,34 @@ pub struct Cli {
         help = "Reset all persisted state (delete the SQLite database) before starting"
     )]
     pub reset: bool,
+
+    #[arg(
+        long,
+        default_value = ".brc721/",
+        value_name = "DIR",
+        help = "Directory to store persistent data"
+    )]
+    pub data_dir: String,
+
+    #[arg(
+        long,
+        default_value = "http://127.0.0.1:8332",
+        value_name = "URL",
+        help = "Bitcoin Core RPC URL"
+    )]
+    pub rpc_url: String,
+
+    #[arg(long, value_name = "USER", help = "RPC username (user/pass auth)")]
+    pub rpc_user: Option<String>,
+
+    #[arg(long, value_name = "PASS", help = "RPC password (user/pass auth)")]
+    pub rpc_pass: Option<String>,
+
+    #[arg(long, value_name = "PATH", help = "Path to cookie file (cookie auth)")]
+    pub rpc_cookie: Option<String>,
+
+    #[arg(long, value_name = "PATH", help = "Path to SQLite database file")]
+    pub db_path: Option<String>,
 }
 
 pub fn parse() -> Cli {

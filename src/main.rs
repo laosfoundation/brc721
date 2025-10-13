@@ -1,14 +1,12 @@
-use std::env;
 use std::sync::Arc;
 
 use bitcoincore_rpc::{Auth, Client};
-use dotenvy::dotenv;
 mod cli;
 mod core;
 mod parser;
 mod scanner;
 mod storage;
-use crate::storage::Storage;
+use storage::Storage;
 
 #[cfg(test)]
 fn is_orphan(prev: &storage::Block, block: &bitcoin::Block) -> bool {
@@ -45,70 +43,63 @@ fn format_block_scripts(block: &bitcoin::Block) -> String {
 }
 
 fn main() {
-    dotenv().ok();
-
     let cli = cli::parse();
-    let debug = cli.debug;
-    let confirmations = cli.confirmations;
 
-    let rpc_url =
-        env::var("BITCOIN_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8332".to_string());
-
-    let auth = match (
-        env::var("BITCOIN_RPC_USER").ok(),
-        env::var("BITCOIN_RPC_PASS").ok(),
-        env::var("BITCOIN_RPC_COOKIE").ok(),
-    ) {
-        (Some(user), Some(pass), _) => Auth::UserPass(user, pass),
-        (_, _, Some(cookie_path)) => Auth::CookieFile(cookie_path.into()),
-        _ => Auth::None,
-    };
-
-    let auth_mode = match (
-        env::var("BITCOIN_RPC_USER").ok(),
-        env::var("BITCOIN_RPC_PASS").ok(),
-        env::var("BITCOIN_RPC_COOKIE").ok(),
-    ) {
-        (Some(_), Some(_), _) => "user/pass",
-        (_, _, Some(_)) => "cookie",
+    let auth_mode = match (&cli.rpc_user, &cli.rpc_pass) {
+        (Some(_), Some(_)) => "user/pass",
         _ => "none",
     };
 
     println!("🚀 Starting brc721");
-    println!("🔗 RPC URL: {}", rpc_url);
+    println!("🔗 RPC URL: {}", cli.rpc_url);
     println!("🔐 Auth: {}", auth_mode);
-    println!("🛠️ Debug: {}", if debug { "on" } else { "off" });
-    println!("🧮 Confirmations: {}", confirmations);
+    println!("🛠️ Debug: {}", if cli.debug { "on" } else { "off" });
+    println!("🧮 Confirmations: {}", cli.confirmations);
+    println!("📂 Data dir: {}", cli.data_dir);
 
-    let client = Client::new(&rpc_url, auth.clone()).expect("failed to create RPC client");
+    init_data_dir(&cli);
+    let storage_arc = init_storage(&cli);
+    let starting_block = storage_arc
+        .load_last()
+        .unwrap_or_default()
+        .map(|last| last.height + 1)
+        .unwrap_or_default();
+    let scanner = init_scanner(&cli, starting_block);
 
-    let default_db = "./.brc721/brc721.sqlite".to_string();
-    let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
+    let core = core::Core::new(storage_arc.clone(), scanner, cli.debug, cli.batch_size);
+    core.run();
+}
 
-    let storage_arc: Arc<dyn Storage + Send + Sync> = {
-        let sqlite = storage::SqliteStorage::new(db_path);
-        if cli.reset {
-            let _ = sqlite.reset_all();
-        }
-        let _ = sqlite.init();
-        Arc::new(sqlite)
+fn init_data_dir(cli: &cli::Cli) {
+    let data_dir = std::path::PathBuf::from(&cli.data_dir);
+    let _ = std::fs::create_dir_all(&data_dir);
+}
+
+fn init_storage(cli: &cli::Cli) -> Arc<dyn Storage + Send + Sync> {
+    let data_dir = std::path::PathBuf::from(&cli.data_dir);
+    let db_path = data_dir
+        .join("brc721.sqlite")
+        .to_string_lossy()
+        .into_owned();
+    let sqlite = storage::SqliteStorage::new(&db_path);
+    if cli.reset {
+        let _ = sqlite.reset_all();
+    }
+    let _ = sqlite.init();
+    Arc::new(sqlite)
+}
+
+fn init_scanner(cli: &cli::Cli, start_block: u64) -> scanner::Scanner<Client> {
+    let auth = match (&cli.rpc_user, &cli.rpc_pass) {
+        (Some(user), Some(pass)) => Auth::UserPass(user.clone(), pass.clone()),
+        _ => Auth::None,
     };
 
-    if let Ok(Some(last)) = storage_arc.load_last() {
-        println!("📦 Resuming from height {}", last.height + 1);
-    }
-
-    let batch_size = cli.batch_size;
-    let max = if batch_size == 0 { 1 } else { batch_size };
-    let mut scanner = scanner::Scanner::new(client)
-        .with_confirmations(confirmations)
-        .with_capacity(max);
-    if let Ok(Some(last)) = storage_arc.load_last() {
-        scanner = scanner.with_start_from(last.height + 1);
-    }
-
-    let core = core::Core::new(storage_arc.clone(), scanner, debug, batch_size);
-    core.run();
+    let client = Client::new(&cli.rpc_url, auth).expect("failed to create RPC client");
+    scanner::Scanner::new(client)
+        .with_confirmations(cli.confirmations)
+        .with_capacity(cli.batch_size)
+        .with_start_from(start_block)
 }
 
 #[cfg(test)]
