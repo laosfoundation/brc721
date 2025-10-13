@@ -174,9 +174,11 @@ async fn main() {
                 std::thread::spawn(move || {
                     let client2 =
                         Client::new(&rpc_url2, auth2).expect("failed to create RPC client");
-                    let mut scanner = scanner::Scanner::new(client2, confirmations2, max2);
+                    let mut scanner = scanner::Scanner::new(client2)
+                        .with_confirmations(confirmations2)
+                        .with_capacity(max2);
                     if let Ok(Some(last)) = storage2.load_last() {
-                        scanner.start_from(last.height + 1);
+                        scanner = scanner.with_start_from(last.height + 1);
                     }
                     let st = storage2.clone();
                     if batch_size2 <= 1 {
@@ -276,9 +278,11 @@ async fn main() {
 
     let batch_size = cli.batch_size;
     let max = if batch_size == 0 { 1 } else { batch_size };
-    let mut scanner = scanner::Scanner::new(client, confirmations, max);
+    let mut scanner = scanner::Scanner::new(client)
+        .with_confirmations(confirmations)
+        .with_capacity(max);
     if let Ok(Some(last)) = storage_arc.load_last() {
-        scanner.start_from(last.height + 1);
+        scanner = scanner.with_start_from(last.height + 1);
     }
 
     let storage2 = storage_arc.clone();
