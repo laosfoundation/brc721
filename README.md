@@ -1,6 +1,20 @@
-brc721
+# BRC721
 
-A simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
+`brc721` is a Rust app that implements the BRC-721 protocol described in the [BRC-721 research paper](https://eprint.iacr.org/2025/641).
+
+It is experimental software with no warranty. See [LICENSE](LICENSE) for more details.
+
+BRC-721 scales the creation, management, and trading of non-fungible tokens (NFTs) on Bitcoin by extending [Bridgeless Minting patterns](https://github.com/freeverseio/laos-whitepaper/blob/main/laos.pdf) previously used on other blockchains.
+
+The protocol leverages on-chain Bitcoin data to handle all aspects of token ownership, including trading, while integrating a secondary consensus system for minting and optionally modifying token metadata. 
+
+To minimize its on-chain footprint, the protocol utilizes the `OP_RETURN` mechanism for ownership records, while complementary NFT-related actions are stored on the LAOS blockchain. All data remains permanently on-chain, with no reliance on bridges or third-party operators.
+
+The `OP_RETURN` pattern is heavily inspired by the [Runes Protocol](https://docs.ordinals.com/runes.html), which greatly simplifies previous patterns based on [Ordinal Theory](https://docs.ordinals.com/), used by [Inscriptions/Ordinals](https://ordinals.com/).
+
+## The app
+
+This is a simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
 
 Storage
 
