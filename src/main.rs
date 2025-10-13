@@ -1,6 +1,6 @@
 use std::env;
 
-use bitcoin::Block;
+use bitcoin;
 use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
 mod api;
@@ -12,11 +12,11 @@ mod wallet;
 use crate::storage::Storage;
 use std::sync::Arc;
 
-fn is_orphan(prev: &storage::LastBlock, block: &Block) -> bool {
+fn is_orphan(prev: &storage::Block, block: &bitcoin::Block) -> bool {
     block.header.prev_blockhash.to_string() != prev.hash
 }
 
-fn format_block_scripts(block: &Block) -> String {
+fn format_block_scripts(block: &bitcoin::Block) -> String {
     let mut out = String::new();
     for tx in &block.txdata {
         let txid = tx.compute_txid();
@@ -46,7 +46,7 @@ fn format_block_scripts(block: &Block) -> String {
 
 fn process_block(
     storage: Arc<dyn Storage + Send + Sync>,
-    block: &Block,
+    block: &bitcoin::Block,
     debug: bool,
     height: u64,
     block_hash_str: &str,
@@ -210,7 +210,7 @@ async fn main() {
                                     expected = hs.clone();
                                 }
                             }
-                            let refs: Vec<(u64, &Block, &str)> = items
+                            let refs: Vec<(u64, &bitcoin::Block, &str)> = items
                                 .iter()
                                 .map(|(h, b, hs)| (*h, b, hs.as_str()))
                                 .collect();
@@ -293,7 +293,7 @@ async fn main() {
                     expected = hs.clone();
                 }
             }
-            let refs: Vec<(u64, &Block, &str)> = items
+            let refs: Vec<(u64, &bitcoin::Block, &str)> = items
                 .iter()
                 .map(|(h, b, hs)| (*h, b, hs.as_str()))
                 .collect();
@@ -345,7 +345,7 @@ mod tests {
             bits: bitcoin::CompactTarget::from_consensus(0),
             nonce: 0,
         };
-        let block = Block {
+        let block = bitcoin::Block {
             header,
             txdata: vec![tx],
         };
@@ -355,7 +355,7 @@ mod tests {
         assert!(out.contains(&hex::encode(script_pubkey.as_bytes())));
     }
 
-    fn make_block_with_prev(prev: bitcoin::BlockHash) -> Block {
+    fn make_block_with_prev(prev: bitcoin::BlockHash) -> bitcoin::Block {
         let header = bitcoin::block::Header {
             version: bitcoin::block::Version::TWO,
             prev_blockhash: prev,
@@ -364,7 +364,7 @@ mod tests {
             bits: bitcoin::CompactTarget::from_consensus(0),
             nonce: 0,
         };
-        Block {
+        bitcoin::Block {
             header,
             txdata: vec![],
         }
@@ -375,7 +375,7 @@ mod tests {
         let b0 = make_block_with_prev(bitcoin::BlockHash::all_zeros());
         let b0_hash = b0.header.block_hash();
         let b1 = make_block_with_prev(b0_hash);
-        let last = crate::storage::LastBlock {
+        let last = crate::storage::Block {
             height: 0,
             hash: b0_hash.to_string(),
         };
@@ -387,7 +387,7 @@ mod tests {
         let b0 = make_block_with_prev(bitcoin::BlockHash::all_zeros());
         let b0_hash = b0.header.block_hash();
         let b1 = make_block_with_prev(b0_hash);
-        let last = crate::storage::LastBlock {
+        let last = crate::storage::Block {
             height: 0,
             hash: "deadbeef".to_string(),
         };

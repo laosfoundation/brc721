@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{CollectionRow, LastBlock, Storage};
+use super::{Block, CollectionRow, Storage};
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -76,7 +76,7 @@ impl SqliteStorage {
 }
 
 impl Storage for SqliteStorage {
-    fn load_last(&self) -> std::io::Result<Option<LastBlock>> {
+    fn load_last(&self) -> std::io::Result<Option<Block>> {
         let r = self.with_conn(|conn| {
             conn.query_row(
                 "SELECT height, hash FROM chain_state WHERE id = 1",
@@ -84,7 +84,7 @@ impl Storage for SqliteStorage {
                 |row| {
                     let height: i64 = row.get(0)?;
                     let hash: String = row.get(1)?;
-                    Ok(LastBlock {
+                    Ok(Block {
                         height: height as u64,
                         hash,
                     })
