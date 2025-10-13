@@ -23,7 +23,7 @@ pub enum Command {
         fee_rate: Option<f64>,
         #[arg(long)]
         name: String,
-    }
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -36,6 +36,15 @@ pub enum Command {
 pub struct Cli {
     #[arg(short, long, help = "Print transaction scripts and details")]
     pub debug: bool,
+
+    #[arg(
+        short = 's',
+        long = "start",
+        default_value_t = 877186u64,
+        value_name = "HEIGHT",
+        help = "Initial block height to start scanning from when no prior state exists"
+    )]
+    pub start: u64,
 
     #[arg(
         short = 'c',

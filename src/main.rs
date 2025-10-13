@@ -168,6 +168,8 @@ fn main() {
         .with_capacity(max);
     if let Ok(Some(last)) = storage_arc.load_last() {
         scanner = scanner.with_start_from(last.height + 1);
+    } else {
+        scanner = scanner.with_start_from(cli.start);
     }
 
     let storage2 = storage_arc.clone();
