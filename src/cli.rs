@@ -51,17 +51,21 @@ pub struct Cli {
     )]
     pub rpc_url: String,
 
-    #[arg(long, value_name = "USER", help = "RPC username (user/pass auth)")]
+    #[arg(
+        long,
+        value_name = "USER",
+        default_value = "dev",
+        help = "RPC username (user/pass auth)"
+    )]
     pub rpc_user: Option<String>,
 
-    #[arg(long, value_name = "PASS", help = "RPC password (user/pass auth)")]
+    #[arg(
+        long,
+        value_name = "PASS",
+        default_value = "dev",
+        help = "RPC password (user/pass auth)"
+    )]
     pub rpc_pass: Option<String>,
-
-    #[arg(long, value_name = "PATH", help = "Path to cookie file (cookie auth)")]
-    pub rpc_cookie: Option<String>,
-
-    #[arg(long, value_name = "PATH", help = "Path to SQLite database file")]
-    pub db_path: Option<String>,
 }
 
 pub fn parse() -> Cli {
