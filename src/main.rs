@@ -17,15 +17,15 @@ fn main() {
     println!("📂 Data dir: {}", cli.data_dir);
 
     init_data_dir(&cli);
-    let storage_arc = init_storage(&cli);
-    let starting_block = storage_arc
+    let storage = init_storage(&cli);
+    let starting_block = storage
         .load_last()
         .unwrap_or_default()
         .map(|last| last.height + 1)
         .unwrap_or_default();
     let scanner = init_scanner(&cli, starting_block);
 
-    let core = core::Core::new(storage_arc.clone(), scanner, cli.debug, cli.batch_size);
+    let core = core::Core::new(storage.clone(), scanner, cli.debug, cli.batch_size);
     core.run();
 }
 
