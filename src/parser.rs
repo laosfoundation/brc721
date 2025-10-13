@@ -77,7 +77,6 @@ pub fn parse_blocks_batch(repo: &dyn Storage, items: &[(u64, &Block, &BlockHash)
     let mut rows: Vec<CollectionRow> = Vec::new();
     for &(height, block, block_hash) in items.iter() {
         let block_hash_str = block_hash.to_string();
-        println!("🧱 {} {}", height, block_hash_str);
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             if let Some(out0) = tx.output.first() {
                 if let Some((laos, rebaseable)) =

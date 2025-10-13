@@ -181,6 +181,7 @@ fn main() {
                     continue;
                 }
             };
+            let mut last_processed: Option<(u64, String)> = None;
             for (height, block, hash) in blocks.iter().map(|(h, b, hs)| (*h, b, hs)) {
                 if let Ok(Some(prev)) = storage2.load_last() {
                     if is_orphan(&prev, &block) {
@@ -199,6 +200,10 @@ fn main() {
                         height, hash_str, e
                     );
                 }
+                last_processed = Some((height, hash_str));
+            }
+            if let Some((h, hs)) = last_processed.take() {
+                println!("last processed: {} {}", h, hs);
             }
         }
     } else {
@@ -235,6 +240,7 @@ fn main() {
                         last_h, last_hash_str, e
                     );
                 }
+                println!("last processed: {} {}", last_h, last_hash_str);
             }
         }
     }
