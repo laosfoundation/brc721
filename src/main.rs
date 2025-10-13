@@ -6,7 +6,6 @@ mod core;
 mod parser;
 mod scanner;
 mod storage;
-use storage::Storage;
 
 fn main() {
     let cli = cli::parse();
@@ -41,7 +40,7 @@ fn init_data_dir(cli: &cli::Cli) {
     let _ = std::fs::create_dir_all(&data_dir);
 }
 
-fn init_storage(cli: &cli::Cli) -> Arc<dyn Storage + Send + Sync> {
+fn init_storage(cli: &cli::Cli) -> Arc<dyn storage::Storage + Send + Sync> {
     let data_dir = std::path::PathBuf::from(&cli.data_dir);
     let db_path = data_dir
         .join("brc721.sqlite")
