@@ -1,6 +1,3 @@
-use std::thread;
-use std::time::Duration;
-
 use bitcoin::{Block, BlockHash};
 use bitcoincore_rpc::{Client, Error as RpcError, RpcApi};
 
@@ -47,7 +44,26 @@ impl<'a, C: BitcoinRpc + ?Sized> Scanner<'a, C> {
         self.current_height = height;
     }
 
-    pub fn step(&mut self) -> Result<Option<(u64, Block, String)>, RpcError> {
+    pub fn next_blocks(&mut self, max: usize) -> Result<Vec<(u64, Block, BlockHash)>, RpcError> {
+        if max == 0 {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::with_capacity(max);
+        for _ in 0..max {
+            match self.next_ready_block()? {
+                Some((height, block, hash_str)) => {
+                    if self.debug {
+                        println!("🧱 {} {} ({} txs)", height, hash_str, block.txdata.len());
+                    }
+                    out.push((height, block, hash_str));
+                }
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
+    fn next_ready_block(&mut self) -> Result<Option<(u64, Block, BlockHash)>, RpcError> {
         let tip = self.client.get_block_count()?;
         if tip < self.confirmations {
             return Ok(None);
@@ -60,77 +76,7 @@ impl<'a, C: BitcoinRpc + ?Sized> Scanner<'a, C> {
         let hash = self.client.get_block_hash(height)?;
         let block = self.client.get_block(&hash)?;
         self.current_height += 1;
-        Ok(Some((height, block, hash.to_string())))
-    }
-
-    pub fn run<F>(&mut self, mut on_block: F) -> !
-    where
-        F: FnMut(u64, &Block, &str),
-    {
-        loop {
-            loop {
-                match self.step() {
-                    Ok(Some((height, block, hash_str))) => {
-                        if self.debug {
-                            println!("🧱 {} {} ({} txs)", height, hash_str, block.txdata.len());
-                        }
-                        on_block(height, &block, &hash_str);
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        eprintln!("scanner step error: {}", e);
-                        thread::sleep(Duration::from_millis(500));
-                        break;
-                    }
-                }
-            }
-            match self.client.wait_for_new_block(60) {
-                Ok(()) => {}
-                Err(_e) => {
-                    thread::sleep(Duration::from_secs(1));
-                }
-            }
-        }
-    }
-
-    pub fn drain_batch(&mut self, max: usize) -> Result<Vec<(u64, Block, String)>, RpcError> {
-        let mut out = Vec::with_capacity(max);
-        for _ in 0..max {
-            match self.step()? {
-                Some((h, b, hs)) => out.push((h, b, hs)),
-                None => break,
-            }
-        }
-        Ok(out)
-    }
-
-    pub fn run_batch<F>(&mut self, batch_size: usize, mut on_batch: F) -> !
-    where
-        F: FnMut(&[(u64, Block, String)]),
-    {
-        loop {
-            let mut got_any = false;
-            loop {
-                match self.drain_batch(batch_size) {
-                    Ok(items) if items.is_empty() => break,
-                    Ok(items) => {
-                        got_any = true;
-                        on_batch(&items);
-                    }
-                    Err(e) => {
-                        eprintln!("scanner batch error: {}", e);
-                        thread::sleep(Duration::from_millis(500));
-                        break;
-                    }
-                }
-            }
-            if !got_any {
-                match self.client.wait_for_new_block(60) {
-                    Ok(()) => {}
-                    Err(_e) => thread::sleep(Duration::from_secs(1)),
-                }
-            }
-        }
+        Ok(Some((height, block, hash)))
     }
 }
 
@@ -209,8 +155,14 @@ mod tests {
         let rpc = MockRpc::new(5);
         let mut scanner = Scanner::new(&rpc, 2, false);
         let mut heights = Vec::new();
-        while let Some((h, _b, _hs)) = scanner.step().unwrap() {
-            heights.push(h)
+        loop {
+            let batch = scanner.next_blocks(1).unwrap();
+            if batch.is_empty() {
+                break;
+            }
+            for (h, _b, _hs) in batch {
+                heights.push(h);
+            }
         }
         assert_eq!(heights, vec![0, 1, 2]);
     }
@@ -219,8 +171,8 @@ mod tests {
     fn step_no_processing_when_tip_less_than_confirmations() {
         let rpc = MockRpc::new(2);
         let mut scanner = Scanner::new(&rpc, 3, false);
-        let r = scanner.step().unwrap();
-        assert!(r.is_none());
+        let r = scanner.next_blocks(1).unwrap();
+        assert!(r.is_empty());
         assert_eq!(scanner.current_height, 0);
     }
 
@@ -229,12 +181,18 @@ mod tests {
         let rpc = MockRpc::new(4);
         let mut scanner = Scanner::new(&rpc, 1, false);
         let mut heights = Vec::new();
-        while let Some((h, _b, _hs)) = scanner.step().unwrap() {
-            heights.push(h)
+        loop {
+            let batch = scanner.next_blocks(1).unwrap();
+            if batch.is_empty() {
+                break;
+            }
+            for (h, _b, _hs) in batch {
+                heights.push(h);
+            }
         }
         assert_eq!(heights, vec![0, 1, 2]);
         rpc.append_block();
-        let r = scanner.step().unwrap();
-        assert_eq!(r.unwrap().0, 3);
+        let r = scanner.next_blocks(1).unwrap();
+        assert_eq!(r.first().unwrap().0, 3);
     }
 }

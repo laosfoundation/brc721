@@ -1,6 +1,6 @@
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
-use bitcoin::{Block, Script};
+use bitcoin::{Block, BlockHash, Script};
 
 use crate::storage::{CollectionRow, Storage};
 
@@ -48,7 +48,8 @@ pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
     Some((laos_bytes, rebaseable))
 }
 
-pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_hash_str: &str) {
+pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_hash: &BlockHash) {
+    let block_hash_str = block_hash.to_string();
     println!("🧱 {} {}", height, block_hash_str);
     let mut rows: Vec<CollectionRow> = Vec::new();
     for (tx_index, tx) in block.txdata.iter().enumerate() {
@@ -61,7 +62,7 @@ pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_has
                     laos,
                     rebaseable,
                     height,
-                    block_hash_str.to_string(),
+                    block_hash_str.clone(),
                     tx_index as u32,
                 ));
             }
@@ -72,9 +73,10 @@ pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_has
     }
 }
 
-pub fn parse_blocks_batch(repo: &dyn Storage, items: &[(u64, &Block, &str)]) {
+pub fn parse_blocks_batch(repo: &dyn Storage, items: &[(u64, &Block, &BlockHash)]) {
     let mut rows: Vec<CollectionRow> = Vec::new();
-    for &(height, block, block_hash_str) in items.iter() {
+    for &(height, block, block_hash) in items.iter() {
+        let block_hash_str = block_hash.to_string();
         println!("🧱 {} {}", height, block_hash_str);
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             if let Some(out0) = tx.output.first() {
@@ -87,7 +89,7 @@ pub fn parse_blocks_batch(repo: &dyn Storage, items: &[(u64, &Block, &str)]) {
                         laos,
                         rebaseable,
                         height,
-                        block_hash_str.to_string(),
+                        block_hash_str.clone(),
                         tx_index as u32,
                     ));
                 }

@@ -1,4 +1,7 @@
 use std::env;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use bitcoin;
 use bitcoincore_rpc::{Auth, Client};
@@ -9,8 +12,8 @@ mod parser;
 mod scanner;
 mod storage;
 mod wallet;
+use crate::scanner::BitcoinRpc;
 use crate::storage::Storage;
-use std::sync::Arc;
 
 fn is_orphan(prev: &storage::Block, block: &bitcoin::Block) -> bool {
     block.header.prev_blockhash.to_string() != prev.hash
@@ -49,13 +52,13 @@ fn process_block(
     block: &bitcoin::Block,
     debug: bool,
     height: u64,
-    block_hash_str: &str,
+    block_hash: &bitcoin::BlockHash,
 ) {
     if debug {
         let s = format_block_scripts(block);
         print!("{}", s);
     } else {
-        parser::parse_with_repo(storage.as_ref(), height, block, block_hash_str)
+        parser::parse_with_repo(storage.as_ref(), height, block, block_hash)
     }
 }
 
@@ -177,26 +180,59 @@ async fn main() {
                     }
                     let st = storage2.clone();
                     if batch_size2 <= 1 {
-                        scanner.run(|height, block, hash| {
-                            if let Ok(Some(prev)) = st.load_last() {
-                                if is_orphan(&prev, block) {
+                        loop {
+                            let blocks = match scanner.next_blocks(1) {
+                                Ok(blocks) => blocks,
+                                Err(e) => {
+                                    eprintln!("scanner next_blocks error: {}", e);
+                                    thread::sleep(Duration::from_millis(500));
+                                    continue;
+                                }
+                            };
+                            if blocks.is_empty() {
+                                match client2.wait_for_new_block(60) {
+                                    Ok(()) => {}
+                                    Err(_e) => thread::sleep(Duration::from_secs(1)),
+                                }
+                                continue;
+                            }
+                            for (height, block, hash) in blocks {
+                                if let Ok(Some(prev)) = st.load_last() {
+                                    if is_orphan(&prev, &block) {
+                                        eprintln!(
+                                            "error: detected orphan branch at height {}: parent {} != last processed {}",
+                                            height, block.header.prev_blockhash, prev.hash
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                                process_block(st.clone(), &block, debug2, height, &hash);
+                                let hash_str = hash.to_string();
+                                if let Err(e) = st.save_last(height, &hash_str) {
                                     eprintln!(
-                                        "error: detected orphan branch at height {}: parent {} != last processed {}",
-                                        height, block.header.prev_blockhash, prev.hash
+                                        "warning: failed to save last block {} ({}): {}",
+                                        height, hash_str, e
                                     );
-                                    std::process::exit(1);
                                 }
                             }
-                            process_block(st.clone(), block, debug2, height, hash);
-                            if let Err(e) = st.save_last(height, hash) {
-                                eprintln!(
-                                    "warning: failed to save last block {} ({}): {}",
-                                    height, hash, e
-                                );
-                            }
-                        });
+                        }
                     } else {
-                        scanner.run_batch(batch_size2, |items| {
+                        loop {
+                            let items = match scanner.next_blocks(batch_size2) {
+                                Ok(items) => items,
+                                Err(e) => {
+                                    eprintln!("scanner next_blocks error: {}", e);
+                                    thread::sleep(Duration::from_millis(500));
+                                    continue;
+                                }
+                            };
+                            if items.is_empty() {
+                                match client2.wait_for_new_block(60) {
+                                    Ok(()) => {}
+                                    Err(_e) => thread::sleep(Duration::from_secs(1)),
+                                }
+                                continue;
+                            }
                             if let Ok(Some(prev)) = st.load_last() {
                                 let mut expected = prev.hash.clone();
                                 for (h, b, hs) in items.iter() {
@@ -207,23 +243,24 @@ async fn main() {
                                         );
                                         std::process::exit(1);
                                     }
-                                    expected = hs.clone();
+                                    expected = hs.to_string();
                                 }
                             }
-                            let refs: Vec<(u64, &bitcoin::Block, &str)> = items
+                            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> = items
                                 .iter()
-                                .map(|(h, b, hs)| (*h, b, hs.as_str()))
+                                .map(|(h, b, hs)| (*h, b, hs))
                                 .collect();
                             parser::parse_blocks_batch(st.as_ref(), &refs);
                             if let Some((last_h, _b, last_hash)) = items.last() {
-                                if let Err(e) = st.save_last(*last_h, last_hash) {
+                                let last_hash_str = last_hash.to_string();
+                                if let Err(e) = st.save_last(*last_h, &last_hash_str) {
                                     eprintln!(
                                         "warning: failed to save last block {} ({}): {}",
-                                        last_h, last_hash, e
+                                        last_h, last_hash_str, e
                                     );
                                 }
                             }
-                        });
+                        }
                     }
                 });
 
@@ -260,26 +297,59 @@ async fn main() {
     let storage2 = storage_arc.clone();
     let batch_size = cli.batch_size;
     if batch_size <= 1 {
-        scanner.run(|height, block, hash| {
-            if let Ok(Some(prev)) = storage2.load_last() {
-                if is_orphan(&prev, block) {
+        loop {
+            let blocks = match scanner.next_blocks(1) {
+                Ok(blocks) => blocks,
+                Err(e) => {
+                    eprintln!("scanner next_blocks error: {}", e);
+                    thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+            };
+            if blocks.is_empty() {
+                match client.wait_for_new_block(60) {
+                    Ok(()) => {}
+                    Err(_e) => thread::sleep(Duration::from_secs(1)),
+                }
+                continue;
+            }
+            for (height, block, hash) in blocks {
+                if let Ok(Some(prev)) = storage2.load_last() {
+                    if is_orphan(&prev, &block) {
+                        eprintln!(
+                            "error: detected orphan branch at height {}: parent {} != last processed {}",
+                            height, block.header.prev_blockhash, prev.hash
+                        );
+                        std::process::exit(1);
+                    }
+                }
+                process_block(storage2.clone(), &block, debug, height, &hash);
+                let hash_str = hash.to_string();
+                if let Err(e) = storage2.save_last(height, &hash_str) {
                     eprintln!(
-                        "error: detected orphan branch at height {}: parent {} != last processed {}",
-                        height, block.header.prev_blockhash, prev.hash
+                        "warning: failed to save last block {} ({}): {}",
+                        height, hash_str, e
                     );
-                    std::process::exit(1);
                 }
             }
-            process_block(storage2.clone(), block, debug, height, hash);
-            if let Err(e) = storage2.save_last(height, hash) {
-                eprintln!(
-                    "warning: failed to save last block {} ({}): {}",
-                    height, hash, e
-                );
-            }
-        });
+        }
     } else {
-        scanner.run_batch(batch_size, |items| {
+        loop {
+            let items = match scanner.next_blocks(batch_size) {
+                Ok(items) => items,
+                Err(e) => {
+                    eprintln!("scanner next_blocks error: {}", e);
+                    thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+            };
+            if items.is_empty() {
+                match client.wait_for_new_block(60) {
+                    Ok(()) => {}
+                    Err(_e) => thread::sleep(Duration::from_secs(1)),
+                }
+                continue;
+            }
             if let Ok(Some(prev)) = storage2.load_last() {
                 let mut expected = prev.hash.clone();
                 for (h, b, hs) in items.iter() {
@@ -290,23 +360,24 @@ async fn main() {
                         );
                         std::process::exit(1);
                     }
-                    expected = hs.clone();
+                    expected = hs.to_string();
                 }
             }
-            let refs: Vec<(u64, &bitcoin::Block, &str)> = items
+            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> = items
                 .iter()
-                .map(|(h, b, hs)| (*h, b, hs.as_str()))
+                .map(|(h, b, hs)| (*h, b, hs))
                 .collect();
             parser::parse_blocks_batch(storage2.as_ref(), &refs);
             if let Some((last_h, _b, last_hash)) = items.last() {
-                if let Err(e) = storage2.save_last(*last_h, last_hash) {
+                let last_hash_str = last_hash.to_string();
+                if let Err(e) = storage2.save_last(*last_h, &last_hash_str) {
                     eprintln!(
                         "warning: failed to save last block {} ({}): {}",
-                        last_h, last_hash, e
+                        last_h, last_hash_str, e
                     );
                 }
             }
-        });
+        }
     }
 }
 
