@@ -23,7 +23,7 @@ impl BitcoinRpc for Client {
     }
 }
 
-impl<'a, T: BitcoinRpc> BitcoinRpc for &'a T {
+impl<T: BitcoinRpc> BitcoinRpc for &T {
     fn get_block_count(&self) -> Result<u64, RpcError> {
         (*self).get_block_count()
     }
