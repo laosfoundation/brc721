@@ -23,11 +23,7 @@ pub enum Command {
         fee_rate: Option<f64>,
         #[arg(long)]
         name: String,
-    },
-    Serve {
-        #[arg(long)]
-        bind: Option<String>,
-    },
+    }
 }
 
 #[derive(Parser, Debug)]
