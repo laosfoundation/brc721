@@ -25,7 +25,7 @@ fn main() {
         .unwrap_or_default();
     let scanner = init_scanner(&cli, starting_block);
 
-    let core = core::Core::new(storage.clone(), scanner, cli.debug, cli.batch_size);
+    let core = core::Core::new(storage.clone(), scanner);
     core.run();
 }
 
