@@ -173,7 +173,7 @@ async fn main() {
                 std::thread::spawn(move || {
                     let client2 =
                         Client::new(&rpc_url2, auth2).expect("failed to create RPC client");
-                    let mut scanner = scanner::Scanner::new(&client2, confirmations2, debug2);
+                    let mut scanner = scanner::Scanner::new(client2, confirmations2, debug2);
                     if let Ok(Some(last)) = storage2.load_last() {
                         scanner.start_from(last.height + 1);
                     }
@@ -272,7 +272,7 @@ async fn main() {
         println!("📦 Resuming from height {}", last.height + 1);
     }
 
-    let mut scanner = scanner::Scanner::new(&client, confirmations, debug);
+    let mut scanner = scanner::Scanner::new(client, confirmations, debug);
     if let Ok(Some(last)) = storage_arc.load_last() {
         scanner.start_from(last.height + 1);
     }
