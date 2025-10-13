@@ -16,13 +16,8 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
         loop {
             match self.scanner.next_blocks() {
                 Ok(blocks) => {
-                    if let Some((height, block)) = blocks.last() {
-                        let hash_str = block.block_hash().to_string();
-                        if let Err(e) = self.storage.save_last(*height, &hash_str) {
-                            eprintln!("storage error: {}", e);
-                            std::process::exit(1);
-                        }
-                        println!("last block: height={}, hash={}", height, block.block_hash());
+                    for (height, block) in blocks {
+                        println!("block: height={}, hash={}", height, block.block_hash());
                     }
                 }
                 Err(e) => {
