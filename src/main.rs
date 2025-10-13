@@ -1,6 +1,5 @@
-use std::sync::Arc;
-
 use bitcoincore_rpc::{Auth, Client};
+use std::sync::Arc;
 mod cli;
 mod core;
 mod parser;
@@ -10,14 +9,9 @@ mod storage;
 fn main() {
     let cli = cli::parse();
 
-    let auth_mode = match (&cli.rpc_user, &cli.rpc_pass) {
-        (Some(_), Some(_)) => "user/pass",
-        _ => "none",
-    };
-
     println!("🚀 Starting brc721");
     println!("🔗 RPC URL: {}", cli.rpc_url);
-    println!("🔐 Auth: {}", auth_mode);
+    println!("🔐 Auth: user/pass");
     println!("🛠️ Debug: {}", if cli.debug { "on" } else { "off" });
     println!("🧮 Confirmations: {}", cli.confirmations);
     println!("📂 Data dir: {}", cli.data_dir);
