@@ -5,7 +5,6 @@ pub trait BitcoinRpc {
     fn get_block_count(&self) -> Result<u64, RpcError>;
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError>;
     fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError>;
-    fn wait_for_new_block(&self, timeout_secs: u64) -> Result<(), RpcError>;
 }
 
 impl BitcoinRpc for Client {
@@ -17,9 +16,6 @@ impl BitcoinRpc for Client {
     }
     fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
         RpcApi::get_block(self, hash)
-    }
-    fn wait_for_new_block(&self, timeout_secs: u64) -> Result<(), RpcError> {
-        RpcApi::wait_for_new_block(self, timeout_secs).map(|_| ())
     }
 }
 
@@ -145,54 +141,70 @@ mod tests {
                 .clone();
             Ok(b)
         }
-        fn wait_for_new_block(&self, _timeout_secs: u64) -> Result<(), RpcError> {
-            Ok(())
-        }
     }
 
-    #[test]
-    fn step_processes_up_to_tip_minus_confirmations() {
-        let rpc = MockRpc::new(5);
-        let mut scanner = Scanner::new(&rpc, 2, false);
+    fn drain_ready_heights(scanner: &mut Scanner<'_, MockRpc>, batch_size: usize) -> Vec<u64> {
         let mut heights = Vec::new();
         loop {
-            let batch = scanner.next_blocks(1).unwrap();
+            let batch = scanner.next_blocks(batch_size).unwrap();
             if batch.is_empty() {
                 break;
             }
-            for (h, _b, _hs) in batch {
-                heights.push(h);
-            }
+            heights.extend(batch.into_iter().map(|(height, _, _)| height));
         }
+        heights
+    }
+
+    #[test]
+    fn processes_ready_blocks_respecting_confirmations() {
+        let rpc = MockRpc::new(5);
+        let mut scanner = Scanner::new(&rpc, 2, false);
+        let heights = drain_ready_heights(&mut scanner, 1);
         assert_eq!(heights, vec![0, 1, 2]);
     }
 
     #[test]
-    fn step_no_processing_when_tip_less_than_confirmations() {
+    fn returns_empty_when_tip_less_than_confirmations() {
         let rpc = MockRpc::new(2);
         let mut scanner = Scanner::new(&rpc, 3, false);
-        let r = scanner.next_blocks(1).unwrap();
-        assert!(r.is_empty());
+        assert!(scanner.next_blocks(1).unwrap().is_empty());
         assert_eq!(scanner.current_height, 0);
     }
 
     #[test]
-    fn step_picks_up_new_blocks_after_append() {
+    fn returns_empty_when_max_is_zero() {
+        let rpc = MockRpc::new(3);
+        let mut scanner = Scanner::new(&rpc, 1, false);
+        assert!(scanner.next_blocks(0).unwrap().is_empty());
+        assert_eq!(scanner.current_height, 0);
+    }
+
+    #[test]
+    fn respects_explicit_start_height() {
+        let rpc = MockRpc::new(6);
+        let mut scanner = Scanner::new(&rpc, 1, false);
+        scanner.start_from(2);
+        let heights = drain_ready_heights(&mut scanner, 3);
+        assert_eq!(heights, vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn stops_when_current_height_exceeds_ready_target() {
         let rpc = MockRpc::new(4);
         let mut scanner = Scanner::new(&rpc, 1, false);
-        let mut heights = Vec::new();
-        loop {
-            let batch = scanner.next_blocks(1).unwrap();
-            if batch.is_empty() {
-                break;
-            }
-            for (h, _b, _hs) in batch {
-                heights.push(h);
-            }
-        }
+        scanner.start_from(5);
+        assert!(scanner.next_blocks(2).unwrap().is_empty());
+        assert_eq!(scanner.current_height, 5);
+    }
+
+    #[test]
+    fn picks_up_new_blocks_after_chain_extends() {
+        let rpc = MockRpc::new(4);
+        let mut scanner = Scanner::new(&rpc, 1, false);
+        let heights = drain_ready_heights(&mut scanner, 2);
         assert_eq!(heights, vec![0, 1, 2]);
         rpc.append_block();
-        let r = scanner.next_blocks(1).unwrap();
-        assert_eq!(r.first().unwrap().0, 3);
+        let next_batch = scanner.next_blocks(1).unwrap();
+        assert_eq!(next_batch.first().unwrap().0, 3);
     }
 }

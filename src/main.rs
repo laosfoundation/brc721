@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use bitcoin;
-use bitcoincore_rpc::{Auth, Client};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use dotenvy::dotenv;
 mod api;
 mod cli;
@@ -12,7 +12,6 @@ mod parser;
 mod scanner;
 mod storage;
 mod wallet;
-use crate::scanner::BitcoinRpc;
 use crate::storage::Storage;
 
 fn is_orphan(prev: &storage::Block, block: &bitcoin::Block) -> bool {
@@ -191,7 +190,7 @@ async fn main() {
                             };
                             if blocks.is_empty() {
                                 match client2.wait_for_new_block(60) {
-                                    Ok(()) => {}
+                                    Ok(_) => {}
                                     Err(_e) => thread::sleep(Duration::from_secs(1)),
                                 }
                                 continue;
@@ -228,7 +227,7 @@ async fn main() {
                             };
                             if items.is_empty() {
                                 match client2.wait_for_new_block(60) {
-                                    Ok(()) => {}
+                                    Ok(_) => {}
                                     Err(_e) => thread::sleep(Duration::from_secs(1)),
                                 }
                                 continue;
@@ -308,7 +307,7 @@ async fn main() {
             };
             if blocks.is_empty() {
                 match client.wait_for_new_block(60) {
-                    Ok(()) => {}
+                    Ok(_) => {}
                     Err(_e) => thread::sleep(Duration::from_secs(1)),
                 }
                 continue;
@@ -345,7 +344,7 @@ async fn main() {
             };
             if items.is_empty() {
                 match client.wait_for_new_block(60) {
-                    Ok(()) => {}
+                    Ok(_) => {}
                     Err(_e) => thread::sleep(Duration::from_secs(1)),
                 }
                 continue;
