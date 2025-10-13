@@ -1,3 +1,4 @@
+// SQLite-backed repository implementation.
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -5,11 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::storage::{LastBlock, Storage};
 
-pub type CollectionRow = (String, [u8; 20], bool, u64, String, u32);
-
-pub trait Repository: Storage {
-    fn insert_collections_batch(&self, rows: &[CollectionRow]) -> rusqlite::Result<()>;
-}
+use super::{CollectionRow, Repository};
 
 #[derive(Clone)]
 pub struct SqliteRepo {
@@ -17,20 +14,22 @@ pub struct SqliteRepo {
 }
 
 impl SqliteRepo {
+    /// Build a repository that targets the provided SQLite database path.
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             path: path.as_ref().to_string_lossy().to_string(),
         }
     }
 
+    /// Remove the backing database file to force a clean start.
     pub fn reset_all(&self) -> std::io::Result<()> {
-        match std::fs::remove_file(&self.path) {
-            Ok(_) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
+        if !std::path::Path::new(&self.path).exists() {
+            return Ok(());
         }
+        std::fs::remove_file(&self.path)
     }
 
+    /// Perform any one-off database import before normal use.
     pub fn import_if_needed(&self) -> std::io::Result<()> {
         self.with_conn(|_conn| {
             // No legacy import in dev mode
@@ -39,6 +38,7 @@ impl SqliteRepo {
         .map_err(|e| std::io::Error::other(e.to_string()))
     }
 
+    /// Open a connection, ensure schema, and run the supplied closure.
     fn with_conn<F, T>(&self, f: F) -> rusqlite::Result<T>
     where
         F: FnOnce(&Connection) -> rusqlite::Result<T>,
@@ -51,6 +51,7 @@ impl SqliteRepo {
         f(&conn)
     }
 
+    /// Create missing tables and indexes.
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             r#"
@@ -77,6 +78,7 @@ impl SqliteRepo {
         )
     }
 
+    /// Return the current UNIX timestamp in seconds.
     fn now_ts() -> i64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -86,6 +88,7 @@ impl SqliteRepo {
 }
 
 impl Storage for SqliteRepo {
+    /// Fetch the most recent chain state from persistent storage.
     fn load_last(&self) -> std::io::Result<Option<LastBlock>> {
         let r = self.with_conn(|conn| {
             conn.query_row(
@@ -108,6 +111,7 @@ impl Storage for SqliteRepo {
         }
     }
 
+    /// Upsert the current chain state.
     fn save_last(&self, height: u64, hash: &str) -> std::io::Result<()> {
         let r = self.with_conn(|conn| {
             let ts = Self::now_ts();
@@ -125,6 +129,7 @@ impl Storage for SqliteRepo {
 }
 
 impl Repository for SqliteRepo {
+    /// Insert collection entries while preserving idempotency and batching.
     fn insert_collections_batch(&self, rows: &[CollectionRow]) -> rusqlite::Result<()> {
         self.with_conn(|conn| {
             let ts = Self::now_ts();
@@ -140,5 +145,43 @@ impl Repository for SqliteRepo {
             tx.commit()?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Generate a unique path in the temp directory.
+    fn unique_temp_path() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        p.push(format!("brc721_reset_{}.db", nanos));
+        p
+    }
+
+    /// reset_all returns Ok when the file does not exist.
+    #[test]
+    fn reset_all_ok_when_missing() {
+        let path = unique_temp_path();
+        let repo = SqliteRepo::new(&path);
+        repo.reset_all().unwrap();
+        assert!(!path.exists());
+    }
+
+    /// reset_all removes the database file when present.
+    #[test]
+    fn reset_all_removes_existing_file() {
+        let path = unique_temp_path();
+        std::fs::write(&path, b"dummy").unwrap();
+        assert!(path.exists());
+        let repo = SqliteRepo::new(&path);
+        repo.reset_all().unwrap();
+        assert!(!path.exists());
     }
 }
