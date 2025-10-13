@@ -28,19 +28,21 @@ const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
 pub struct Scanner<C: BitcoinRpc> {
     client: C,
     confirmations: u64,
-    debug: bool,
     current_height: u64,
     wait_timeout_ms: u64,
+    max: usize,
+    out: Vec<(u64, Block, BlockHash)>,
 }
 
 impl<C: BitcoinRpc> Scanner<C> {
-    pub fn new(client: C, confirmations: u64, debug: bool) -> Self {
+    pub fn new(client: C, confirmations: u64, max: usize) -> Self {
         Self {
             client,
             confirmations,
-            debug,
             current_height: 0,
             wait_timeout_ms: DEFAULT_WAIT_TIMEOUT_MS,
+            max,
+            out: Vec::with_capacity(max),
         }
     }
 
@@ -48,36 +50,31 @@ impl<C: BitcoinRpc> Scanner<C> {
         self.current_height = height;
     }
 
-    pub fn next_blocks(&mut self, max: usize) -> Result<Vec<(u64, Block, BlockHash)>, RpcError> {
-        if max == 0 {
-            return Ok(Vec::new());
+    pub fn next_blocks(&mut self) -> Result<&[(u64, Block, BlockHash)], RpcError> {
+        if self.max == 0 {
+            self.out.clear();
+            return Ok(self.out.as_slice());
         }
         loop {
-            let batch = self.collect_ready_blocks(max)?;
-            if !batch.is_empty() {
-                return Ok(batch);
+            self.collect_ready_blocks()?;
+            if !self.out.is_empty() {
+                return Ok(self.out.as_slice());
             }
             self.client.wait_for_new_block(self.wait_timeout_ms)?;
         }
     }
 
-    fn collect_ready_blocks(
-        &mut self,
-        max: usize,
-    ) -> Result<Vec<(u64, Block, BlockHash)>, RpcError> {
-        let mut out = Vec::with_capacity(max);
-        for _ in 0..max {
+    fn collect_ready_blocks(&mut self) -> Result<&[(u64, Block, BlockHash)], RpcError> {
+        self.out.clear();
+        for _ in 0..self.max {
             match self.next_ready_block()? {
                 Some((height, block, hash_str)) => {
-                    if self.debug {
-                        println!("🧱 {} {} ({} txs)", height, hash_str, block.txdata.len());
-                    }
-                    out.push((height, block, hash_str));
+                    self.out.push((height, block, hash_str));
                 }
                 None => break,
             }
         }
-        Ok(out)
+        Ok(self.out.as_slice())
     }
 
     fn next_ready_block(&mut self) -> Result<Option<(u64, Block, BlockHash)>, RpcError> {
@@ -163,8 +160,8 @@ mod tests {
     fn next_blocks_zero_returns_empty() {
         let blocks = MockRpc::make_chain(3);
         let mock = MockRpc::new(blocks, 2);
-        let mut scanner = Scanner::new(mock, 0, false);
-        let v = scanner.next_blocks(0).unwrap();
+        let mut scanner = Scanner::new(mock, 0, 0);
+        let v = scanner.next_blocks().unwrap();
         assert!(v.is_empty());
     }
 
@@ -172,8 +169,8 @@ mod tests {
     fn collect_ready_blocks_empty_when_tip_less_than_confirmations() {
         let blocks = MockRpc::make_chain(1);
         let mock = MockRpc::new(blocks, 0);
-        let mut scanner = Scanner::new(mock, 1, false);
-        let v = scanner.collect_ready_blocks(5).unwrap();
+        let mut scanner = Scanner::new(mock, 1, 5);
+        let v = scanner.collect_ready_blocks().unwrap();
         assert!(v.is_empty());
     }
 
@@ -181,7 +178,7 @@ mod tests {
     fn next_ready_block_returns_some_and_increments() {
         let blocks = MockRpc::make_chain(1);
         let mock = MockRpc::new(blocks.clone(), 1);
-        let mut scanner = Scanner::new(mock, 1, false);
+        let mut scanner = Scanner::new(mock, 1, 1);
         let r = scanner.next_ready_block().unwrap();
         assert!(r.is_some());
         assert_eq!(scanner.current_height, 1);
@@ -191,10 +188,10 @@ mod tests {
     fn next_blocks_returns_batch_up_to_max() {
         let blocks = MockRpc::make_chain(4);
         let mock = MockRpc::new(blocks, 4);
-        let mut scanner = Scanner::new(mock, 1, false);
-        let a = scanner.next_blocks(2).unwrap();
+        let mut scanner = Scanner::new(mock, 1, 2);
+        let a = scanner.next_blocks().unwrap();
         assert_eq!(a.len(), 2);
-        let b = scanner.next_blocks(10).unwrap();
+        let b = scanner.next_blocks().unwrap();
         assert_eq!(b.len(), 2);
     }
 
@@ -234,8 +231,8 @@ mod tests {
             blocks,
             tip: Cell::new(0),
         };
-        let mut scanner = Scanner::new(mock, 1, false);
-        let v = scanner.next_blocks(1).unwrap();
+        let mut scanner = Scanner::new(mock, 1, 1);
+        let v = scanner.next_blocks().unwrap();
         assert_eq!(v.len(), 1);
     }
 
@@ -296,9 +293,9 @@ mod tests {
     fn start_from_nonzero_respects_confirmations() {
         let blocks = MockRpc::make_chain(6);
         let mock = MockRpc::new(blocks.clone(), 5);
-        let mut scanner = Scanner::new(mock, 2, false);
+        let mut scanner = Scanner::new(mock, 2, 10);
         scanner.start_from(2);
-        let batch = scanner.next_blocks(10).unwrap();
+        let batch = scanner.next_blocks().unwrap();
         assert_eq!(batch.len(), 2);
         assert_eq!(batch[0].0, 2);
         assert_eq!(batch[1].0, 3);
@@ -310,7 +307,7 @@ mod tests {
     fn next_ready_block_none_when_current_height_above_target() {
         let blocks = MockRpc::make_chain(3);
         let mock = MockRpc::new(blocks, 2);
-        let mut scanner = Scanner::new(mock, 0, false);
+        let mut scanner = Scanner::new(mock, 0, 1);
         scanner.start_from(3);
         let r = scanner.next_ready_block().unwrap();
         assert!(r.is_none());
@@ -321,8 +318,8 @@ mod tests {
         let blocks = MockRpc::make_chain(3);
         let rpc = WaitCounterRpc::new(blocks, 2, 1);
         let rpc_view = rpc.clone();
-        let mut scanner = Scanner::new(rpc, 0, false);
-        let v = scanner.next_blocks(1).unwrap();
+        let mut scanner = Scanner::new(rpc, 0, 1);
+        let v = scanner.next_blocks().unwrap();
         assert_eq!(v.len(), 1);
         assert_eq!(rpc_view.waits(), 0);
     }
@@ -332,8 +329,8 @@ mod tests {
         let blocks = MockRpc::make_chain(4);
         let rpc = WaitCounterRpc::new(blocks, 0, 1);
         let rpc_view = rpc.clone();
-        let mut scanner = Scanner::new(rpc, 2, false);
-        let v = scanner.next_blocks(5).unwrap();
+        let mut scanner = Scanner::new(rpc, 2, 5);
+        let v = scanner.next_blocks().unwrap();
         assert_eq!(v.len(), 1);
         assert_eq!(rpc_view.waits(), 2);
     }
@@ -342,17 +339,17 @@ mod tests {
     fn collect_ready_blocks_respects_max_and_drains() {
         let blocks = MockRpc::make_chain(6);
         let mock = MockRpc::new(blocks, 5);
-        let mut scanner = Scanner::new(mock, 1, false);
-        let a = scanner.collect_ready_blocks(3).unwrap();
+        let mut scanner = Scanner::new(mock, 1, 3);
+        let a = scanner.collect_ready_blocks().unwrap();
         assert_eq!(a.len(), 3);
         assert_eq!(a[0].0, 0);
         assert_eq!(a[1].0, 1);
         assert_eq!(a[2].0, 2);
-        let b = scanner.collect_ready_blocks(10).unwrap();
+        let b = scanner.collect_ready_blocks().unwrap();
         assert_eq!(b.len(), 2);
         assert_eq!(b[0].0, 3);
         assert_eq!(b[1].0, 4);
-        let c = scanner.collect_ready_blocks(1).unwrap();
+        let c = scanner.collect_ready_blocks().unwrap();
         assert_eq!(c.len(), 0);
     }
 
@@ -360,9 +357,9 @@ mod tests {
     fn returned_hash_matches_block_hash() {
         let blocks = MockRpc::make_chain(3);
         let mock = MockRpc::new(blocks.clone(), 2);
-        let mut scanner = Scanner::new(mock, 0, false);
+        let mut scanner = Scanner::new(mock, 0, 5);
         scanner.start_from(1);
-        let batch = scanner.collect_ready_blocks(5).unwrap();
+        let batch = scanner.collect_ready_blocks().unwrap();
         assert_eq!(batch.len(), 2);
         assert_eq!(batch[0].0, 1);
         assert_eq!(batch[0].2, blocks[1].0);
@@ -370,4 +367,3 @@ mod tests {
         assert_eq!(batch[1].2, blocks[2].0);
     }
 }
-

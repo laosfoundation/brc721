@@ -169,18 +169,19 @@ async fn main() {
                 let debug2 = debug;
                 let confirmations2 = confirmations;
                 let batch_size2 = cli.batch_size;
+                let max2 = if batch_size2 == 0 { 1 } else { batch_size2 };
 
                 std::thread::spawn(move || {
                     let client2 =
                         Client::new(&rpc_url2, auth2).expect("failed to create RPC client");
-                    let mut scanner = scanner::Scanner::new(client2, confirmations2, debug2);
+                    let mut scanner = scanner::Scanner::new(client2, confirmations2, max2);
                     if let Ok(Some(last)) = storage2.load_last() {
                         scanner.start_from(last.height + 1);
                     }
                     let st = storage2.clone();
                     if batch_size2 <= 1 {
                         loop {
-                            let blocks = match scanner.next_blocks(1) {
+                            let blocks = match scanner.next_blocks() {
                                 Ok(blocks) => blocks,
                                 Err(e) => {
                                     eprintln!("scanner next_blocks error: {}", e);
@@ -188,7 +189,8 @@ async fn main() {
                                     continue;
                                 }
                             };
-                            for (height, block, hash) in blocks {
+                            for (height, block, hash) in blocks.iter().map(|(h, b, hs)| (*h, b, hs))
+                            {
                                 if let Ok(Some(prev)) = st.load_last() {
                                     if is_orphan(&prev, &block) {
                                         eprintln!(
@@ -198,7 +200,7 @@ async fn main() {
                                         std::process::exit(1);
                                     }
                                 }
-                                process_block(st.clone(), &block, debug2, height, &hash);
+                                process_block(st.clone(), block, debug2, height, hash);
                                 let hash_str = hash.to_string();
                                 if let Err(e) = st.save_last(height, &hash_str) {
                                     eprintln!(
@@ -210,7 +212,7 @@ async fn main() {
                         }
                     } else {
                         loop {
-                            let items = match scanner.next_blocks(batch_size2) {
+                            let items = match scanner.next_blocks() {
                                 Ok(items) => items,
                                 Err(e) => {
                                     eprintln!("scanner next_blocks error: {}", e);
@@ -272,16 +274,17 @@ async fn main() {
         println!("📦 Resuming from height {}", last.height + 1);
     }
 
-    let mut scanner = scanner::Scanner::new(client, confirmations, debug);
+    let batch_size = cli.batch_size;
+    let max = if batch_size == 0 { 1 } else { batch_size };
+    let mut scanner = scanner::Scanner::new(client, confirmations, max);
     if let Ok(Some(last)) = storage_arc.load_last() {
         scanner.start_from(last.height + 1);
     }
 
     let storage2 = storage_arc.clone();
-    let batch_size = cli.batch_size;
     if batch_size <= 1 {
         loop {
-            let blocks = match scanner.next_blocks(1) {
+            let blocks = match scanner.next_blocks() {
                 Ok(blocks) => blocks,
                 Err(e) => {
                     eprintln!("scanner next_blocks error: {}", e);
@@ -289,7 +292,7 @@ async fn main() {
                     continue;
                 }
             };
-            for (height, block, hash) in blocks {
+            for (height, block, hash) in blocks.iter().map(|(h, b, hs)| (*h, b, hs)) {
                 if let Ok(Some(prev)) = storage2.load_last() {
                     if is_orphan(&prev, &block) {
                         eprintln!(
@@ -299,7 +302,7 @@ async fn main() {
                         std::process::exit(1);
                     }
                 }
-                process_block(storage2.clone(), &block, debug, height, &hash);
+                process_block(storage2.clone(), block, debug, height, hash);
                 let hash_str = hash.to_string();
                 if let Err(e) = storage2.save_last(height, &hash_str) {
                     eprintln!(
@@ -311,7 +314,7 @@ async fn main() {
         }
     } else {
         loop {
-            let items = match scanner.next_blocks(batch_size) {
+            let items = match scanner.next_blocks() {
                 Ok(items) => items,
                 Err(e) => {
                     eprintln!("scanner next_blocks error: {}", e);
