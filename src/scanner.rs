@@ -5,6 +5,7 @@ pub trait BitcoinRpc {
     fn get_block_count(&self) -> Result<u64, RpcError>;
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError>;
     fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError>;
+    fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError>;
 }
 
 impl BitcoinRpc for Client {
@@ -17,22 +18,44 @@ impl BitcoinRpc for Client {
     fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
         RpcApi::get_block(self, hash)
     }
+    fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError> {
+        RpcApi::wait_for_new_block(self, timeout).map(|_| ())
+    }
 }
 
-pub struct Scanner<'a, C: BitcoinRpc + ?Sized> {
-    client: &'a C,
+impl<'a, T: BitcoinRpc> BitcoinRpc for &'a T {
+    fn get_block_count(&self) -> Result<u64, RpcError> {
+        (*self).get_block_count()
+    }
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
+        (*self).get_block_hash(height)
+    }
+    fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
+        (*self).get_block(hash)
+    }
+    fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError> {
+        (*self).wait_for_new_block(timeout)
+    }
+}
+
+const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
+
+pub struct Scanner<C: BitcoinRpc> {
+    client: C,
     confirmations: u64,
     debug: bool,
     current_height: u64,
+    wait_timeout_ms: u64,
 }
 
-impl<'a, C: BitcoinRpc + ?Sized> Scanner<'a, C> {
-    pub fn new(client: &'a C, confirmations: u64, debug: bool) -> Self {
+impl<C: BitcoinRpc> Scanner<C> {
+    pub fn new(client: C, confirmations: u64, debug: bool) -> Self {
         Self {
             client,
             confirmations,
             debug,
             current_height: 0,
+            wait_timeout_ms: DEFAULT_WAIT_TIMEOUT_MS,
         }
     }
 
@@ -44,6 +67,19 @@ impl<'a, C: BitcoinRpc + ?Sized> Scanner<'a, C> {
         if max == 0 {
             return Ok(Vec::new());
         }
+        loop {
+            let batch = self.collect_ready_blocks(max)?;
+            if !batch.is_empty() {
+                return Ok(batch);
+            }
+            self.client.wait_for_new_block(self.wait_timeout_ms)?;
+        }
+    }
+
+    fn collect_ready_blocks(
+        &mut self,
+        max: usize,
+    ) -> Result<Vec<(u64, Block, BlockHash)>, RpcError> {
         let mut out = Vec::with_capacity(max);
         for _ in 0..max {
             match self.next_ready_block()? {
@@ -141,12 +177,15 @@ mod tests {
                 .clone();
             Ok(b)
         }
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            Ok(())
+        }
     }
 
-    fn drain_ready_heights(scanner: &mut Scanner<'_, MockRpc>, batch_size: usize) -> Vec<u64> {
+    fn drain_ready_heights(scanner: &mut Scanner<&MockRpc>, batch_size: usize) -> Vec<u64> {
         let mut heights = Vec::new();
         loop {
-            let batch = scanner.next_blocks(batch_size).unwrap();
+            let batch = scanner.collect_ready_blocks(batch_size).unwrap();
             if batch.is_empty() {
                 break;
             }
@@ -167,7 +206,7 @@ mod tests {
     fn returns_empty_when_tip_less_than_confirmations() {
         let rpc = MockRpc::new(2);
         let mut scanner = Scanner::new(&rpc, 3, false);
-        assert!(scanner.next_blocks(1).unwrap().is_empty());
+        assert!(scanner.collect_ready_blocks(1).unwrap().is_empty());
         assert_eq!(scanner.current_height, 0);
     }
 
@@ -193,7 +232,7 @@ mod tests {
         let rpc = MockRpc::new(4);
         let mut scanner = Scanner::new(&rpc, 1, false);
         scanner.start_from(5);
-        assert!(scanner.next_blocks(2).unwrap().is_empty());
+        assert!(scanner.collect_ready_blocks(2).unwrap().is_empty());
         assert_eq!(scanner.current_height, 5);
     }
 

@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use bitcoin;
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
 mod api;
 mod cli;
@@ -188,13 +188,6 @@ async fn main() {
                                     continue;
                                 }
                             };
-                            if blocks.is_empty() {
-                                match client2.wait_for_new_block(60) {
-                                    Ok(_) => {}
-                                    Err(_e) => thread::sleep(Duration::from_secs(1)),
-                                }
-                                continue;
-                            }
                             for (height, block, hash) in blocks {
                                 if let Ok(Some(prev)) = st.load_last() {
                                     if is_orphan(&prev, &block) {
@@ -225,13 +218,6 @@ async fn main() {
                                     continue;
                                 }
                             };
-                            if items.is_empty() {
-                                match client2.wait_for_new_block(60) {
-                                    Ok(_) => {}
-                                    Err(_e) => thread::sleep(Duration::from_secs(1)),
-                                }
-                                continue;
-                            }
                             if let Ok(Some(prev)) = st.load_last() {
                                 let mut expected = prev.hash.clone();
                                 for (h, b, hs) in items.iter() {
@@ -245,10 +231,8 @@ async fn main() {
                                     expected = hs.to_string();
                                 }
                             }
-                            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> = items
-                                .iter()
-                                .map(|(h, b, hs)| (*h, b, hs))
-                                .collect();
+                            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> =
+                                items.iter().map(|(h, b, hs)| (*h, b, hs)).collect();
                             parser::parse_blocks_batch(st.as_ref(), &refs);
                             if let Some((last_h, _b, last_hash)) = items.last() {
                                 let last_hash_str = last_hash.to_string();
@@ -305,13 +289,6 @@ async fn main() {
                     continue;
                 }
             };
-            if blocks.is_empty() {
-                match client.wait_for_new_block(60) {
-                    Ok(_) => {}
-                    Err(_e) => thread::sleep(Duration::from_secs(1)),
-                }
-                continue;
-            }
             for (height, block, hash) in blocks {
                 if let Ok(Some(prev)) = storage2.load_last() {
                     if is_orphan(&prev, &block) {
@@ -342,13 +319,6 @@ async fn main() {
                     continue;
                 }
             };
-            if items.is_empty() {
-                match client.wait_for_new_block(60) {
-                    Ok(_) => {}
-                    Err(_e) => thread::sleep(Duration::from_secs(1)),
-                }
-                continue;
-            }
             if let Ok(Some(prev)) = storage2.load_last() {
                 let mut expected = prev.hash.clone();
                 for (h, b, hs) in items.iter() {
@@ -362,10 +332,8 @@ async fn main() {
                     expected = hs.to_string();
                 }
             }
-            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> = items
-                .iter()
-                .map(|(h, b, hs)| (*h, b, hs))
-                .collect();
+            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> =
+                items.iter().map(|(h, b, hs)| (*h, b, hs)).collect();
             parser::parse_blocks_batch(storage2.as_ref(), &refs);
             if let Some((last_h, _b, last_hash)) = items.last() {
                 let last_hash_str = last_hash.to_string();
