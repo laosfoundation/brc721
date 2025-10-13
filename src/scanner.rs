@@ -238,4 +238,136 @@ mod tests {
         let v = scanner.next_blocks(1).unwrap();
         assert_eq!(v.len(), 1);
     }
+
+    use std::rc::Rc;
+
+    struct Inner {
+        tip: Cell<u64>,
+        waits: Cell<u64>,
+    }
+
+    #[derive(Clone)]
+    struct WaitCounterRpc {
+        blocks: Vec<(BlockHash, Block)>,
+        inner: Rc<Inner>,
+        inc: u64,
+    }
+
+    impl WaitCounterRpc {
+        fn new(blocks: Vec<(BlockHash, Block)>, tip: u64, inc: u64) -> Self {
+            Self {
+                blocks,
+                inner: Rc::new(Inner {
+                    tip: Cell::new(tip),
+                    waits: Cell::new(0),
+                }),
+                inc,
+            }
+        }
+        fn waits(&self) -> u64 {
+            self.inner.waits.get()
+        }
+    }
+
+    impl BitcoinRpc for WaitCounterRpc {
+        fn get_block_count(&self) -> Result<u64, RpcError> {
+            Ok(self.inner.tip.get())
+        }
+        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
+            Ok(self.blocks[height as usize].0)
+        }
+        fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
+            Ok(self
+                .blocks
+                .iter()
+                .find(|(h, _)| h == hash)
+                .unwrap()
+                .1
+                .clone())
+        }
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            self.inner.waits.set(self.inner.waits.get() + 1);
+            self.inner.tip.set(self.inner.tip.get() + self.inc);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn start_from_nonzero_respects_confirmations() {
+        let blocks = MockRpc::make_chain(6);
+        let mock = MockRpc::new(blocks.clone(), 5);
+        let mut scanner = Scanner::new(mock, 2, false);
+        scanner.start_from(2);
+        let batch = scanner.next_blocks(10).unwrap();
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].0, 2);
+        assert_eq!(batch[1].0, 3);
+        assert_eq!(batch[0].2, blocks[2].0);
+        assert_eq!(batch[1].2, blocks[3].0);
+    }
+
+    #[test]
+    fn next_ready_block_none_when_current_height_above_target() {
+        let blocks = MockRpc::make_chain(3);
+        let mock = MockRpc::new(blocks, 2);
+        let mut scanner = Scanner::new(mock, 0, false);
+        scanner.start_from(3);
+        let r = scanner.next_ready_block().unwrap();
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn next_blocks_does_not_wait_when_blocks_ready() {
+        let blocks = MockRpc::make_chain(3);
+        let rpc = WaitCounterRpc::new(blocks, 2, 1);
+        let rpc_view = rpc.clone();
+        let mut scanner = Scanner::new(rpc, 0, false);
+        let v = scanner.next_blocks(1).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(rpc_view.waits(), 0);
+    }
+
+    #[test]
+    fn next_blocks_returns_early_when_any_ready_even_if_max_not_filled() {
+        let blocks = MockRpc::make_chain(4);
+        let rpc = WaitCounterRpc::new(blocks, 0, 1);
+        let rpc_view = rpc.clone();
+        let mut scanner = Scanner::new(rpc, 2, false);
+        let v = scanner.next_blocks(5).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(rpc_view.waits(), 2);
+    }
+
+    #[test]
+    fn collect_ready_blocks_respects_max_and_drains() {
+        let blocks = MockRpc::make_chain(6);
+        let mock = MockRpc::new(blocks, 5);
+        let mut scanner = Scanner::new(mock, 1, false);
+        let a = scanner.collect_ready_blocks(3).unwrap();
+        assert_eq!(a.len(), 3);
+        assert_eq!(a[0].0, 0);
+        assert_eq!(a[1].0, 1);
+        assert_eq!(a[2].0, 2);
+        let b = scanner.collect_ready_blocks(10).unwrap();
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].0, 3);
+        assert_eq!(b[1].0, 4);
+        let c = scanner.collect_ready_blocks(1).unwrap();
+        assert_eq!(c.len(), 0);
+    }
+
+    #[test]
+    fn returned_hash_matches_block_hash() {
+        let blocks = MockRpc::make_chain(3);
+        let mock = MockRpc::new(blocks.clone(), 2);
+        let mut scanner = Scanner::new(mock, 0, false);
+        scanner.start_from(1);
+        let batch = scanner.collect_ready_blocks(5).unwrap();
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].0, 1);
+        assert_eq!(batch[0].2, blocks[1].0);
+        assert_eq!(batch[1].0, 2);
+        assert_eq!(batch[1].2, blocks[2].0);
+    }
 }
+
