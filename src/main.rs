@@ -1,22 +1,21 @@
 use std::env;
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
-use bitcoin;
 use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
 mod cli;
+mod core;
 mod parser;
 mod scanner;
 mod storage;
-mod wallet;
 use crate::storage::Storage;
 
+#[cfg(test)]
 fn is_orphan(prev: &storage::Block, block: &bitcoin::Block) -> bool {
     block.header.prev_blockhash.to_string() != prev.hash
 }
 
+#[cfg(test)]
 fn format_block_scripts(block: &bitcoin::Block) -> String {
     let mut out = String::new();
     for tx in &block.txdata {
@@ -43,21 +42,6 @@ fn format_block_scripts(block: &bitcoin::Block) -> String {
         }
     }
     out
-}
-
-fn process_block(
-    storage: Arc<dyn Storage + Send + Sync>,
-    block: &bitcoin::Block,
-    debug: bool,
-    height: u64,
-    block_hash: &bitcoin::BlockHash,
-) {
-    if debug {
-        let s = format_block_scripts(block);
-        print!("{}", s);
-    } else {
-        parser::parse_with_repo(storage.as_ref(), height, block, block_hash)
-    }
 }
 
 fn main() {
@@ -98,53 +82,6 @@ fn main() {
 
     let client = Client::new(&rpc_url, auth.clone()).expect("failed to create RPC client");
 
-    if let Some(cmd) = &cli.command {
-        match cmd {
-            crate::cli::Command::WalletInit { name } => {
-                let _ = wallet::Wallet::create_wallet(&client, name);
-                println!("wallet {} ready", name);
-                return;
-            }
-            crate::cli::Command::WalletNewAddress { name } => {
-                let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
-                let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
-                let addr = wallet::Wallet::new_address(&wclient).expect("new address");
-                println!("{}", addr);
-                return;
-            }
-            crate::cli::Command::WalletBalance { name } => {
-                let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
-                let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
-                let b = wallet::Wallet::balance(&wclient).expect("balance");
-                println!("{}", b);
-                return;
-            }
-            crate::cli::Command::CollectionCreate {
-                laos_hex,
-                rebaseable,
-                fee_rate,
-                name,
-            } => {
-                let mut laos = [0u8; 20];
-                let bytes = hex::decode(laos_hex).expect("hex");
-                assert_eq!(bytes.len(), 20, "laos hex must be 20 bytes");
-                laos.copy_from_slice(&bytes);
-                let url = format!("{}/wallet/{}", rpc_url.trim_end_matches('/'), name);
-                let wclient = Client::new(&url, auth.clone()).expect("wallet-scoped client");
-                let txid = wallet::Wallet::create_and_broadcast_collection(
-                    &wclient,
-                    laos,
-                    *rebaseable,
-                    *fee_rate,
-                )
-                .expect("broadcast");
-                println!("{}", txid);
-                return;
-            }
-
-        }
-    }
-
     let default_db = "./.brc721/brc721.sqlite".to_string();
     let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
 
@@ -170,80 +107,8 @@ fn main() {
         scanner = scanner.with_start_from(last.height + 1);
     }
 
-    let storage2 = storage_arc.clone();
-    if batch_size <= 1 {
-        loop {
-            let blocks = match scanner.next_blocks() {
-                Ok(blocks) => blocks,
-                Err(e) => {
-                    eprintln!("scanner next_blocks error: {}", e);
-                    thread::sleep(Duration::from_millis(500));
-                    continue;
-                }
-            };
-            let mut last_processed: Option<(u64, String)> = None;
-            for (height, block, hash) in blocks.iter().map(|(h, b, hs)| (*h, b, hs)) {
-                if let Ok(Some(prev)) = storage2.load_last() {
-                    if is_orphan(&prev, &block) {
-                        eprintln!(
-                            "error: detected orphan branch at height {}: parent {} != last processed {}",
-                            height, block.header.prev_blockhash, prev.hash
-                        );
-                        std::process::exit(1);
-                    }
-                }
-                process_block(storage2.clone(), block, debug, height, hash);
-                let hash_str = hash.to_string();
-                if let Err(e) = storage2.save_last(height, &hash_str) {
-                    eprintln!(
-                        "warning: failed to save last block {} ({}): {}",
-                        height, hash_str, e
-                    );
-                }
-                last_processed = Some((height, hash_str));
-            }
-            if let Some((h, hs)) = last_processed.take() {
-                println!("last processed: {} {}", h, hs);
-            }
-        }
-    } else {
-        loop {
-            let items = match scanner.next_blocks() {
-                Ok(items) => items,
-                Err(e) => {
-                    eprintln!("scanner next_blocks error: {}", e);
-                    thread::sleep(Duration::from_millis(500));
-                    continue;
-                }
-            };
-            if let Ok(Some(prev)) = storage2.load_last() {
-                let mut expected = prev.hash.clone();
-                for (h, b, hs) in items.iter() {
-                    if b.header.prev_blockhash.to_string() != expected {
-                        eprintln!(
-                            "error: detected orphan branch at height {}: parent {} != last processed {}",
-                            h, b.header.prev_blockhash, expected
-                        );
-                        std::process::exit(1);
-                    }
-                    expected = hs.to_string();
-                }
-            }
-            let refs: Vec<(u64, &bitcoin::Block, &bitcoin::BlockHash)> =
-                items.iter().map(|(h, b, hs)| (*h, b, hs)).collect();
-            parser::parse_blocks_batch(storage2.as_ref(), &refs);
-            if let Some((last_h, _b, last_hash)) = items.last() {
-                let last_hash_str = last_hash.to_string();
-                if let Err(e) = storage2.save_last(*last_h, &last_hash_str) {
-                    eprintln!(
-                        "warning: failed to save last block {} ({}): {}",
-                        last_h, last_hash_str, e
-                    );
-                }
-                println!("last processed: {} {}", last_h, last_hash_str);
-            }
-        }
-    }
+    let core = core::Core::new(storage_arc.clone(), scanner, debug, batch_size);
+    core.run();
 }
 
 #[cfg(test)]
