@@ -168,17 +168,8 @@ async fn create_collection(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
-    match Wallet::create_and_broadcast_collection(
-        &client,
-        laos,
-        req.rebaseable,
-        req.fee_rate,
-    ) {
-        Ok(txid) => (
-            StatusCode::OK,
-            Json(CreateCollectionResp { txid }),
-        )
-            .into_response(),
+    match Wallet::create_and_broadcast_collection(&client, laos, req.rebaseable, req.fee_rate) {
+        Ok(txid) => (StatusCode::OK, Json(CreateCollectionResp { txid })).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
 }
@@ -189,7 +180,11 @@ pub async fn serve(
     auth: Auth,
     token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let state = ApiState { rpc_url, auth, token };
+    let state = ApiState {
+        rpc_url,
+        auth,
+        token,
+    };
 
     let app = Router::new()
         .route("/wallet/init", post(wallet_init))

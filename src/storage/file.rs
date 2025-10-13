@@ -2,16 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LastBlock {
-    pub height: u64,
-    pub hash: String,
-}
-
-pub trait Storage {
-    fn load_last(&self) -> io::Result<Option<LastBlock>>;
-    fn save_last(&self, height: u64, hash: &str) -> io::Result<()>;
-}
+use super::{CollectionRow, LastBlock, Storage};
 
 #[derive(Clone, Debug)]
 pub struct FileStorage {
@@ -61,6 +52,10 @@ impl Storage for FileStorage {
         let s = format!("{} {}\n", height, hash);
         fs::write(&self.path, s.as_bytes())
     }
+
+    fn insert_collections_batch(&self, _rows: &[CollectionRow]) -> rusqlite::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -68,27 +63,27 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn unique_temp_file() -> PathBuf {
+    fn unique_temp_file(prefix: &str, ext: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        p.push(format!("brc721_state_{}.txt", nanos));
+        p.push(format!("{}_{}.{}", prefix, nanos, ext));
         p
     }
 
     #[test]
-    fn load_returns_none_when_missing() {
-        let path = unique_temp_file();
+    fn file_storage_load_returns_none_when_missing() {
+        let path = unique_temp_file("brc721_state", "txt");
         let store = FileStorage::new(&path);
         let v = store.load_last().unwrap();
         assert!(v.is_none());
     }
 
     #[test]
-    fn save_and_load_roundtrip() {
-        let path = unique_temp_file();
+    fn file_storage_save_and_load_roundtrip() {
+        let path = unique_temp_file("brc721_state", "txt");
         let store = FileStorage::new(&path);
         store.save_last(42, "deadbeef").unwrap();
         let v = store.load_last().unwrap();

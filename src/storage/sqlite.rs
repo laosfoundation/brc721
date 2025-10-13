@@ -1,27 +1,22 @@
-// SQLite-backed repository implementation.
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::storage::{LastBlock, Storage};
-
-use super::{CollectionRow, Repository};
+use super::{CollectionRow, LastBlock, Storage};
 
 #[derive(Clone)]
-pub struct SqliteRepo {
+pub struct SqliteStorage {
     pub path: String,
 }
 
-impl SqliteRepo {
-    /// Build a repository that targets the provided SQLite database path.
+impl SqliteStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             path: path.as_ref().to_string_lossy().to_string(),
         }
     }
 
-    /// Remove the backing database file to force a clean start.
     pub fn reset_all(&self) -> std::io::Result<()> {
         if !std::path::Path::new(&self.path).exists() {
             return Ok(());
@@ -29,16 +24,11 @@ impl SqliteRepo {
         std::fs::remove_file(&self.path)
     }
 
-    /// Perform any one-off database import before normal use.
-    pub fn import_if_needed(&self) -> std::io::Result<()> {
-        self.with_conn(|_conn| {
-            // No legacy import in dev mode
-            Ok(())
-        })
-        .map_err(|e| std::io::Error::other(e.to_string()))
+    pub fn init(&self) -> std::io::Result<()> {
+        self.with_conn(|_conn| Ok(()))
+            .map_err(|e| std::io::Error::other(e.to_string()))
     }
 
-    /// Open a connection, ensure schema, and run the supplied closure.
     fn with_conn<F, T>(&self, f: F) -> rusqlite::Result<T>
     where
         F: FnOnce(&Connection) -> rusqlite::Result<T>,
@@ -51,7 +41,6 @@ impl SqliteRepo {
         f(&conn)
     }
 
-    /// Create missing tables and indexes.
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             r#"
@@ -78,7 +67,6 @@ impl SqliteRepo {
         )
     }
 
-    /// Return the current UNIX timestamp in seconds.
     fn now_ts() -> i64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -87,8 +75,7 @@ impl SqliteRepo {
     }
 }
 
-impl Storage for SqliteRepo {
-    /// Fetch the most recent chain state from persistent storage.
+impl Storage for SqliteStorage {
     fn load_last(&self) -> std::io::Result<Option<LastBlock>> {
         let r = self.with_conn(|conn| {
             conn.query_row(
@@ -111,12 +98,12 @@ impl Storage for SqliteRepo {
         }
     }
 
-    /// Upsert the current chain state.
     fn save_last(&self, height: u64, hash: &str) -> std::io::Result<()> {
         let r = self.with_conn(|conn| {
             let ts = Self::now_ts();
             conn.execute(
-                "INSERT INTO chain_state (id, height, hash, updated_at) VALUES (1, ?, ?, ?)\n                 ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash, updated_at=excluded.updated_at",
+                "INSERT INTO chain_state (id, height, hash, updated_at) VALUES (1, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash, updated_at=excluded.updated_at",
                 params![height as i64, hash, ts],
             )?;
             Ok(())
@@ -126,10 +113,7 @@ impl Storage for SqliteRepo {
             Err(e) => Err(std::io::Error::other(e.to_string())),
         }
     }
-}
 
-impl Repository for SqliteRepo {
-    /// Insert collection entries while preserving idempotency and batching.
     fn insert_collections_batch(&self, rows: &[CollectionRow]) -> rusqlite::Result<()> {
         self.with_conn(|conn| {
             let ts = Self::now_ts();
@@ -151,37 +135,63 @@ impl Repository for SqliteRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use rusqlite::{Connection, OptionalExtension};
 
-    /// Generate a unique path in the temp directory.
-    fn unique_temp_path() -> PathBuf {
+    fn unique_temp_file(prefix: &str, ext: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        p.push(format!("brc721_reset_{}.db", nanos));
+        p.push(format!("{}_{}.{}", prefix, nanos, ext));
         p
     }
 
-    /// reset_all returns Ok when the file does not exist.
     #[test]
-    fn reset_all_ok_when_missing() {
-        let path = unique_temp_path();
-        let repo = SqliteRepo::new(&path);
+    fn sqlite_reset_all_ok_when_missing() {
+        let path = unique_temp_file("brc721_reset", "db");
+        let repo = SqliteStorage::new(&path);
         repo.reset_all().unwrap();
         assert!(!path.exists());
     }
 
-    /// reset_all removes the database file when present.
     #[test]
-    fn reset_all_removes_existing_file() {
-        let path = unique_temp_path();
+    fn sqlite_reset_all_removes_existing_file() {
+        let path = unique_temp_file("brc721_reset", "db");
         std::fs::write(&path, b"dummy").unwrap();
         assert!(path.exists());
-        let repo = SqliteRepo::new(&path);
+        let repo = SqliteStorage::new(&path);
         repo.reset_all().unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn sqlite_init_initializes_schema() {
+        let path = unique_temp_file("brc721_init", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        assert!(path.exists());
+
+        let conn = Connection::open(&path).unwrap();
+        let chain_state = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='chain_state'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(chain_state.as_deref(), Some("chain_state"));
+
+        let collections = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='collections'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(collections.as_deref(), Some("collections"));
     }
 }

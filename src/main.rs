@@ -5,7 +5,6 @@ use bitcoincore_rpc::{Auth, Client};
 use dotenvy::dotenv;
 mod api;
 mod cli;
-mod db;
 mod parser;
 mod scanner;
 mod storage;
@@ -46,7 +45,7 @@ fn format_block_scripts(block: &Block) -> String {
 }
 
 fn process_block(
-    repo: Arc<dyn db::Repository + Send + Sync>,
+    storage: Arc<dyn Storage + Send + Sync>,
     block: &Block,
     debug: bool,
     height: u64,
@@ -56,7 +55,7 @@ fn process_block(
         let s = format_block_scripts(block);
         print!("{}", s);
     } else {
-        parser::parse_with_repo(repo.as_ref(), height, block, block_hash_str)
+        parser::parse_with_repo(storage.as_ref(), height, block, block_hash_str)
     }
 }
 
@@ -151,34 +150,32 @@ async fn main() {
 
                 let default_db = "./.brc721/brc721.sqlite".to_string();
                 let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
-                let sqlite = db::SqliteRepo::new(db_path);
+                let sqlite = storage::SqliteStorage::new(db_path);
                 if cli.reset {
                     let _ = sqlite.reset_all();
                 }
-                let _ = sqlite.import_if_needed();
-                let store: Arc<dyn Storage + Send + Sync> = Arc::new(sqlite.clone());
-                let repo: Arc<dyn db::Repository + Send + Sync> = Arc::new(sqlite);
+                let _ = sqlite.init();
+                let storage_arc: Arc<dyn Storage + Send + Sync> = Arc::new(sqlite);
 
-                if let Ok(Some(last)) = store.load_last() {
+                if let Ok(Some(last)) = storage_arc.load_last() {
                     println!("📦 Resuming from height {}", last.height + 1);
                 }
 
                 let rpc_url2 = rpc_url.clone();
                 let auth2 = auth.clone();
-                let store2 = store.clone();
-                let repo2 = repo.clone();
+                let storage2 = storage_arc.clone();
                 let debug2 = debug;
                 let confirmations2 = confirmations;
                 let batch_size2 = cli.batch_size;
 
                 std::thread::spawn(move || {
-                    let client2 = Client::new(&rpc_url2, auth2).expect("failed to create RPC client");
+                    let client2 =
+                        Client::new(&rpc_url2, auth2).expect("failed to create RPC client");
                     let mut scanner = scanner::Scanner::new(&client2, confirmations2, debug2);
-                    if let Ok(Some(last)) = store2.load_last() {
+                    if let Ok(Some(last)) = storage2.load_last() {
                         scanner.start_from(last.height + 1);
                     }
-                    let st = store2.clone();
-                    let rp = repo2.clone();
+                    let st = storage2.clone();
                     if batch_size2 <= 1 {
                         scanner.run(|height, block, hash| {
                             if let Ok(Some(prev)) = st.load_last() {
@@ -190,7 +187,7 @@ async fn main() {
                                     std::process::exit(1);
                                 }
                             }
-                            process_block(rp.clone(), block, debug2, height, hash);
+                            process_block(st.clone(), block, debug2, height, hash);
                             if let Err(e) = st.save_last(height, hash) {
                                 eprintln!(
                                     "warning: failed to save last block {} ({}): {}",
@@ -217,7 +214,7 @@ async fn main() {
                                 .iter()
                                 .map(|(h, b, hs)| (*h, b, hs.as_str()))
                                 .collect();
-                            parser::parse_blocks_batch(rp.as_ref(), &refs);
+                            parser::parse_blocks_batch(st.as_ref(), &refs);
                             if let Some((last_h, _b, last_hash)) = items.last() {
                                 if let Err(e) = st.save_last(*last_h, last_hash) {
                                     eprintln!(
@@ -242,36 +239,29 @@ async fn main() {
     let default_db = "./.brc721/brc721.sqlite".to_string();
     let db_path = env::var("BRC721_DB_PATH").unwrap_or(default_db);
 
-    let (store, repo): (
-        Arc<dyn Storage + Send + Sync>,
-        Arc<dyn db::Repository + Send + Sync>,
-    ) = {
-        let sqlite = db::SqliteRepo::new(db_path);
+    let storage_arc: Arc<dyn Storage + Send + Sync> = {
+        let sqlite = storage::SqliteStorage::new(db_path);
         if cli.reset {
             let _ = sqlite.reset_all();
         }
-        let _ = sqlite.import_if_needed();
-        (
-            Arc::new(sqlite.clone()) as Arc<dyn Storage + Send + Sync>,
-            Arc::new(sqlite) as Arc<dyn db::Repository + Send + Sync>,
-        )
+        let _ = sqlite.init();
+        Arc::new(sqlite)
     };
 
-    if let Ok(Some(last)) = store.load_last() {
+    if let Ok(Some(last)) = storage_arc.load_last() {
         println!("📦 Resuming from height {}", last.height + 1);
     }
 
     let mut scanner = scanner::Scanner::new(&client, confirmations, debug);
-    if let Ok(Some(last)) = store.load_last() {
+    if let Ok(Some(last)) = storage_arc.load_last() {
         scanner.start_from(last.height + 1);
     }
 
-    let store2 = store.clone();
-    let repo2 = repo.clone();
+    let storage2 = storage_arc.clone();
     let batch_size = cli.batch_size;
     if batch_size <= 1 {
         scanner.run(|height, block, hash| {
-            if let Ok(Some(prev)) = store2.load_last() {
+            if let Ok(Some(prev)) = storage2.load_last() {
                 if is_orphan(&prev, block) {
                     eprintln!(
                         "error: detected orphan branch at height {}: parent {} != last processed {}",
@@ -280,8 +270,8 @@ async fn main() {
                     std::process::exit(1);
                 }
             }
-            process_block(repo2.clone(), block, debug, height, hash);
-            if let Err(e) = store2.save_last(height, hash) {
+            process_block(storage2.clone(), block, debug, height, hash);
+            if let Err(e) = storage2.save_last(height, hash) {
                 eprintln!(
                     "warning: failed to save last block {} ({}): {}",
                     height, hash, e
@@ -290,7 +280,7 @@ async fn main() {
         });
     } else {
         scanner.run_batch(batch_size, |items| {
-            if let Ok(Some(prev)) = store2.load_last() {
+            if let Ok(Some(prev)) = storage2.load_last() {
                 let mut expected = prev.hash.clone();
                 for (h, b, hs) in items.iter() {
                     if b.header.prev_blockhash.to_string() != expected {
@@ -307,9 +297,9 @@ async fn main() {
                 .iter()
                 .map(|(h, b, hs)| (*h, b, hs.as_str()))
                 .collect();
-            parser::parse_blocks_batch(repo2.as_ref(), &refs);
+            parser::parse_blocks_batch(storage2.as_ref(), &refs);
             if let Some((last_h, _b, last_hash)) = items.last() {
-                if let Err(e) = store2.save_last(*last_h, last_hash) {
+                if let Err(e) = storage2.save_last(*last_h, last_hash) {
                     eprintln!(
                         "warning: failed to save last block {} ({}): {}",
                         last_h, last_hash, e

@@ -2,7 +2,7 @@ use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::{Block, Script};
 
-use crate::db::Repository;
+use crate::storage::{CollectionRow, Storage};
 
 pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
     let mut it = script.instructions();
@@ -48,9 +48,9 @@ pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
     Some((laos_bytes, rebaseable))
 }
 
-pub fn parse_with_repo(repo: &dyn Repository, height: u64, block: &Block, block_hash_str: &str) {
+pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_hash_str: &str) {
     println!("🧱 {} {}", height, block_hash_str);
-    let mut rows: Vec<crate::db::CollectionRow> = Vec::new();
+    let mut rows: Vec<CollectionRow> = Vec::new();
     for (tx_index, tx) in block.txdata.iter().enumerate() {
         if let Some(out0) = tx.output.first() {
             if let Some((laos, rebaseable)) = parse_register_output0(out0.script_pubkey.as_script())
@@ -72,8 +72,8 @@ pub fn parse_with_repo(repo: &dyn Repository, height: u64, block: &Block, block_
     }
 }
 
-pub fn parse_blocks_batch(repo: &dyn Repository, items: &[(u64, &Block, &str)]) {
-    let mut rows: Vec<crate::db::CollectionRow> = Vec::new();
+pub fn parse_blocks_batch(repo: &dyn Storage, items: &[(u64, &Block, &str)]) {
+    let mut rows: Vec<CollectionRow> = Vec::new();
     for &(height, block, block_hash_str) in items.iter() {
         println!("🧱 {} {}", height, block_hash_str);
         for (tx_index, tx) in block.txdata.iter().enumerate() {
