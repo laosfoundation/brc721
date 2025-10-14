@@ -18,7 +18,7 @@ This is a simple Rust app that connects to a Bitcoin Core node and streams block
 
 Storage
 
-- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically.
+- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically (you just need to create the .brc721 folder first manually)
 - No CSV or legacy fallback.
 - Use --reset to delete the database file before starting.
 
