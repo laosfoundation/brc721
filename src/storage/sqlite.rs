@@ -1,9 +1,8 @@
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{Block, CollectionRow, Storage};
+use super::{Block, Storage};
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -47,31 +46,10 @@ impl SqliteStorage {
             CREATE TABLE IF NOT EXISTS chain_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 height INTEGER NOT NULL,
-                hash TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
+                hash TEXT NOT NULL
             );
-
-            CREATE TABLE IF NOT EXISTS collections (
-                id TEXT PRIMARY KEY,
-                laos_addr BLOB NOT NULL,
-                rebaseable INTEGER NOT NULL,
-                block_height INTEGER NOT NULL,
-                block_hash TEXT NOT NULL,
-                tx_index INTEGER NOT NULL,
-                inserted_at INTEGER NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_collections_laos ON collections(laos_addr);
-            CREATE INDEX IF NOT EXISTS idx_collections_height ON collections(block_height);
             "#,
         )
-    }
-
-    fn now_ts() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
     }
 }
 
@@ -100,11 +78,10 @@ impl Storage for SqliteStorage {
 
     fn save_last(&self, height: u64, hash: &str) -> std::io::Result<()> {
         let r = self.with_conn(|conn| {
-            let ts = Self::now_ts();
             conn.execute(
-                "INSERT INTO chain_state (id, height, hash, updated_at) VALUES (1, ?, ?, ?)
-                 ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash, updated_at=excluded.updated_at",
-                params![height as i64, hash, ts],
+                "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash",
+                params![height as i64, hash],
             )?;
             Ok(())
         });
@@ -113,29 +90,13 @@ impl Storage for SqliteStorage {
             Err(e) => Err(std::io::Error::other(e.to_string())),
         }
     }
-
-    fn insert_collections_batch(&self, rows: &[CollectionRow]) -> rusqlite::Result<()> {
-        self.with_conn(|conn| {
-            let ts = Self::now_ts();
-            let tx = conn.unchecked_transaction()?;
-            {
-                let mut stmt = tx.prepare(
-                    "INSERT OR IGNORE INTO collections (id, laos_addr, rebaseable, block_height, block_hash, tx_index, inserted_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                )?;
-                for (id, laos, rebaseable, height, hash, tx_index) in rows.iter() {
-                    stmt.execute(params![id, &laos[..], if *rebaseable {1} else {0}, *height as i64, hash, *tx_index as i64, ts])?;
-                }
-            }
-            tx.commit()?;
-            Ok(())
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::{Connection, OptionalExtension};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_file(prefix: &str, ext: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
@@ -184,14 +145,35 @@ mod tests {
             .unwrap();
         assert_eq!(chain_state.as_deref(), Some("chain_state"));
 
-        let collections = conn
+
+    }
+
+    #[test]
+    fn sqlite_save_last_inserts_then_updates() {
+        let path = unique_temp_file("brc721_save_last", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        assert_eq!(repo.load_last().unwrap(), None);
+
+        repo.save_last(100, "hash100").unwrap();
+        let first = repo.load_last().unwrap().unwrap();
+        assert_eq!(first.height, 100);
+        assert_eq!(first.hash, "hash100");
+
+        repo.save_last(101, "hash101").unwrap();
+        let second = repo.load_last().unwrap().unwrap();
+        assert_eq!(second.height, 101);
+        assert_eq!(second.hash, "hash101");
+
+        let conn = Connection::open(&path).unwrap();
+        let row_count: i64 = conn
             .query_row(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='collections'",
+                "SELECT COUNT(*) FROM chain_state",
                 [],
-                |row| row.get::<_, String>(0),
+                |row| row.get(0),
             )
-            .optional()
             .unwrap();
-        assert_eq!(collections.as_deref(), Some("collections"));
+        assert_eq!(row_count, 1);
     }
 }

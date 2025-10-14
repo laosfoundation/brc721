@@ -2,7 +2,6 @@ use bitcoincore_rpc::{Auth, Client};
 use std::sync::Arc;
 mod cli;
 mod core;
-mod parser;
 mod scanner;
 mod storage;
 
@@ -21,7 +20,7 @@ fn main() {
         .load_last()
         .unwrap_or_default()
         .map(|last| last.height + 1)
-        .unwrap_or_default();
+        .unwrap_or(cli.start);
     let scanner = init_scanner(&cli, starting_block);
 
     let core = core::Core::new(storage.clone(), scanner);
