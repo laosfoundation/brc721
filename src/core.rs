@@ -18,6 +18,9 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
                 Ok(blocks) => {
                     for (height, block) in blocks {
                         println!("block: height={}, hash={}", height, block.block_hash());
+                        self.storage
+                            .save_last(*height, &block.block_hash().to_string())
+                            .unwrap();
                     }
                 }
                 Err(e) => {
