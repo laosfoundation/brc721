@@ -29,7 +29,7 @@ pub struct Scanner<C: BitcoinRpc> {
     client: C,
     confirmations: u64,
     current_height: u64,
-    out: Vec<(u64, Block, BlockHash)>,
+    out: Vec<(u64, Block)>,
 }
 
 impl<C: BitcoinRpc> Scanner<C> {
@@ -57,7 +57,7 @@ impl<C: BitcoinRpc> Scanner<C> {
         self
     }
 
-    pub fn next_blocks(&mut self) -> Result<&[(u64, Block, BlockHash)], RpcError> {
+    pub fn next_blocks(&mut self) -> Result<&[(u64, Block)], RpcError> {
         if self.out.capacity() == 0 {
             self.out.clear();
             return Ok(self.out.as_slice());
@@ -71,12 +71,12 @@ impl<C: BitcoinRpc> Scanner<C> {
         }
     }
 
-    fn collect_ready_blocks(&mut self) -> Result<&[(u64, Block, BlockHash)], RpcError> {
+    fn collect_ready_blocks(&mut self) -> Result<&[(u64, Block)], RpcError> {
         self.out.clear();
         for _ in 0..self.out.capacity() {
             match self.next_ready_block()? {
-                Some((height, block, hash_str)) => {
-                    self.out.push((height, block, hash_str));
+                Some((height, block)) => {
+                    self.out.push((height, block));
                 }
                 None => break,
             }
@@ -84,7 +84,7 @@ impl<C: BitcoinRpc> Scanner<C> {
         Ok(self.out.as_slice())
     }
 
-    fn next_ready_block(&mut self) -> Result<Option<(u64, Block, BlockHash)>, RpcError> {
+    fn next_ready_block(&mut self) -> Result<Option<(u64, Block)>, RpcError> {
         let tip = self.client.get_block_count()?;
         if tip < self.confirmations {
             return Ok(None);
@@ -97,6 +97,6 @@ impl<C: BitcoinRpc> Scanner<C> {
         let hash = self.client.get_block_hash(height)?;
         let block = self.client.get_block(&hash)?;
         self.current_height += 1;
-        Ok(Some((height, block, hash)))
+        Ok(Some((height, block)))
     }
 }

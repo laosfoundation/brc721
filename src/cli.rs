@@ -1,42 +1,13 @@
-use clap::{Parser, Subcommand};
-
-#[derive(Subcommand, Debug)]
-pub enum Command {
-    WalletInit {
-        #[arg(long)]
-        name: String,
-    },
-    WalletNewAddress {
-        #[arg(long)]
-        name: String,
-    },
-    WalletBalance {
-        #[arg(long)]
-        name: String,
-    },
-    CollectionCreate {
-        #[arg(long, value_name = "HEX20")]
-        laos_hex: String,
-        #[arg(long, default_value_t = false)]
-        rebaseable: bool,
-        #[arg(long)]
-        fee_rate: Option<f64>,
-        #[arg(long)]
-        name: String,
-    },
-}
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
     author,
     version,
     about = "Stream Bitcoin Core blocks and print summaries or detailed scripts",
-    long_about = "A simple Rust app that connects to a Bitcoin Core node via RPC and streams blocks.\n\nEnvironment:\n  BITCOIN_RPC_URL       RPC URL (default http://127.0.0.1:8332)\n  BITCOIN_RPC_USER      RPC username\n  BITCOIN_RPC_PASS      RPC password\n  BITCOIN_RPC_COOKIE    Path to cookie file\n"
+    long_about = "A simple Rust app that connects to a Bitcoin Core node via RPC and streams blocks."
 )]
 pub struct Cli {
-    #[arg(short, long, help = "Print transaction scripts and details")]
-    pub debug: bool,
-
     #[arg(
         short = 's',
         long = "start",
@@ -71,10 +42,43 @@ pub struct Cli {
     )]
     pub reset: bool,
 
-    #[command(subcommand)]
-    pub command: Option<Command>,
+    #[arg(
+        long,
+        default_value = ".brc721/",
+        value_name = "DIR",
+        help = "Directory to store persistent data"
+    )]
+    pub data_dir: String,
+
+    #[arg(
+        long,
+        env = "BITCOIN_RPC_URL",
+        default_value = "http://127.0.0.1:8332",
+        value_name = "URL",
+        help = "Bitcoin Core RPC URL"
+    )]
+    pub rpc_url: String,
+
+    #[arg(
+        long,
+        env = "BITCOIN_RPC_USER",
+        value_name = "USER",
+        default_value = "dev",
+        help = "RPC username (user/pass auth)"
+    )]
+    pub rpc_user: Option<String>,
+
+    #[arg(
+        long,
+        env = "BITCOIN_RPC_PASS",
+        value_name = "PASS",
+        default_value = "dev",
+        help = "RPC password (user/pass auth)"
+    )]
+    pub rpc_pass: Option<String>,
 }
 
 pub fn parse() -> Cli {
+    let _ = dotenvy::dotenv();
     Cli::parse()
 }
