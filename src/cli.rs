@@ -1,4 +1,5 @@
 use clap::Parser;
+
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -42,6 +43,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        env = "BITCOIN_RPC_URL",
         default_value = "http://127.0.0.1:8332",
         value_name = "URL",
         help = "Bitcoin Core RPC URL"
@@ -50,6 +52,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        env = "BITCOIN_RPC_USER",
         value_name = "USER",
         default_value = "dev",
         help = "RPC username (user/pass auth)"
@@ -58,6 +61,7 @@ pub struct Cli {
 
     #[arg(
         long,
+        env = "BITCOIN_RPC_PASS",
         value_name = "PASS",
         default_value = "dev",
         help = "RPC password (user/pass auth)"
@@ -66,5 +70,6 @@ pub struct Cli {
 }
 
 pub fn parse() -> Cli {
+    let _ = dotenvy::dotenv();
     Cli::parse()
 }
