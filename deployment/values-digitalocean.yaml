@@ -1,12 +1,8 @@
-namespace: laos-bitcoin-dev
+namespace: brc721
 storageClassName: do-block-storage
-chain: regtest
-tag: "main"
+chain: main
 bitcoind:
   service:
     type: LoadBalancer
   storage:
-    size: 100Gi
-laosbtc:
-  logLevel: debug
-  host: dev.ord.gorengine.com
+    size: 1500Gi
