@@ -1,0 +1,9 @@
+namespace: brc721-local-dev
+storageClassName: local-path
+chain: regtest
+tag: "main" # Use the latest image tag for development
+bitcoind:
+  service:
+    type: LoadBalancer
+  storage:
+    size: 100Gi
