@@ -141,7 +141,6 @@ fn main() {
                 println!("{}", txid);
                 return;
             }
-
         }
     }
 
