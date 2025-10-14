@@ -7,9 +7,6 @@ use clap::Parser;
     long_about = "A simple Rust app that connects to a Bitcoin Core node via RPC and streams blocks."
 )]
 pub struct Cli {
-    #[arg(short, long, help = "Print transaction scripts and details")]
-    pub debug: bool,
-
     #[arg(
         short = 'c',
         long,

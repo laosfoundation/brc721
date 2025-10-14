@@ -12,7 +12,6 @@ fn main() {
     println!("🚀 Starting brc721");
     println!("🔗 RPC URL: {}", cli.rpc_url);
     println!("🔐 Auth: user/pass");
-    println!("🛠️ Debug: {}", if cli.debug { "on" } else { "off" });
     println!("🧮 Confirmations: {}", cli.confirmations);
     println!("📂 Data dir: {}", cli.data_dir);
 
