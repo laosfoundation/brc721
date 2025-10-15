@@ -5,19 +5,10 @@ use bitcoin::Script;
 use bitcoin::Transaction;
 use bitcoin::TxOut;
 
-/// A block parser that can analyze blocks and perform domain-specific actions.
-/// Implementations are injected into Core via dependency injection.
-pub trait Parser {
-    /// Parse a single block at the given height.
-    /// Implementations should be side-effect free unless explicitly required.
-    fn parse_block(&self, height: u64, block: &Block);
-}
+pub struct Parser;
 
-/// Default parser that only logs a short summary for each block.
-pub struct NoopParser;
-
-impl Parser for NoopParser {
-    fn parse_block(&self, height: u64, block: &Block) {
+impl Parser {
+    pub fn parse_block(&self, height: u64, block: &Block) {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let out = match get_op_return_output(tx) {
                 Some(val) => val,
@@ -74,7 +65,7 @@ pub fn op_return_items(script: &Script) -> Option<Vec<OpItem>> {
 }
 
 /// Parse a register output TxOut that contains the OP_RETURN payload for a create-collection.
-/// Accepts the TxOut (typically from get_op_return_output) and returns (20-byte addr, rebaseable).
+/// Accepts the TxOut and returns (20-byte addr, rebaseable).
 pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<([u8; 20], bool)> {
     let script = out.script_pubkey.as_script();
     let items = op_return_items(script)?;

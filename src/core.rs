@@ -6,14 +6,14 @@ use std::sync::Arc;
 pub struct Core<C: crate::scanner::BitcoinRpc> {
     storage: Arc<dyn Storage + Send + Sync>,
     scanner: Scanner<C>,
-    parser: Arc<dyn Parser + Send + Sync>,
+    parser: Parser,
 }
 
 impl<C: crate::scanner::BitcoinRpc> Core<C> {
     pub fn new(
         storage: Arc<dyn Storage + Send + Sync>,
         scanner: Scanner<C>,
-        parser: Arc<dyn Parser + Send + Sync>,
+        parser: Parser,
     ) -> Self {
         Self {
             storage,
