@@ -19,26 +19,25 @@ pub struct NoopParser;
 impl Parser for NoopParser {
     fn parse_block(&self, height: u64, block: &Block) {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let has_opret = get_op_return_output(tx).is_some();
-            log::info!(
-                "🧱 block={} 🧾 tx[{}] 🔹opret={}",
-                height,
-                tx_index,
-                has_opret,
-            );
-            if let Some(out0) = tx.output.first() {
-                if let Some((laos, rebaseable)) =
-                    parse_register_output0(out0.script_pubkey.as_script())
-                {
-                    let addr_hex = hex::encode(laos);
-                    log::info!(
-                        "✨ create-collection: height={} tx_index={} addr={} rebaseable={}",
-                        height,
-                        tx_index,
-                        addr_hex,
-                        rebaseable
-                    );
-                }
+            let out = match get_op_return_output(tx) {
+                Some(val) => val,
+                None => continue,
+            };
+            // log::info!(
+            //     "🧱 block={} 🧾 tx[{}] 🔹opret={}",
+            //     height,
+            //     tx_index,
+            //     has_opret,
+            // );
+            if let Some((laos, rebaseable)) = parse_register_output0(out) {
+                let addr_hex = hex::encode(laos);
+                log::info!(
+                    "✨ create-collection: height={} tx_index={} addr={} rebaseable={}",
+                    height,
+                    tx_index,
+                    addr_hex,
+                    rebaseable
+                );
             }
         }
     }
@@ -78,10 +77,26 @@ pub fn op_return_items(script: &Script) -> Option<Vec<OpItem>> {
     Some(out)
 }
 
+/// Test helper: return the first pushdata after OP_RETURN when present.
+fn op_return_first_pushdata(script: &Script) -> Option<Vec<u8>> {
+    let items = op_return_items(script)?;
+    for item in items.into_iter() {
+        if let OpItem::Push(b) = item {
+            return Some(b);
+        }
+    }
+    None
+}
+
 /// Parses a BRC-721 register script of the form:
 /// OP_RETURN OP_15 <flag:0> <20-byte address> <rebaseable:0|1>
 /// Returns (address20, rebaseable) on success, None otherwise.
-pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
+use bitcoin::TxOut as BitcoinTxOut;
+
+/// Parse a register output TxOut that contains the OP_RETURN payload for a create-collection.
+/// Accepts the TxOut (typically from get_op_return_output) and returns (20-byte addr, rebaseable).
+pub fn parse_register_output0(out: &BitcoinTxOut) -> Option<([u8; 20], bool)> {
+    let script = out.script_pubkey.as_script();
     let items = op_return_items(script)?;
     if items.len() != 4 {
         return None;
@@ -142,7 +157,11 @@ mod tests {
         laos[0] = 0xaa;
         laos[19] = 0x55;
         let s = script_with(0, laos, true);
-        let r = parse_register_output0(s.as_script());
+        let txout = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(0),
+            script_pubkey: s,
+        };
+        let r = parse_register_output0(&txout);
         assert!(r.is_some());
         let (addr, rebaseable) = r.unwrap();
         assert_eq!(addr, laos);
@@ -157,13 +176,21 @@ mod tests {
             .push_slice([0u8; 20])
             .push_opcode(opcodes::OP_PUSHBYTES_0)
             .into_script();
-        assert!(parse_register_output0(s.as_script()).is_none());
+        let txout = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(0),
+            script_pubkey: s,
+        };
+        assert!(parse_register_output0(&txout).is_none());
     }
 
     #[test]
     fn parse_register_output0_requires_flag_zero() {
         let s = script_with(1, [0u8; 20], false);
-        assert!(parse_register_output0(s.as_script()).is_none());
+        let txout = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(0),
+            script_pubkey: s,
+        };
+        assert!(parse_register_output0(&txout).is_none());
     }
 
     #[test]
@@ -175,7 +202,11 @@ mod tests {
             .push_slice([0u8; 19])
             .push_opcode(opcodes::OP_PUSHBYTES_0)
             .into_script();
-        assert!(parse_register_output0(s.as_script()).is_none());
+        let txout = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(0),
+            script_pubkey: s,
+        };
+        assert!(parse_register_output0(&txout).is_none());
     }
 
     #[test]
