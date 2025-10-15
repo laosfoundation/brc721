@@ -2,86 +2,113 @@ use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::Block;
 use bitcoin::Script;
+use bitcoin::Transaction;
+use bitcoin::TxOut;
 
+/// A block parser that can analyze blocks and perform domain-specific actions.
+/// Implementations are injected into Core via dependency injection.
 pub trait Parser {
+    /// Parse a single block at the given height.
+    /// Implementations should be side-effect free unless explicitly required.
     fn parse_block(&self, height: u64, block: &Block);
 }
 
+/// Default parser that only logs a short summary for each block.
 pub struct NoopParser;
 
-pub fn op_return_first_pushdata(script: &Script) -> Option<Vec<u8>> {
-    let mut it = script.instructions();
-    match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
-        _ => return None,
+impl Parser for NoopParser {
+    fn parse_block(&self, height: u64, block: &Block) {
+        for (tx_index, tx) in block.txdata.iter().enumerate() {
+            let has_opret = get_op_return_output(tx).is_some();
+            log::info!(
+                "🧱 block={} 🧾 tx[{}] 🔹opret={}",
+                height,
+                tx_index,
+                has_opret,
+            );
+            if let Some(out0) = tx.output.first() {
+                if let Some((laos, rebaseable)) =
+                    parse_register_output0(out0.script_pubkey.as_script())
+                {
+                    let addr_hex = hex::encode(laos);
+                    log::info!(
+                        "✨ create-collection: height={} tx_index={} addr={} rebaseable={}",
+                        height,
+                        tx_index,
+                        addr_hex,
+                        rebaseable
+                    );
+                }
+            }
+        }
     }
+}
+
+/// A normalized script item after OP_RETURN: either an opcode (as u8) or raw push bytes.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OpItem {
+    Op(u8),
+    Push(Vec<u8>),
+}
+
+/// Returns a normalized list of items that follow OP_RETURN in the script.
+/// Returns None if the script does not start with OP_RETURN.
+pub fn get_op_return_output(tx: &Transaction) -> Option<&TxOut> {
+    let out0 = tx.output.first()?;
+    let mut it = out0.script_pubkey.instructions();
     match it.next()? {
-        Ok(Instruction::PushBytes(b)) => Some(b.as_bytes().to_vec()),
-        Ok(Instruction::Op(opcodes::OP_PUSHBYTES_0)) => Some(Vec::new()),
+        Ok(Instruction::Op(opcodes::OP_RETURN)) => Some(out0),
         _ => None,
     }
 }
 
-fn first_op_return_push_hex(block: &Block) -> Option<String> {
-    for tx in &block.txdata {
-        for out in &tx.output {
-            if let Some(bytes) = op_return_first_pushdata(out.script_pubkey.as_script()) {
-                return Some(hex::encode(bytes));
-            }
-        }
-    }
-    None
-}
-
-impl Parser for NoopParser {
-    fn parse_block(&self, height: u64, block: &Block) {
-        let opret = first_op_return_push_hex(block).unwrap_or_else(|| "-".to_string());
-        log::info!("🧱 block={} 🧾 txs={} 🔹 opret={}", height, block.txdata.len(), opret);
-    }
-}
-
-pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
+pub fn op_return_items(script: &Script) -> Option<Vec<OpItem>> {
     let mut it = script.instructions();
     match it.next()? {
         Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
         _ => return None,
     }
-    match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_PUSHNUM_15)) => {}
-        _ => return None,
-    }
-    let flag_is_zero = match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_PUSHBYTES_0)) => true,
-        Ok(Instruction::PushBytes(b)) => {
-            let bytes = b.as_bytes();
-            bytes.is_empty() || (bytes.len() == 1 && bytes[0] == 0)
+    let mut out = Vec::new();
+    for instr in it {
+        match instr.ok()? {
+            Instruction::Op(op) => out.push(OpItem::Op(op.to_u8())),
+            Instruction::PushBytes(b) => out.push(OpItem::Push(b.as_bytes().to_vec())),
         }
-        _ => false,
-    };
-    if !flag_is_zero {
+    }
+    Some(out)
+}
+
+/// Parses a BRC-721 register script of the form:
+/// OP_RETURN OP_15 <flag:0> <20-byte address> <rebaseable:0|1>
+/// Returns (address20, rebaseable) on success, None otherwise.
+pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
+    let items = op_return_items(script)?;
+    if items.len() != 4 {
         return None;
     }
-    let laos_bytes: [u8; 20] = match it.next()? {
-        Ok(Instruction::PushBytes(b)) if b.as_bytes().len() == 20 => {
-            let mut a = [0u8; 20];
-            a.copy_from_slice(b.as_bytes());
-            a
+    match (&items[0], &items[1], &items[2], &items[3]) {
+        (OpItem::Op(op), flag, OpItem::Push(addr), reb)
+            if *op == opcodes::OP_PUSHNUM_15.to_u8() =>
+        {
+            let flag_is_zero = match flag {
+                OpItem::Op(op) => *op == opcodes::OP_PUSHBYTES_0.to_u8(),
+                OpItem::Push(b) => b.is_empty() || (b.len() == 1 && b[0] == 0),
+            };
+            if !flag_is_zero || addr.len() != 20 {
+                return None;
+            }
+            let mut laos_bytes = [0u8; 20];
+            laos_bytes.copy_from_slice(&addr[..]);
+            let rebaseable = match reb {
+                OpItem::Op(op) if *op == opcodes::OP_PUSHBYTES_0.to_u8() => false,
+                OpItem::Op(op) if *op == opcodes::OP_PUSHNUM_1.to_u8() => true,
+                OpItem::Push(b) => b.len() == 1 && b[0] != 0,
+                _ => return None,
+            };
+            Some((laos_bytes, rebaseable))
         }
-        _ => return None,
-    };
-    let rebaseable = match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_PUSHBYTES_0)) => false,
-        Ok(Instruction::Op(opcodes::OP_PUSHNUM_1)) => true,
-        Ok(Instruction::PushBytes(b)) => {
-            let bb = b.as_bytes();
-            bb.len() == 1 && bb[0] != 0
-        }
-        _ => return None,
-    };
-    if it.next().is_some() {
-        return None;
+        _ => None,
     }
-    Some((laos_bytes, rebaseable))
 }
 
 #[cfg(test)]
@@ -115,15 +142,6 @@ mod tests {
         laos[0] = 0xaa;
         laos[19] = 0x55;
         let s = script_with(0, laos, true);
-        let insts: Vec<String> = s
-            .instructions()
-            .map(|x| match x {
-                Ok(Instruction::Op(op)) => format!("OP {}", op.to_u8()),
-                Ok(Instruction::PushBytes(b)) => format!("PUSH {}", b.as_bytes().len()),
-                Err(e) => format!("ERR {}", e),
-            })
-            .collect();
-        log::debug!("insts={:?}", insts);
         let r = parse_register_output0(s.as_script());
         assert!(r.is_some());
         let (addr, rebaseable) = r.unwrap();
@@ -182,9 +200,7 @@ mod tests {
 
     #[test]
     fn op_return_first_pushdata_no_op_return() {
-        let s = ScriptBuf::builder()
-            .push_slice([1u8, 2, 3])
-            .into_script();
+        let s = ScriptBuf::builder().push_slice([1u8, 2, 3]).into_script();
         assert!(op_return_first_pushdata(s.as_script()).is_none());
     }
 
@@ -195,5 +211,83 @@ mod tests {
             .push_opcode(opcodes::OP_DROP)
             .into_script();
         assert!(op_return_first_pushdata(s.as_script()).is_none());
+    }
+
+    #[test]
+    fn op_return_items_parses_sequence() {
+        let s = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_RETURN)
+            .push_opcode(opcodes::OP_PUSHNUM_1)
+            .push_slice([0xAA, 0xBB])
+            .push_opcode(opcodes::OP_DROP)
+            .into_script();
+        let items = op_return_items(s.as_script()).unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], OpItem::Op(opcodes::OP_PUSHNUM_1.to_u8()));
+        assert_eq!(items[1], OpItem::Push(vec![0xAA, 0xBB]));
+        assert_eq!(items[2], OpItem::Op(opcodes::OP_DROP.to_u8()));
+    }
+
+    #[test]
+    fn get_op_return_output_on_vout0_returns_some() {
+        use bitcoin::{OutPoint, Sequence, TxIn};
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: bitcoin::Witness::default(),
+            }],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(0),
+                script_pubkey: ScriptBuf::builder()
+                    .push_opcode(opcodes::OP_RETURN)
+                    .push_opcode(opcodes::OP_PUSHBYTES_0)
+                    .into_script(),
+            }],
+        };
+        let out = get_op_return_output(&tx);
+        assert!(out.is_some());
+    }
+
+    #[test]
+    fn get_op_return_output_non_op_return_returns_none() {
+        use bitcoin::{OutPoint, Sequence, TxIn};
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: bitcoin::Witness::default(),
+            }],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(0),
+                script_pubkey: ScriptBuf::new(),
+            }],
+        };
+        let out = get_op_return_output(&tx);
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn get_op_return_output_empty_outputs_returns_none() {
+        use bitcoin::{OutPoint, Sequence, TxIn};
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: bitcoin::Witness::default(),
+            }],
+            output: vec![],
+        };
+        let out = get_op_return_output(&tx);
+        assert!(out.is_none());
     }
 }
