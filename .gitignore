@@ -31,3 +31,4 @@ target/
 .serena/
 CRUSH.md
 .env
+.crush/
