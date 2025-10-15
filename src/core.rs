@@ -15,7 +15,11 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
         scanner: Scanner<C>,
         parser: Arc<dyn Parser + Send + Sync>,
     ) -> Self {
-        Self { storage, scanner, parser }
+        Self {
+            storage,
+            scanner,
+            parser,
+        }
     }
 
     pub fn run(mut self) -> ! {
