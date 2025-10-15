@@ -10,7 +10,9 @@ pub trait Parser {
 pub struct NoopParser;
 
 impl Parser for NoopParser {
-    fn parse_block(&self, _height: u64, _block: &Block) {}
+    fn parse_block(&self, height: u64, block: &Block) {
+        log::info!("🧱 block={} 🧾 txs={}", height, block.txdata.len());
+    }
 }
 
 pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {

@@ -27,7 +27,7 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
             match self.scanner.next_blocks() {
                 Ok(blocks) => {
                     for (height, block) in blocks {
-                        log::info!("block: height={}, hash={}", height, block.block_hash());
+                        log::debug!("block: height={}, hash={}", height, block.block_hash());
                         self.parser.parse_block(*height, block);
                         if let Err(e) = self
                             .storage
