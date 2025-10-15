@@ -50,7 +50,7 @@ pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
 
 pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_hash: &BlockHash) {
     let block_hash_str = block_hash.to_string();
-    println!("🧱 {} {}", height, block_hash_str);
+    log::info!("🧱 {} {}", height, block_hash_str);
     let mut rows: Vec<CollectionRow> = Vec::new();
     for (tx_index, tx) in block.txdata.iter().enumerate() {
         if let Some(out0) = tx.output.first() {
@@ -139,7 +139,7 @@ mod tests {
                 Err(e) => format!("ERR {}", e),
             })
             .collect();
-        println!("insts={:?}", insts);
+        log::debug!("insts={:?}", insts);
         let r = parse_register_output0(s.as_script());
         assert!(r.is_some());
         let (addr, rebaseable) = r.unwrap();

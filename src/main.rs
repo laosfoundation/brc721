@@ -8,11 +8,13 @@ mod storage;
 fn main() {
     let cli = cli::parse();
 
-    println!("🚀 Starting brc721");
-    println!("🔗 RPC URL: {}", cli.rpc_url);
-    println!("🔐 Auth: user/pass");
-    println!("🧮 Confirmations: {}", cli.confirmations);
-    println!("📂 Data dir: {}", cli.data_dir);
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    log::info!("🚀 Starting brc721");
+    log::info!("🔗 RPC URL: {}", cli.rpc_url);
+    log::info!("🔐 Auth: user/pass");
+    log::info!("🧮 Confirmations: {}", cli.confirmations);
+    log::info!("📂 Data dir: {}", cli.data_dir);
 
     init_data_dir(&cli);
     let storage = init_storage(&cli);
