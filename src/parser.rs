@@ -23,12 +23,8 @@ impl Parser for NoopParser {
                 Some(val) => val,
                 None => continue,
             };
-            // log::info!(
-            //     "🧱 block={} 🧾 tx[{}] 🔹opret={}",
-            //     height,
-            //     tx_index,
-            //     has_opret,
-            // );
+
+            log::debug!("🧾 tx[{}]🔹opret={:?}", tx_index, out);
             if let Some((laos, rebaseable)) = parse_register_output0(out) {
                 let addr_hex = hex::encode(laos);
                 log::info!(
@@ -77,25 +73,9 @@ pub fn op_return_items(script: &Script) -> Option<Vec<OpItem>> {
     Some(out)
 }
 
-/// Test helper: return the first pushdata after OP_RETURN when present.
-fn op_return_first_pushdata(script: &Script) -> Option<Vec<u8>> {
-    let items = op_return_items(script)?;
-    for item in items.into_iter() {
-        if let OpItem::Push(b) = item {
-            return Some(b);
-        }
-    }
-    None
-}
-
-/// Parses a BRC-721 register script of the form:
-/// OP_RETURN OP_15 <flag:0> <20-byte address> <rebaseable:0|1>
-/// Returns (address20, rebaseable) on success, None otherwise.
-use bitcoin::TxOut as BitcoinTxOut;
-
 /// Parse a register output TxOut that contains the OP_RETURN payload for a create-collection.
 /// Accepts the TxOut (typically from get_op_return_output) and returns (20-byte addr, rebaseable).
-pub fn parse_register_output0(out: &BitcoinTxOut) -> Option<([u8; 20], bool)> {
+pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<([u8; 20], bool)> {
     let script = out.script_pubkey.as_script();
     let items = op_return_items(script)?;
     if items.len() != 4 {
@@ -207,41 +187,6 @@ mod tests {
             script_pubkey: s,
         };
         assert!(parse_register_output0(&txout).is_none());
-    }
-
-    #[test]
-    fn op_return_first_pushdata_happy_path() {
-        let s = ScriptBuf::builder()
-            .push_opcode(opcodes::OP_RETURN)
-            .push_slice([1u8, 2, 3])
-            .into_script();
-        let out = op_return_first_pushdata(s.as_script()).unwrap();
-        assert_eq!(out, vec![1u8, 2, 3]);
-    }
-
-    #[test]
-    fn op_return_first_pushdata_empty_push() {
-        let s = ScriptBuf::builder()
-            .push_opcode(opcodes::OP_RETURN)
-            .push_opcode(opcodes::OP_PUSHBYTES_0)
-            .into_script();
-        let out = op_return_first_pushdata(s.as_script()).unwrap();
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn op_return_first_pushdata_no_op_return() {
-        let s = ScriptBuf::builder().push_slice([1u8, 2, 3]).into_script();
-        assert!(op_return_first_pushdata(s.as_script()).is_none());
-    }
-
-    #[test]
-    fn op_return_first_pushdata_non_push_after_op_return() {
-        let s = ScriptBuf::builder()
-            .push_opcode(opcodes::OP_RETURN)
-            .push_opcode(opcodes::OP_DROP)
-            .into_script();
-        assert!(op_return_first_pushdata(s.as_script()).is_none());
     }
 
     #[test]
