@@ -1,3 +1,4 @@
+use crate::parser::Parser;
 use crate::scanner::Scanner;
 use crate::storage::Storage;
 use std::sync::Arc;
@@ -5,11 +6,20 @@ use std::sync::Arc;
 pub struct Core<C: crate::scanner::BitcoinRpc> {
     storage: Arc<dyn Storage + Send + Sync>,
     scanner: Scanner<C>,
+    parser: Parser,
 }
 
 impl<C: crate::scanner::BitcoinRpc> Core<C> {
-    pub fn new(storage: Arc<dyn Storage + Send + Sync>, scanner: Scanner<C>) -> Self {
-        Self { storage, scanner }
+    pub fn new(
+        storage: Arc<dyn Storage + Send + Sync>,
+        scanner: Scanner<C>,
+        parser: Parser,
+    ) -> Self {
+        Self {
+            storage,
+            scanner,
+            parser,
+        }
     }
 
     pub fn run(mut self) -> ! {
@@ -17,7 +27,8 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
             match self.scanner.next_blocks() {
                 Ok(blocks) => {
                     for (height, block) in blocks {
-                        log::info!("block: height={}, hash={}", height, block.block_hash());
+                        log::info!("🧱 block={} 🧾 hash={}", height, block.block_hash());
+                        self.parser.parse_block(*height, block);
                         if let Err(e) = self
                             .storage
                             .save_last(*height, &block.block_hash().to_string())
