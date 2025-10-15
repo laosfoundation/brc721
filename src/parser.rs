@@ -1,8 +1,17 @@
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
-use bitcoin::{Block, BlockHash, Script};
+use bitcoin::Block;
+use bitcoin::Script;
 
-use crate::storage::{CollectionRow, Storage};
+pub trait Parser {
+    fn parse_block(&self, height: u64, block: &Block);
+}
+
+pub struct NoopParser;
+
+impl Parser for NoopParser {
+    fn parse_block(&self, _height: u64, _block: &Block) {}
+}
 
 pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
     let mut it = script.instructions();
@@ -46,58 +55,6 @@ pub fn parse_register_output0(script: &Script) -> Option<([u8; 20], bool)> {
         return None;
     }
     Some((laos_bytes, rebaseable))
-}
-
-pub fn parse_with_repo(repo: &dyn Storage, height: u64, block: &Block, block_hash: &BlockHash) {
-    let block_hash_str = block_hash.to_string();
-    log::info!("🧱 {} {}", height, block_hash_str);
-    let mut rows: Vec<CollectionRow> = Vec::new();
-    for (tx_index, tx) in block.txdata.iter().enumerate() {
-        if let Some(out0) = tx.output.first() {
-            if let Some((laos, rebaseable)) = parse_register_output0(out0.script_pubkey.as_script())
-            {
-                let id = format!("{}:{}", block_hash_str, tx_index);
-                rows.push((
-                    id,
-                    laos,
-                    rebaseable,
-                    height,
-                    block_hash_str.clone(),
-                    tx_index as u32,
-                ));
-            }
-        }
-    }
-    if !rows.is_empty() {
-        let _ = repo.insert_collections_batch(&rows);
-    }
-}
-
-pub fn parse_blocks_batch(repo: &dyn Storage, items: &[(u64, &Block, &BlockHash)]) {
-    let mut rows: Vec<CollectionRow> = Vec::new();
-    for &(height, block, block_hash) in items.iter() {
-        let block_hash_str = block_hash.to_string();
-        for (tx_index, tx) in block.txdata.iter().enumerate() {
-            if let Some(out0) = tx.output.first() {
-                if let Some((laos, rebaseable)) =
-                    parse_register_output0(out0.script_pubkey.as_script())
-                {
-                    let id = format!("{}:{}", block_hash_str, tx_index);
-                    rows.push((
-                        id,
-                        laos,
-                        rebaseable,
-                        height,
-                        block_hash_str.clone(),
-                        tx_index as u32,
-                    ));
-                }
-            }
-        }
-    }
-    if !rows.is_empty() {
-        let _ = repo.insert_collections_batch(&rows);
-    }
 }
 
 #[cfg(test)]
