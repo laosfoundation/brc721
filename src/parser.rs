@@ -9,9 +9,34 @@ pub trait Parser {
 
 pub struct NoopParser;
 
+pub fn op_return_first_pushdata(script: &Script) -> Option<Vec<u8>> {
+    let mut it = script.instructions();
+    match it.next()? {
+        Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
+        _ => return None,
+    }
+    match it.next()? {
+        Ok(Instruction::PushBytes(b)) => Some(b.as_bytes().to_vec()),
+        Ok(Instruction::Op(opcodes::OP_PUSHBYTES_0)) => Some(Vec::new()),
+        _ => None,
+    }
+}
+
+fn first_op_return_push_hex(block: &Block) -> Option<String> {
+    for tx in &block.txdata {
+        for out in &tx.output {
+            if let Some(bytes) = op_return_first_pushdata(out.script_pubkey.as_script()) {
+                return Some(hex::encode(bytes));
+            }
+        }
+    }
+    None
+}
+
 impl Parser for NoopParser {
     fn parse_block(&self, height: u64, block: &Block) {
-        log::info!("🧱 block={} 🧾 txs={}", height, block.txdata.len());
+        let opret = first_op_return_push_hex(block).unwrap_or_else(|| "-".to_string());
+        log::info!("🧱 block={} 🧾 txs={} 🔹 opret={}", height, block.txdata.len(), opret);
     }
 }
 
@@ -133,5 +158,42 @@ mod tests {
             .push_opcode(opcodes::OP_PUSHBYTES_0)
             .into_script();
         assert!(parse_register_output0(s.as_script()).is_none());
+    }
+
+    #[test]
+    fn op_return_first_pushdata_happy_path() {
+        let s = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_RETURN)
+            .push_slice([1u8, 2, 3])
+            .into_script();
+        let out = op_return_first_pushdata(s.as_script()).unwrap();
+        assert_eq!(out, vec![1u8, 2, 3]);
+    }
+
+    #[test]
+    fn op_return_first_pushdata_empty_push() {
+        let s = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_RETURN)
+            .push_opcode(opcodes::OP_PUSHBYTES_0)
+            .into_script();
+        let out = op_return_first_pushdata(s.as_script()).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn op_return_first_pushdata_no_op_return() {
+        let s = ScriptBuf::builder()
+            .push_slice([1u8, 2, 3])
+            .into_script();
+        assert!(op_return_first_pushdata(s.as_script()).is_none());
+    }
+
+    #[test]
+    fn op_return_first_pushdata_non_push_after_op_return() {
+        let s = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_RETURN)
+            .push_opcode(opcodes::OP_DROP)
+            .into_script();
+        assert!(op_return_first_pushdata(s.as_script()).is_none());
     }
 }
