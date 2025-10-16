@@ -1,322 +1,55 @@
-use crate::types::{CollectionAddress, RegisterCollectionPayload, REGISTER_COLLECTION_FLAG};
+use crate::types::{Brc721Command, BRC721_CODE};
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::Block;
-use bitcoin::Script;
 use bitcoin::Transaction;
 use bitcoin::TxOut;
+
+mod create_collection;
 
 pub struct Parser;
 
 impl Parser {
-    pub fn parse_block(&self, height: u64, block: &Block) {
+    pub fn parse_block(&self, block: &Block) {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let out = match get_op_return_output(tx) {
+            let output = match get_op_return_output(tx) {
                 Some(val) => val,
                 None => continue,
             };
 
-            log::debug!("🧾 tx[{}]🔹opret={:?}", tx_index, out);
-            if let Some(register_collection_payload) = parse_register_output0(out) {
-                let addr_hex = hex::encode(register_collection_payload.collection_address);
-                log::info!(
-                    "✨ create-collection: height={} tx_index={} addr={} rebaseable={}",
-                    height,
-                    tx_index,
-                    addr_hex,
-                    register_collection_payload.rebaseable
-                );
+            let script = &output.script_pubkey;
+
+            log::debug!("🧾 tx[{}]🔹opret={:?}", tx_index, script);
+
+            let bytes = output.script_pubkey.clone().into_bytes();
+            if bytes.len() < 3 {
+                return;
+            }
+
+            if bytes[0] != opcodes::OP_RETURN.to_u8() {
+                return;
+            };
+            if bytes[1] != BRC721_CODE {
+                return;
+            };
+
+            let command = match Brc721Command::try_from(bytes[2]) {
+                Ok(cmd) => cmd,
+                Err(_) => return,
+            };
+
+            match command {
+                Brc721Command::CreateCollection => create_collection::digest(&script),
             }
         }
     }
 }
 
-/// A normalized script item after OP_RETURN: either an opcode (as u8) or raw push bytes.
-#[derive(Debug, PartialEq, Eq)]
-pub enum OpItem {
-    Op(u8),
-    Push(Vec<u8>),
-}
-
-/// Returns a normalized list of items that follow OP_RETURN in the script.
-/// Returns None if the script does not start with OP_RETURN.
 pub fn get_op_return_output(tx: &Transaction) -> Option<&TxOut> {
     let out0 = tx.output.first()?;
     let mut it = out0.script_pubkey.instructions();
     match it.next()? {
         Ok(Instruction::Op(opcodes::OP_RETURN)) => Some(out0),
         _ => None,
-    }
-}
-
-pub fn op_return_items(script: &Script) -> Option<Vec<OpItem>> {
-    let mut it = script.instructions();
-    match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
-        _ => return None,
-    }
-    let mut out = Vec::new();
-    for instr in it {
-        match instr.ok()? {
-            Instruction::Op(op) => out.push(OpItem::Op(op.to_u8())),
-            Instruction::PushBytes(b) => out.push(OpItem::Push(b.as_bytes().to_vec())),
-        }
-    }
-    Some(out)
-}
-
-/// Parse a register output TxOut that contains the OP_RETURN payload for a create-collection.
-/// Accepts the TxOut and returns (20-byte addr, rebaseable).
-pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<RegisterCollectionPayload> {
-    let script = out.script_pubkey.as_script();
-    let items = op_return_items(script)?;
-    if items.len() != 4 {
-        return None;
-    }
-    println!("{}", script);
-    match (&items[0], &items[1], &items[2], &items[3]) {
-        (OpItem::Op(op), flag, OpItem::Push(addr), reb)
-            if *op == opcodes::OP_PUSHNUM_15.to_u8() =>
-        {
-            let flag_is_zero = match flag {
-                OpItem::Op(op) => *op == REGISTER_COLLECTION_FLAG,
-                OpItem::Push(b) => b.is_empty() || (b.len() == 1 && b[0] == 0),
-            };
-            if !flag_is_zero || addr.len() != 20 {
-                return None;
-            }
-            let collection_address = CollectionAddress::from_slice(&addr[..]);
-            let rebaseable = match reb {
-                OpItem::Op(op) if *op == opcodes::OP_PUSHBYTES_0.to_u8() => false,
-                OpItem::Op(op) if *op == opcodes::OP_PUSHBYTES_1.to_u8() => true,
-                OpItem::Push(b) => b.len() == 1 && b[0] != 0,
-                _ => return None,
-            };
-            Some(RegisterCollectionPayload {
-                collection_address,
-                rebaseable,
-            })
-        }
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bitcoin::ScriptBuf;
-    use std::str::FromStr;
-
-    fn script_with(flag: u8, address: CollectionAddress, reb: bool) -> ScriptBuf {
-        let mut b = ScriptBuf::builder();
-        b = b.push_opcode(opcodes::OP_RETURN);
-        b = b.push_opcode(opcodes::OP_PUSHNUM_15);
-        if flag == 0 {
-            b = b.push_opcode(opcodes::OP_PUSHBYTES_0);
-        } else if flag == 1 {
-            b = b.push_opcode(opcodes::OP_PUSHNUM_1);
-        } else {
-            b = b.push_slice([flag]);
-        }
-        b = b.push_slice(address.to_fixed_bytes());
-        if reb {
-            b = b.push_opcode(opcodes::OP_PUSHBYTES_1);
-        } else {
-            b = b.push_opcode(opcodes::OP_PUSHBYTES_0);
-        }
-        b.into_script()
-    }
-
-    #[test]
-    fn parse_register_output0_happy_path() {
-        let address = CollectionAddress::from_slice(&[0u8; 20]);
-        let s = script_with(REGISTER_COLLECTION_FLAG, address, true);
-        let txout = bitcoin::TxOut {
-            value: bitcoin::Amount::from_sat(0),
-            script_pubkey: s,
-        };
-        let r = parse_register_output0(&txout);
-        assert!(r.is_some());
-        let payload = r.unwrap();
-        assert_eq!(payload.collection_address, address);
-        assert!(payload.rebaseable);
-    }
-
-    #[test]
-    fn parse_register_output0_requires_op_return() {
-        let s = ScriptBuf::builder()
-            .push_opcode(opcodes::OP_PUSHNUM_15)
-            .push_opcode(opcodes::OP_PUSHBYTES_0)
-            .push_slice([0u8; 20])
-            .push_opcode(opcodes::OP_PUSHBYTES_0)
-            .into_script();
-        let txout = bitcoin::TxOut {
-            value: bitcoin::Amount::from_sat(0),
-            script_pubkey: s,
-        };
-        assert!(parse_register_output0(&txout).is_none());
-    }
-
-    #[test]
-    fn parse_register_output0_requires_flag_zero() {
-        let address = CollectionAddress::from_slice(&[0u8; 20]);
-        let s = script_with(1, address, false);
-        let txout = bitcoin::TxOut {
-            value: bitcoin::Amount::from_sat(0),
-            script_pubkey: s,
-        };
-        assert!(parse_register_output0(&txout).is_none());
-    }
-
-    #[test]
-    fn parse_register_output0_requires_20b_address() {
-        let s = ScriptBuf::builder()
-            .push_opcode(opcodes::OP_RETURN)
-            .push_opcode(opcodes::OP_PUSHNUM_15)
-            .push_opcode(opcodes::OP_PUSHBYTES_0)
-            .push_slice([0u8; 19])
-            .push_opcode(opcodes::OP_PUSHBYTES_0)
-            .into_script();
-        let txout = bitcoin::TxOut {
-            value: bitcoin::Amount::from_sat(0),
-            script_pubkey: s,
-        };
-        assert!(parse_register_output0(&txout).is_none());
-    }
-
-    #[test]
-    fn op_return_items_parses_sequence() {
-        let s = ScriptBuf::builder()
-            .push_opcode(opcodes::OP_RETURN)
-            .push_opcode(opcodes::OP_PUSHNUM_1)
-            .push_slice([0xAA, 0xBB])
-            .push_opcode(opcodes::OP_DROP)
-            .into_script();
-        let items = op_return_items(s.as_script()).unwrap();
-        assert_eq!(items.len(), 3);
-        assert_eq!(items[0], OpItem::Op(opcodes::OP_PUSHNUM_1.to_u8()));
-        assert_eq!(items[1], OpItem::Push(vec![0xAA, 0xBB]));
-        assert_eq!(items[2], OpItem::Op(opcodes::OP_DROP.to_u8()));
-    }
-
-    #[test]
-    fn get_op_return_output_on_vout0_returns_some() {
-        use bitcoin::{OutPoint, Sequence, TxIn};
-        let tx = bitcoin::Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::null(),
-                script_sig: ScriptBuf::new(),
-                sequence: Sequence::MAX,
-                witness: bitcoin::Witness::default(),
-            }],
-            output: vec![bitcoin::TxOut {
-                value: bitcoin::Amount::from_sat(0),
-                script_pubkey: ScriptBuf::builder()
-                    .push_opcode(opcodes::OP_RETURN)
-                    .push_opcode(opcodes::OP_PUSHBYTES_0)
-                    .into_script(),
-            }],
-        };
-        let out = get_op_return_output(&tx);
-        assert!(out.is_some());
-    }
-
-    #[test]
-    fn get_op_return_output_non_op_return_returns_none() {
-        use bitcoin::{OutPoint, Sequence, TxIn};
-        let tx = bitcoin::Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::null(),
-                script_sig: ScriptBuf::new(),
-                sequence: Sequence::MAX,
-                witness: bitcoin::Witness::default(),
-            }],
-            output: vec![bitcoin::TxOut {
-                value: bitcoin::Amount::from_sat(0),
-                script_pubkey: ScriptBuf::new(),
-            }],
-        };
-        let out = get_op_return_output(&tx);
-        assert!(out.is_none());
-    }
-
-    #[test]
-    fn get_op_return_output_empty_outputs_returns_none() {
-        use bitcoin::{OutPoint, Sequence, TxIn};
-        let tx = bitcoin::Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::null(),
-                script_sig: ScriptBuf::new(),
-                sequence: Sequence::MAX,
-                witness: bitcoin::Witness::default(),
-            }],
-            output: vec![],
-        };
-        let out = get_op_return_output(&tx);
-        assert!(out.is_none());
-    }
-
-    #[test]
-    fn test_script() {
-        let address =
-            CollectionAddress::from_str("0xffff0123ffffffffffffffffffffffff3210ffff").unwrap();
-
-        let script = script_with(0, address, false);
-        assert_eq!(
-            hex::encode(script.as_bytes()),
-            "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff00"
-        );
-
-        let script = script_with(0, address, true);
-        assert_eq!(
-            hex::encode(script.as_bytes()),
-            "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff01"
-        );
-    }
-
-    #[test]
-    fn test_parse_register_collection_no_rebaseable() {
-        let txout = bitcoin::TxOut {
-            value: bitcoin::Amount::from_sat(0),
-            script_pubkey: ScriptBuf::from_hex(
-                "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff00",
-            )
-            .unwrap(),
-        };
-
-        let r = parse_register_output0(&txout);
-        assert!(r.is_some());
-        let register_collection = r.unwrap();
-        assert_eq!(
-            register_collection.collection_address,
-            CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
-        );
-        assert!(!register_collection.rebaseable)
-    }
-
-    #[test]
-    fn test_parse_register_collection_rebaseable() {
-        let txout = bitcoin::TxOut {
-            value: bitcoin::Amount::from_sat(0),
-            script_pubkey: ScriptBuf::from_hex(
-                "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff01",
-            )
-            .unwrap(),
-        };
-
-        let r = parse_register_output0(&txout);
-        assert!(r.is_some());
-        let register_collection = r.unwrap();
-        assert_eq!(
-            register_collection.collection_address,
-            CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
-        );
-        assert!(register_collection.rebaseable)
     }
 }
