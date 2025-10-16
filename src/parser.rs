@@ -72,6 +72,7 @@ pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<([u8; 20], bool)> 
     if items.len() != 4 {
         return None;
     }
+    println!("{}", script);
     match (&items[0], &items[1], &items[2], &items[3]) {
         (OpItem::Op(op), flag, OpItem::Push(addr), reb)
             if *op == opcodes::OP_PUSHNUM_15.to_u8() =>
@@ -257,4 +258,31 @@ mod tests {
         let out = get_op_return_output(&tx);
         assert!(out.is_none());
     }
+
+    #[test]
+    fn test_script_with_flag_0_reb_false_hex() {
+        let laos = [0x11; 20]; // 20 bytes of 0x11
+        let address = hex::decode("0x0123456789abcdef0123456789abcdef01234567").unwrap();
+
+        let script = script_with(0, address, false);
+
+        let result_hex = hex::encode(script.as_bytes());
+
+        assert_eq!(
+            result_hex,
+            "6a5f0014111111111111111111111111111111111111111100"
+        );
+    }
+
+    // #[test]
+    // fn register_collection_decode_ignores_extra_bytes() {
+    //     let script = ScriptBuf::from_bytes(
+    //         hex::decode("6a5f000123456789abcdef0123456789abcdef0123456701").unwrap(),
+    //     );
+    //     let txout = bitcoin::TxOut {
+    //         value: bitcoin::Amount::from_sat(0),
+    //         script_pubkey: script,
+    //     };
+    //     assert!(parse_register_output0(&txout).is_some());
+    // }
 }
