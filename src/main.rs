@@ -5,6 +5,7 @@ mod core;
 mod parser;
 mod scanner;
 mod storage;
+mod types;
 
 fn main() {
     let cli = cli::parse();
