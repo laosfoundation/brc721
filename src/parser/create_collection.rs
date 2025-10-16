@@ -10,7 +10,7 @@ pub fn digest(script: &ScriptBuf) {
 fn parse(script: &ScriptBuf) -> Option<RegisterCollectionPayload> {
     let bytes = script.clone().into_bytes();
 
-    if bytes.len() < 1 + 1 + 1 + 1 + 20 + 1 {
+    if bytes.len() < 1 + 1 + 1 + 20 + 1 {
         return None;
     }
 
@@ -26,32 +26,15 @@ fn parse(script: &ScriptBuf) -> Option<RegisterCollectionPayload> {
         return None;
     }
 
-    let mut idx = 3;
+    let addr_bytes = &bytes[3..23];
+    let collection_address = CollectionAddress::from_slice(addr_bytes);
 
-    if bytes[idx] != 0x14 {
-        return None;
-    }
-    idx += 1;
-
-    if idx + 20 > bytes.len() {
-        return None;
-    }
-
-    let addr_bytes = &bytes[idx..idx + 20];
-    idx += 20;
-
-    if idx >= bytes.len() {
-        return None;
-    }
-
-    let rebase_flag = bytes[idx];
+    let rebase_flag = bytes[23];
     let rebaseable = match rebase_flag {
         0 => false,
         1 => true,
         _ => return None,
     };
-
-    let collection_address = CollectionAddress::from_slice(addr_bytes);
 
     Some(RegisterCollectionPayload {
         collection_address,
@@ -68,7 +51,7 @@ mod tests {
     #[test]
     fn test_parse_register_collection_no_rebaseable() {
         let script =
-            ScriptBuf::from_hex("6a5f0014ffff0123ffffffffffffffffffffffff3210ffff00").unwrap();
+            ScriptBuf::from_hex("6a5f00ffff0123ffffffffffffffffffffffff3210ffff00").unwrap();
 
         let r = parse(&script);
         assert!(r.is_some());
@@ -83,7 +66,7 @@ mod tests {
     #[test]
     fn test_parse_register_collection_rebaseable() {
         let script =
-            ScriptBuf::from_hex("6a5f0014ffff0123ffffffffffffffffffffffff3210ffff01").unwrap();
+            ScriptBuf::from_hex("6a5f00ffff0123ffffffffffffffffffffffff3210ffff01").unwrap();
 
         let r = parse(&script);
         assert!(r.is_some());

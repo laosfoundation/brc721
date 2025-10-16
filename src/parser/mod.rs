@@ -7,6 +7,28 @@ use bitcoin::TxOut;
 
 mod create_collection;
 
+use thiserror::Error;
+
+/// Custom error type for errors related to bitcoin script operations.
+#[derive(Debug, Error, PartialEq)]
+pub enum Brc721Error {
+    /// An instruction of the expected type was not found in the script.
+    #[error("Instruction not found: `{0}`")]
+    InstructionNotFound(String),
+
+    /// An unexpected instruction was encountered during decoding.
+    #[error("Unexpected instruction")]
+    UnexpectedInstruction,
+
+    /// The length of a push operation in the script does not match the expected size.
+    #[error("Invalid length: `{0}`")]
+    InvalidLength(String),
+
+    /// An error occurred during decoding.
+    #[error("Decoding error: `{0}`")]
+    Decode(String),
+}
+
 // The Parser struct serves as a namespace for parsing logic
 pub struct Parser;
 
