@@ -47,7 +47,7 @@ impl Parser {
 
             // Dispatch command handler.
             match command {
-                Brc721Command::CreateCollection => create_collection::digest(&script),
+                Brc721Command::CreateCollection => create_collection::digest(script),
             }
         }
     }
