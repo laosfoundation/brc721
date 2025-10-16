@@ -6,7 +6,8 @@ use crate::types::{Brc721Command, CollectionAddress, RegisterCollectionPayload, 
 use super::Brc721Error;
 
 pub fn digest(script: &ScriptBuf) -> Result<(), Brc721Error> {
-    parse(script)?;
+    let payload = parse(script)?;
+    todo!("print register collection payload");
     Ok(())
 }
 

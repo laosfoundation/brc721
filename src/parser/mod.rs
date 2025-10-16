@@ -51,7 +51,7 @@ impl Parser {
 
             let command = match Brc721Command::try_from(bytes[2]) {
                 Ok(cmd) => cmd,
-                Err(_) => return,
+                Err(_) => return, // TODO add a warning
             };
 
             let result = match command {
