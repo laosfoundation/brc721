@@ -88,7 +88,7 @@ pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<RegisterCollection
             let collection_address = CollectionAddress::from_slice(&addr[..]);
             let rebaseable = match reb {
                 OpItem::Op(op) if *op == opcodes::OP_PUSHBYTES_0.to_u8() => false,
-                OpItem::Op(op) if *op == opcodes::OP_PUSHNUM_1.to_u8() => true,
+                OpItem::Op(op) if *op == opcodes::OP_PUSHBYTES_1.to_u8() => true,
                 OpItem::Push(b) => b.len() == 1 && b[0] != 0,
                 _ => return None,
             };
@@ -120,7 +120,7 @@ mod tests {
         }
         b = b.push_slice(address.to_fixed_bytes());
         if reb {
-            b = b.push_opcode(opcodes::OP_PUSHNUM_1);
+            b = b.push_opcode(opcodes::OP_PUSHBYTES_1);
         } else {
             b = b.push_opcode(opcodes::OP_PUSHBYTES_0);
         }
@@ -263,29 +263,60 @@ mod tests {
     }
 
     #[test]
-    fn test_script_with_flag_0_reb_false_hex() {
+    fn test_script() {
         let address =
             CollectionAddress::from_str("0xffff0123ffffffffffffffffffffffff3210ffff").unwrap();
 
         let script = script_with(0, address, false);
-
-        let result_hex = hex::encode(script.as_bytes());
-
         assert_eq!(
-            result_hex,
+            hex::encode(script.as_bytes()),
             "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff00"
+        );
+
+        let script = script_with(0, address, true);
+        assert_eq!(
+            hex::encode(script.as_bytes()),
+            "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff01"
         );
     }
 
-    // #[test]
-    // fn register_collection_decode_ignores_extra_bytes() {
-    //     let script = ScriptBuf::from_bytes(
-    //         hex::decode("6a5f000123456789abcdef0123456789abcdef0123456701").unwrap(),
-    //     );
-    //     let txout = bitcoin::TxOut {
-    //         value: bitcoin::Amount::from_sat(0),
-    //         script_pubkey: script,
-    //     };
-    //     assert!(parse_register_output0(&txout).is_some());
-    // }
+    #[test]
+    fn test_parse_register_collection_no_rebaseable() {
+        let txout = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(0),
+            script_pubkey: ScriptBuf::from_hex(
+                "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff00",
+            )
+            .unwrap(),
+        };
+
+        let r = parse_register_output0(&txout);
+        assert!(r.is_some());
+        let register_collection = r.unwrap();
+        assert_eq!(
+            register_collection.collection_address,
+            CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
+        );
+        assert!(!register_collection.rebaseable)
+    }
+
+    #[test]
+    fn test_parse_register_collection_rebaseable() {
+        let txout = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(0),
+            script_pubkey: ScriptBuf::from_hex(
+                "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff01",
+            )
+            .unwrap(),
+        };
+
+        let r = parse_register_output0(&txout);
+        assert!(r.is_some());
+        let register_collection = r.unwrap();
+        assert_eq!(
+            register_collection.collection_address,
+            CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
+        );
+        assert!(register_collection.rebaseable)
+    }
 }
