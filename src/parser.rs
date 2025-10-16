@@ -1,3 +1,4 @@
+use crate::types::{CollectionAddress, RegisterCollectionPayload, REGISTER_COLLECTION_FLAG};
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::Block;
@@ -16,14 +17,14 @@ impl Parser {
             };
 
             log::debug!("🧾 tx[{}]🔹opret={:?}", tx_index, out);
-            if let Some((laos, rebaseable)) = parse_register_output0(out) {
-                let addr_hex = hex::encode(laos);
+            if let Some(register_collection_payload) = parse_register_output0(out) {
+                let addr_hex = hex::encode(register_collection_payload.collection_address);
                 log::info!(
                     "✨ create-collection: height={} tx_index={} addr={} rebaseable={}",
                     height,
                     tx_index,
                     addr_hex,
-                    rebaseable
+                    register_collection_payload.rebaseable
                 );
             }
         }
@@ -66,7 +67,7 @@ pub fn op_return_items(script: &Script) -> Option<Vec<OpItem>> {
 
 /// Parse a register output TxOut that contains the OP_RETURN payload for a create-collection.
 /// Accepts the TxOut and returns (20-byte addr, rebaseable).
-pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<([u8; 20], bool)> {
+pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<RegisterCollectionPayload> {
     let script = out.script_pubkey.as_script();
     let items = op_return_items(script)?;
     if items.len() != 4 {
@@ -78,21 +79,23 @@ pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<([u8; 20], bool)> 
             if *op == opcodes::OP_PUSHNUM_15.to_u8() =>
         {
             let flag_is_zero = match flag {
-                OpItem::Op(op) => *op == opcodes::OP_PUSHBYTES_0.to_u8(),
+                OpItem::Op(op) => *op == REGISTER_COLLECTION_FLAG,
                 OpItem::Push(b) => b.is_empty() || (b.len() == 1 && b[0] == 0),
             };
             if !flag_is_zero || addr.len() != 20 {
                 return None;
             }
-            let mut laos_bytes = [0u8; 20];
-            laos_bytes.copy_from_slice(&addr[..]);
+            let collection_address = CollectionAddress::from_slice(&addr[..]);
             let rebaseable = match reb {
                 OpItem::Op(op) if *op == opcodes::OP_PUSHBYTES_0.to_u8() => false,
                 OpItem::Op(op) if *op == opcodes::OP_PUSHNUM_1.to_u8() => true,
                 OpItem::Push(b) => b.len() == 1 && b[0] != 0,
                 _ => return None,
             };
-            Some((laos_bytes, rebaseable))
+            Some(RegisterCollectionPayload {
+                collection_address,
+                rebaseable,
+            })
         }
         _ => None,
     }
@@ -102,8 +105,9 @@ pub fn parse_register_output0(out: &bitcoin::TxOut) -> Option<([u8; 20], bool)> 
 mod tests {
     use super::*;
     use bitcoin::ScriptBuf;
+    use std::str::FromStr;
 
-    fn script_with(flag: u8, laos: [u8; 20], reb: bool) -> ScriptBuf {
+    fn script_with(flag: u8, address: CollectionAddress, reb: bool) -> ScriptBuf {
         let mut b = ScriptBuf::builder();
         b = b.push_opcode(opcodes::OP_RETURN);
         b = b.push_opcode(opcodes::OP_PUSHNUM_15);
@@ -114,7 +118,7 @@ mod tests {
         } else {
             b = b.push_slice([flag]);
         }
-        b = b.push_slice(laos);
+        b = b.push_slice(address.to_fixed_bytes());
         if reb {
             b = b.push_opcode(opcodes::OP_PUSHNUM_1);
         } else {
@@ -125,19 +129,17 @@ mod tests {
 
     #[test]
     fn parse_register_output0_happy_path() {
-        let mut laos = [0u8; 20];
-        laos[0] = 0xaa;
-        laos[19] = 0x55;
-        let s = script_with(0, laos, true);
+        let address = CollectionAddress::from_slice(&[0u8; 20]);
+        let s = script_with(REGISTER_COLLECTION_FLAG, address, true);
         let txout = bitcoin::TxOut {
             value: bitcoin::Amount::from_sat(0),
             script_pubkey: s,
         };
         let r = parse_register_output0(&txout);
         assert!(r.is_some());
-        let (addr, rebaseable) = r.unwrap();
-        assert_eq!(addr, laos);
-        assert!(rebaseable);
+        let payload = r.unwrap();
+        assert_eq!(payload.collection_address, address);
+        assert!(payload.rebaseable);
     }
 
     #[test]
@@ -157,7 +159,8 @@ mod tests {
 
     #[test]
     fn parse_register_output0_requires_flag_zero() {
-        let s = script_with(1, [0u8; 20], false);
+        let address = CollectionAddress::from_slice(&[0u8; 20]);
+        let s = script_with(1, address, false);
         let txout = bitcoin::TxOut {
             value: bitcoin::Amount::from_sat(0),
             script_pubkey: s,
@@ -261,8 +264,8 @@ mod tests {
 
     #[test]
     fn test_script_with_flag_0_reb_false_hex() {
-        let laos = [0x11; 20]; // 20 bytes of 0x11
-        let address = hex::decode("0x0123456789abcdef0123456789abcdef01234567").unwrap();
+        let address =
+            CollectionAddress::from_str("0xffff0123ffffffffffffffffffffffff3210ffff").unwrap();
 
         let script = script_with(0, address, false);
 
@@ -270,7 +273,7 @@ mod tests {
 
         assert_eq!(
             result_hex,
-            "6a5f0014111111111111111111111111111111111111111100"
+            "6a5f0014ffff0123ffffffffffffffffffffffff3210ffff00"
         );
     }
 
