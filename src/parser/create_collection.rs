@@ -62,9 +62,7 @@ mod tests {
         let script =
             ScriptBuf::from_hex("6a5f00ffff0123ffffffffffffffffffffffff3210ffff00").unwrap();
 
-        let r = parse(&script);
-        assert!(r.is_ok());
-        let register_collection = r.unwrap();
+        let register_collection = parse(&script).unwrap();
         assert_eq!(
             register_collection.collection_address,
             CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
@@ -77,9 +75,7 @@ mod tests {
         let script =
             ScriptBuf::from_hex("6a5f00ffff0123ffffffffffffffffffffffff3210ffff01").unwrap();
 
-        let r = parse(&script);
-        assert!(r.is_ok());
-        let register_collection = r.unwrap();
+        let register_collection = parse(&script).unwrap();
         assert_eq!(
             register_collection.collection_address,
             CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
