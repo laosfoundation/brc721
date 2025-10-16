@@ -3,27 +3,36 @@ use bitcoin::ScriptBuf;
 
 use crate::types::{Brc721Command, CollectionAddress, RegisterCollectionPayload, BRC721_CODE};
 
-pub fn digest(script: &ScriptBuf) {
-    parse(script);
+use super::Brc721Error;
+
+pub fn digest(script: &ScriptBuf) -> Result<(), Brc721Error> {
+    parse(script)?;
+    Ok(())
 }
 
-fn parse(script: &ScriptBuf) -> Option<RegisterCollectionPayload> {
+fn parse(script: &ScriptBuf) -> Result<RegisterCollectionPayload, Brc721Error> {
     let bytes = script.clone().into_bytes();
 
     if bytes.len() < 1 + 1 + 1 + 20 + 1 {
-        return None;
+        return Err(Brc721Error::ScriptTooShort);
     }
 
     if bytes[0] != opcodes::OP_RETURN.to_u8() {
-        return None;
+        return Err(Brc721Error::NotOpReturn);
     }
 
     if bytes[1] != BRC721_CODE {
-        return None;
+        return Err(Brc721Error::WrongProtocolCode {
+            expected: BRC721_CODE,
+            found: bytes[1],
+        });
     }
 
     if bytes[2] != Brc721Command::CreateCollection as u8 {
-        return None;
+        return Err(Brc721Error::WrongCommand {
+            expected: Brc721Command::CreateCollection as u8,
+            found: bytes[2],
+        });
     }
 
     let addr_bytes = &bytes[3..23];
@@ -33,10 +42,10 @@ fn parse(script: &ScriptBuf) -> Option<RegisterCollectionPayload> {
     let rebaseable = match rebase_flag {
         0 => false,
         1 => true,
-        _ => return None,
+        other => return Err(Brc721Error::InvalidRebaseFlag(other)),
     };
 
-    Some(RegisterCollectionPayload {
+    Ok(RegisterCollectionPayload {
         collection_address,
         rebaseable,
     })
@@ -54,7 +63,7 @@ mod tests {
             ScriptBuf::from_hex("6a5f00ffff0123ffffffffffffffffffffffff3210ffff00").unwrap();
 
         let r = parse(&script);
-        assert!(r.is_some());
+        assert!(r.is_ok());
         let register_collection = r.unwrap();
         assert_eq!(
             register_collection.collection_address,
@@ -69,7 +78,7 @@ mod tests {
             ScriptBuf::from_hex("6a5f00ffff0123ffffffffffffffffffffffff3210ffff01").unwrap();
 
         let r = parse(&script);
-        assert!(r.is_some());
+        assert!(r.is_ok());
         let register_collection = r.unwrap();
         assert_eq!(
             register_collection.collection_address,
