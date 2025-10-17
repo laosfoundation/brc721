@@ -23,7 +23,7 @@ pub struct Parser;
 
 impl Parser {
     pub fn parse_block(&self, block: &Block) -> Result<(), Brc721Error> {
-        for (_, tx) in block.txdata.iter().enumerate() {
+        for tx in block.txdata.iter() {
             let output = match get_first_output_if_op_return(tx) {
                 Some(output) => output,
                 None => continue,
@@ -53,8 +53,8 @@ fn get_brc721_tx(output: &TxOut) -> Option<&[u8]> {
         _ => return None,
     }
     match it.next()? {
-        Ok(Instruction::PushBytes(payload)) => return Some(payload.as_bytes()),
-        _ => return None,
+        Ok(Instruction::PushBytes(payload)) => Some(payload.as_bytes()),
+        _ => None,
     }
 }
 
