@@ -7,7 +7,7 @@ use super::Brc721Error;
 
 pub fn digest(script: &ScriptBuf) -> Result<(), Brc721Error> {
     let payload = parse(script)?;
-    todo!("print register collection payload");
+    log::info!("📝 RegisterCollectionPayload: {:?}", payload);
     Ok(())
 }
 

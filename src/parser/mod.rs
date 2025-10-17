@@ -48,10 +48,12 @@ impl Parser {
             if bytes[1] != BRC721_CODE {
                 return;
             };
-
             let command = match Brc721Command::try_from(bytes[2]) {
                 Ok(cmd) => cmd,
-                Err(_) => return, // TODO add a warning
+                Err(_) => {
+                    log::warn!("Failed to parse Brc721Command from byte {}", bytes[2]);
+                    return;
+                }
             };
 
             let result = match command {
