@@ -1,9 +1,10 @@
+use bitcoin::opcodes;
 use ethereum_types::H160;
 use std::convert::TryFrom;
 
 pub type CollectionAddress = H160;
 
-pub const BRC721_CODE: u8 = 0x5f;
+pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterCollectionPayload {

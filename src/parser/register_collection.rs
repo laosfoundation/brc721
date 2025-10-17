@@ -16,10 +16,7 @@ fn parse(tx: &[u8]) -> Result<RegisterCollectionPayload, Brc721Error> {
     }
 
     if bytes[0] != Brc721Command::RegisterCollection as u8 {
-        return Err(Brc721Error::WrongCommand {
-            expected: Brc721Command::RegisterCollection as u8,
-            found: bytes[2],
-        });
+        return Err(Brc721Error::WrongCommand(bytes[2]));
     }
 
     let addr_bytes = &bytes[1..21];

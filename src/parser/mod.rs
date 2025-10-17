@@ -13,12 +13,8 @@ use thiserror::Error;
 pub enum Brc721Error {
     #[error("script too short")]
     ScriptTooShort,
-    #[error("not OP_RETURN")]
-    NotOpReturn,
-    #[error("wrong protocol code: expected {expected:#x}, got {found:#x}")]
-    WrongProtocolCode { expected: u8, found: u8 },
-    #[error("wrong command: expected {expected:#x}, got {found:#x}")]
-    WrongCommand { expected: u8, found: u8 },
+    #[error("wrong command: got {0}")]
+    WrongCommand(u8),
     #[error("invalid rebase flag: {0}")]
     InvalidRebaseFlag(u8),
 }
@@ -28,60 +24,60 @@ pub struct Parser;
 impl Parser {
     pub fn parse_block(&self, block: &Block) -> Result<(), Brc721Error> {
         for (_, tx) in block.txdata.iter().enumerate() {
-            let output = get_op_return_output(tx).unwrap();
-
-            let brc721_tx = match Self::get_brc721_tx(output) {
-                Some(tx) => tx,
-                None => return Ok(()),
+            let output = match get_first_output_if_op_return(tx) {
+                Some(output) => output,
+                None => continue,
             };
 
-            if let Some(Err(ref e)) = Self::parse_brc721_tx(brc721_tx) {
+            let brc721_tx = match get_brc721_tx(output) {
+                Some(tx) => tx,
+                None => continue,
+            };
+
+            if let Some(Err(ref e)) = digest(brc721_tx) {
                 log::warn!("{:?}", e);
             }
         }
         Ok(())
     }
+}
 
-    pub fn get_brc721_tx(output: &TxOut) -> Option<&[u8]> {
-        let mut it = output.script_pubkey.instructions();
-        match it.next()? {
-            Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
-            _ => return None,
-        }
-        match it.next()? {
-            Ok(Instruction::Op(opcodes::OP_PUSHNUM_15)) => {}
-            _ => return None,
-        }
-        match it.next()? {
-            Ok(Instruction::PushBytes(payload)) => return Some(payload.as_bytes()),
-            _ => return None,
-        }
+fn get_brc721_tx(output: &TxOut) -> Option<&[u8]> {
+    let mut it = output.script_pubkey.instructions();
+    match it.next()? {
+        Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
+        _ => return None,
     }
-
-    pub fn parse_brc721_tx(tx: &[u8]) -> Option<Result<(), Brc721Error>> {
-        if tx.is_empty() {
-            return None;
-        }
-
-        let command = match Brc721Command::try_from(tx[0]) {
-            Ok(cmd) => cmd,
-            Err(_) => {
-                log::warn!("Failed to parse Brc721Command from byte {}", tx[0]);
-                return Some(Err(Brc721Error::WrongCommand {
-                    expected: 0,
-                    found: tx[0],
-                }));
-            }
-        };
-
-        let result = match command {
-            Brc721Command::RegisterCollection => register_collection::digest(tx),
-        };
-        Some(result)
+    match it.next()? {
+        Ok(Instruction::Op(BRC721_CODE)) => {}
+        _ => return None,
+    }
+    match it.next()? {
+        Ok(Instruction::PushBytes(payload)) => return Some(payload.as_bytes()),
+        _ => return None,
     }
 }
 
-pub fn get_op_return_output(tx: &Transaction) -> Option<&TxOut> {
+fn digest(tx: &[u8]) -> Option<Result<(), Brc721Error>> {
+    if tx.is_empty() {
+        return None;
+    }
+
+    let command = match Brc721Command::try_from(tx[0]) {
+        Ok(cmd) => cmd,
+        Err(_) => {
+            log::warn!("Failed to parse Brc721Command from byte {}", tx[0]);
+            return Some(Err(Brc721Error::WrongCommand(tx[0])));
+        }
+    };
+
+    let result = match command {
+        Brc721Command::RegisterCollection => register_collection::digest(tx),
+    };
+    Some(result)
+}
+
+fn get_first_output_if_op_return(tx: &Transaction) -> Option<&TxOut> {
     let out0 = tx.output.first()?;
     let mut it = out0.script_pubkey.instructions();
     match it.next()? {
