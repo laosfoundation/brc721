@@ -6,11 +6,55 @@ mod parser;
 mod scanner;
 mod storage;
 mod types;
+mod wallet;
 
 fn main() {
     let cli = cli::parse();
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    if let Some(cmd) = cli.cmd.clone() {
+        match cmd {
+            cli::Command::Wallet { cmd: wcmd } => match wcmd {
+                cli::WalletCmd::Init { network, mnemonic, passphrase } => {
+                    let net = wallet::parse_network(Some(network));
+                    let _ = std::fs::create_dir_all(&cli.data_dir);
+                    match wallet::init_wallet(&cli.data_dir, net, mnemonic, passphrase) {
+                        Ok(res) => {
+                            if res.created {
+                                if let Some(m) = res.mnemonic {
+                                    println!("initialized wallet db={} mnemonic=\"{}\"", res.db_path.display(), m);
+                                } else {
+                                    println!("initialized wallet db={}", res.db_path.display());
+                                }
+                            } else {
+                                println!("wallet already initialized db={}", res.db_path.display());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("wallet init error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    return;
+                }
+                cli::WalletCmd::Address { network } => {
+                    let net = wallet::parse_network(Some(network));
+                    let _ = std::fs::create_dir_all(&cli.data_dir);
+                    match wallet::next_address(&cli.data_dir, net) {
+                        Ok(addr) => {
+                            println!("{}", addr);
+                        }
+                        Err(e) => {
+                            eprintln!("wallet address error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    return;
+                }
+            },
+        }
+    }
 
     log::info!("🚀 Starting brc721");
     log::info!("🔗 RPC URL: {}", cli.rpc_url);
