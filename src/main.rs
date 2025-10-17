@@ -1,6 +1,7 @@
 use bitcoincore_rpc::{Auth, Client};
 use std::sync::Arc;
 mod cli;
+
 mod core;
 mod parser;
 mod scanner;
@@ -9,50 +10,15 @@ mod types;
 mod wallet;
 
 fn main() {
-    let cli = cli::parse();
-
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let cli = cli::parse();
 
     if let Some(cmd) = cli.cmd.clone() {
         match cmd {
             cli::Command::Wallet { network, cmd: wcmd } => {
                 let net = wallet::parse_network(Some(network));
-                match wcmd {
-                    cli::WalletCmd::Init { mnemonic, passphrase } => {
-                        let _ = std::fs::create_dir_all(&cli.data_dir);
-                        match wallet::init_wallet(&cli.data_dir, net, mnemonic, passphrase) {
-                            Ok(res) => {
-                                if res.created {
-                                    if let Some(m) = res.mnemonic {
-                                        println!("initialized wallet db={} mnemonic=\"{}\"", res.db_path.display(), m);
-                                    } else {
-                                        println!("initialized wallet db={}", res.db_path.display());
-                                    }
-                                } else {
-                                    println!("wallet already initialized db={}", res.db_path.display());
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("wallet init error: {}", e);
-                                std::process::exit(1);
-                            }
-                        }
-                        return;
-                    }
-                    cli::WalletCmd::Address => {
-                        let _ = std::fs::create_dir_all(&cli.data_dir);
-                        match wallet::next_address(&cli.data_dir, net) {
-                            Ok(addr) => {
-                                println!("{}", addr);
-                            }
-                            Err(e) => {
-                                eprintln!("wallet address error: {}", e);
-                                std::process::exit(1);
-                            }
-                        }
-                        return;
-                    }
-                }
+                handle_wallet_command(&cli, net, wcmd);
             }
         }
     }
@@ -107,4 +73,47 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> scanner::Scanner<Client> {
         .with_confirmations(cli.confirmations)
         .with_capacity(cli.batch_size)
         .with_start_from(start_block)
+}
+
+fn handle_wallet_command(cli: &cli::Cli, net: bitcoin::network::Network, wcmd: cli::WalletCmd) {
+    match wcmd {
+        cli::WalletCmd::Init {
+            mnemonic,
+            passphrase,
+        } => {
+            let _ = std::fs::create_dir_all(&cli.data_dir);
+            match wallet::init_wallet(&cli.data_dir, net, mnemonic, passphrase) {
+                Ok(res) => {
+                    if res.created {
+                        if let Some(m) = res.mnemonic {
+                            log::info!(
+                                "initialized wallet db={} mnemonic=\"{}\"",
+                                res.db_path.display(),
+                                m
+                            );
+                        } else {
+                            log::info!("initialized wallet db={}", res.db_path.display());
+                        }
+                    } else {
+                        log::info!("wallet already initialized db={}", res.db_path.display());
+                    }
+                }
+                Err(e) => {
+                    log::error!("wallet init error: {}", e);
+                }
+            }
+        }
+        cli::WalletCmd::Address => {
+            let _ = std::fs::create_dir_all(&cli.data_dir);
+            match wallet::next_address(&cli.data_dir, net) {
+                Ok(addr) => {
+                    log::info!("{}", addr);
+                }
+                Err(e) => {
+                    log::error!("wallet address error: {}", e);
+                }
+            }
+        }
+    }
+    std::process::exit(1);
 }
