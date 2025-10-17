@@ -28,42 +28,42 @@ pub struct Parser;
 impl Parser {
     pub fn parse_block(&self, block: &Block) {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let output = match get_op_return_output(tx) {
-                Some(val) => val,
-                None => continue,
-            };
-
-            let script = &output.script_pubkey;
-
-            log::debug!("tx[{}] opret={:?}", tx_index, script);
-
-            let bytes = output.script_pubkey.clone().into_bytes();
-            if bytes.len() < 3 {
-                return;
-            }
-
-            if bytes[0] != opcodes::OP_RETURN.to_u8() {
-                return;
-            };
-            if bytes[1] != BRC721_CODE {
-                return;
-            };
-            let command = match Brc721Command::try_from(bytes[2]) {
-                Ok(cmd) => cmd,
-                Err(_) => {
-                    log::warn!("Failed to parse Brc721Command from byte {}", bytes[2]);
-                    return;
-                }
-            };
-
-            let result = match command {
-                Brc721Command::RegisterCollection => register_collection::digest(script),
-            };
-
-            if let Err(ref e) = result {
+            if let Some(Err(ref e)) = self.parse_tx(tx, tx_index) {
                 log::warn!("{:?}", e);
             }
         }
+    }
+
+    pub fn parse_tx(&self, tx: &Transaction, tx_index: usize) -> Option<Result<(), Brc721Error>> {
+        let output = get_op_return_output(tx)?;
+        let script = &output.script_pubkey;
+        log::debug!("tx[{}] opret={:?}", tx_index, script);
+
+        let bytes = output.script_pubkey.clone().into_bytes();
+        if bytes.len() < 3 {
+            return None;
+        }
+        if bytes[0] != opcodes::OP_RETURN.to_u8() {
+            return None;
+        }
+        if bytes[1] != BRC721_CODE {
+            return None;
+        }
+        let command = match Brc721Command::try_from(bytes[2]) {
+            Ok(cmd) => cmd,
+            Err(_) => {
+                log::warn!("Failed to parse Brc721Command from byte {}", bytes[2]);
+                return Some(Err(Brc721Error::WrongCommand {
+                    expected: 0,
+                    found: bytes[2],
+                }));
+            }
+        };
+
+        let result = match command {
+            Brc721Command::RegisterCollection => register_collection::digest(script),
+        };
+        Some(result)
     }
 }
 
