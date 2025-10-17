@@ -94,15 +94,35 @@ pub enum Command {
 #[derive(Subcommand, Debug, Clone)]
 pub enum WalletCmd {
     Init {
-        #[arg(long, value_name = "NETWORK", help = "bitcoin|testnet|signet|regtest", default_value = "regtest")]
+        #[arg(
+            long,
+            value_name = "NETWORK",
+            help = "bitcoin|testnet|signet|regtest",
+            default_value = "bitcoin"
+        )]
         network: String,
-        #[arg(long, value_name = "MNEMONIC", help = "Existing 12-24 words mnemonic", required = false)]
+        #[arg(
+            long,
+            value_name = "MNEMONIC",
+            help = "Existing 12-24 words mnemonic",
+            required = false
+        )]
         mnemonic: Option<String>,
-        #[arg(long, value_name = "PASSPHRASE", help = "Optional BIP39 passphrase", required = false)]
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Optional BIP39 passphrase",
+            required = false
+        )]
         passphrase: Option<String>,
     },
     Address {
-        #[arg(long, value_name = "NETWORK", help = "bitcoin|testnet|signet|regtest", default_value = "regtest")]
+        #[arg(
+            long,
+            value_name = "NETWORK",
+            help = "bitcoin|testnet|signet|regtest",
+            default_value = "regtest"
+        )]
         network: String,
     },
 }
