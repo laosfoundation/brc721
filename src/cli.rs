@@ -86,6 +86,13 @@ pub struct Cli {
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
     Wallet {
+        #[arg(
+            long,
+            value_name = "NETWORK",
+            help = "bitcoin|testnet|signet|regtest",
+            default_value = "bitcoin"
+        )]
+        network: String,
         #[command(subcommand)]
         cmd: WalletCmd,
     },
@@ -94,13 +101,6 @@ pub enum Command {
 #[derive(Subcommand, Debug, Clone)]
 pub enum WalletCmd {
     Init {
-        #[arg(
-            long,
-            value_name = "NETWORK",
-            help = "bitcoin|testnet|signet|regtest",
-            default_value = "bitcoin"
-        )]
-        network: String,
         #[arg(
             long,
             value_name = "MNEMONIC",
@@ -116,15 +116,7 @@ pub enum WalletCmd {
         )]
         passphrase: Option<String>,
     },
-    Address {
-        #[arg(
-            long,
-            value_name = "NETWORK",
-            help = "bitcoin|testnet|signet|regtest",
-            default_value = "regtest"
-        )]
-        network: String,
-    },
+    Address,
 }
 
 pub fn parse() -> Cli {
