@@ -19,6 +19,7 @@ fn main() {
             cli::Command::Wallet { network, cmd: wcmd } => {
                 let net = wallet::parse_network(Some(network));
                 handle_wallet_command(&cli, net, wcmd);
+                return;
             }
         }
     }
@@ -115,5 +116,4 @@ fn handle_wallet_command(cli: &cli::Cli, net: bitcoin::network::Network, wcmd: c
             }
         }
     }
-    std::process::exit(1);
 }
