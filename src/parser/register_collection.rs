@@ -29,9 +29,9 @@ fn parse(script: &ScriptBuf) -> Result<RegisterCollectionPayload, Brc721Error> {
         });
     }
 
-    if bytes[2] != Brc721Command::CreateCollection as u8 {
+    if bytes[2] != Brc721Command::RegisterCollection as u8 {
         return Err(Brc721Error::WrongCommand {
-            expected: Brc721Command::CreateCollection as u8,
+            expected: Brc721Command::RegisterCollection as u8,
             found: bytes[2],
         });
     }

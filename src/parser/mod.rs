@@ -5,7 +5,7 @@ use bitcoin::Block;
 use bitcoin::Transaction;
 use bitcoin::TxOut;
 
-mod create_collection;
+mod register_collection;
 
 use thiserror::Error;
 
@@ -57,7 +57,7 @@ impl Parser {
             };
 
             let result = match command {
-                Brc721Command::CreateCollection => create_collection::digest(script),
+                Brc721Command::RegisterCollection => register_collection::digest(script),
             };
 
             if let Err(ref e) = result {

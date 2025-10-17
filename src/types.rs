@@ -17,7 +17,7 @@ pub struct RegisterCollectionPayload {
 /// Enum representing BRC-721 commands, using `u8` as discriminants.
 #[repr(u8)]
 pub enum Brc721Command {
-    CreateCollection = 0x00,
+    RegisterCollection = 0x00,
 }
 
 impl TryFrom<u8> for Brc721Command {
@@ -25,7 +25,7 @@ impl TryFrom<u8> for Brc721Command {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0x00 => Ok(Brc721Command::CreateCollection),
+            0x00 => Ok(Brc721Command::RegisterCollection),
             _ => Err(()),
         }
     }
