@@ -117,6 +117,28 @@ pub enum WalletCmd {
         passphrase: Option<String>,
     },
     Address,
+    RegisterCollection {
+        #[arg(
+            long = "laos-hex",
+            value_name = "20-BYTE-HEX",
+            help = "20-byte hex collection address (EVM H160)",
+            required = true
+        )]
+        laos_hex: String,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Whether the collection is rebaseable"
+        )]
+        rebaseable: bool,
+        #[arg(
+            long = "fee-rate",
+            value_name = "SAT/VB",
+            required = false,
+            help = "Fee rate in sat/vB (optional)"
+        )]
+        fee_rate: Option<f64>,
+    },
 }
 
 pub fn parse() -> Cli {

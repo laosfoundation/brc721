@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic, WordCount},
     template::Bip86,
@@ -8,34 +6,8 @@ use bdk_wallet::{
 use bitcoin::Network;
 use rusqlite::Connection;
 
-pub fn wallet_db_path<P: AsRef<Path>>(data_dir: P, network: Network) -> PathBuf {
-    let mut p = PathBuf::from(data_dir.as_ref());
-    let name = format!("wallet-{}.sqlite", match network {
-        Network::Bitcoin => "mainnet",
-        Network::Testnet => "testnet",
-        Network::Signet => "signet",
-        Network::Regtest => "regtest",
-        _ => "unknown",
-    });
-    p.push(name);
-    p
-}
-
-pub fn parse_network<S: AsRef<str>>(s: Option<S>) -> Network {
-    match s.as_ref().map(|x| x.as_ref().to_lowercase()) {
-        Some(n) if n == "mainnet" || n == "bitcoin" => Network::Bitcoin,
-        Some(n) if n == "testnet" => Network::Testnet,
-        Some(n) if n == "signet" => Network::Signet,
-        Some(n) if n == "regtest" => Network::Regtest,
-        _ => Network::Regtest,
-    }
-}
-
-pub struct InitResult {
-    pub created: bool,
-    pub mnemonic: Option<Mnemonic>,
-    pub db_path: PathBuf,
-}
+use super::paths::wallet_db_path;
+use super::types::InitResult;
 
 pub fn init_wallet(
     data_dir: &str,
@@ -46,7 +18,6 @@ pub fn init_wallet(
     let db_path = wallet_db_path(data_dir, network);
     let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
 
-    // Try load first
     if let Some(_wallet) = LoadParams::new()
         .check_network(network)
         .load_wallet(&mut conn)
@@ -59,7 +30,6 @@ pub fn init_wallet(
         });
     }
 
-    // Create from supplied or generated mnemonic
     let mnemonic = match mnemonic_str {
         Some(s) => Mnemonic::parse(s).map_err(|e| format!("{}", e))?,
         None => <Mnemonic as bdk_wallet::keys::GeneratableKey<bdk_wallet::miniscript::Tap>>::generate((WordCount::Words12, Language::English))
