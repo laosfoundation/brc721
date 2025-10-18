@@ -42,7 +42,7 @@ impl Parser {
     }
 }
 
-fn get_brc721_tx(output: &TxOut) -> Option<&[u8]> {
+fn get_brc721_tx(output: &TxOut) -> Option<&Brc721Tx> {
     let mut it = output.script_pubkey.instructions();
     match it.next()? {
         Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
