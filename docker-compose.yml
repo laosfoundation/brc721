@@ -1,19 +1,29 @@
 services:
-  bitcoin-mainnet:
-    image: bitcoin/bitcoin:latest
-    container_name: bitcoind-mainnet
-    command: ["bitcoind", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
-    ports:
-      - "127.0.0.1:8332:8332"
-      - "8333:8333"
-    volumes:
-      - bitcoind-mainnet-data:/home/bitcoin/.bitcoin
-    restart: unless-stopped
+  # bitcoin-mainnet:
+  #   image: bitcoin/bitcoin:latest
+  #   container_name: bitcoind-mainnet
+  #   command: ["bitcoind", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
+  #   ports:
+  #     - "127.0.0.1:8332:8332"
+  #     - "8333:8333"
+  #   volumes:
+  #     - bitcoind-mainnet-data:/home/bitcoin/.bitcoin
+  #   restart: unless-stopped
 
   bitcoind-testnet:
     image: bitcoin/bitcoin:latest
     container_name: bitcoind-testnet
-    command: ["bitcoind", "-regtest=1", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
+    command:
+      [
+        "bitcoind",
+        "-regtest=1",
+        "-server=1",
+        "-txindex=1",
+        "-rpcbind=0.0.0.0",
+        "-rpcallowip=0.0.0.0/0",
+        "-rpcuser=dev",
+        "-rpcpassword=dev",
+      ]
     ports:
       - "127.0.0.1:18445:18445"
       - "18333:18333"
@@ -22,7 +32,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  bitcoind-mainnet-data:
-    driver: local
+  # bitcoind-mainnet-data:
+  #   driver: local
   bitcoind-testnet-data:
     driver: local

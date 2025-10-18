@@ -1,16 +1,28 @@
 use bitcoincore_rpc::{Auth, Client};
 use std::sync::Arc;
 mod cli;
+
 mod core;
 mod parser;
 mod scanner;
 mod storage;
 mod types;
+mod wallet;
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let cli = cli::parse();
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    if let Some(cmd) = cli.cmd.clone() {
+        match cmd {
+            cli::Command::Wallet { network, cmd: wcmd } => {
+                let net = wallet::parse_network(Some(network));
+                wallet::handle_wallet_command(&cli, net, wcmd);
+                return;
+            }
+        }
+    }
 
     log::info!("🚀 Starting brc721");
     log::info!("🔗 RPC URL: {}", cli.rpc_url);
