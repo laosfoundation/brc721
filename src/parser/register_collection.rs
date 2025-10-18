@@ -1,14 +1,14 @@
-use crate::types::{Brc721Command, CollectionAddress, RegisterCollectionPayload};
+use crate::types::{Brc721Command, Brc721Tx, CollectionAddress, RegisterCollectionPayload};
 
 use super::Brc721Error;
 
-pub fn digest(tx: &[u8]) -> Result<(), Brc721Error> {
+pub fn digest(tx: &Brc721Tx) -> Result<(), Brc721Error> {
     let payload = parse(tx)?;
     log::info!("📝 RegisterCollectionPayload: {:?}", payload);
     Ok(())
 }
 
-fn parse(tx: &[u8]) -> Result<RegisterCollectionPayload, Brc721Error> {
+fn parse(tx: &Brc721Tx) -> Result<RegisterCollectionPayload, Brc721Error> {
     let bytes = tx;
 
     if bytes.len() < 1 + 20 + 1 {

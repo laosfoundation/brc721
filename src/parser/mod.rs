@@ -1,4 +1,4 @@
-use crate::types::{Brc721Command, BRC721_CODE};
+use crate::types::{Brc721Command, Brc721Tx, BRC721_CODE};
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::Block;
@@ -58,7 +58,7 @@ fn get_brc721_tx(output: &TxOut) -> Option<&[u8]> {
     }
 }
 
-fn digest(tx: &[u8]) -> Option<Result<(), Brc721Error>> {
+fn digest(tx: &Brc721Tx) -> Option<Result<(), Brc721Error>> {
     if tx.is_empty() {
         return None;
     }
