@@ -130,10 +130,7 @@ mod tests {
     fn test_script_hex_starts_with_6a5f16_and_matches_expected() {
         // payload: 00 | ffff0123ffffffffffffffffffffffff3210ffff | 00
         let addr = <[u8; 20]>::from_hex("ffff0123ffffffffffffffffffffffff3210ffff").unwrap();
-        let mut payload = Vec::with_capacity(22);
-        payload.push(Brc721Command::RegisterCollection as u8);
-        payload.extend_from_slice(&addr);
-        payload.push(0x00);
+        let payload = build_payload(addr, 0x00);
         let script = script_for_payload(&payload);
         let hex = hex::encode(script.as_bytes());
         assert_eq!(hex, "6a5f1600ffff0123ffffffffffffffffffffffff3210ffff00");
