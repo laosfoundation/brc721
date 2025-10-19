@@ -14,7 +14,9 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     log::info!("🚀 Starting brc721");
+    log::info!("🔗 Network: {}", cli.network);
     log::info!("🔗 RPC URL: {}", cli.rpc_url);
+    log::info!("🔗 P2P peer: {}", cli.p2p_peer);
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", cli.confirmations);
     log::info!("📂 Data dir: {}", cli.data_dir);
@@ -63,17 +65,17 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> scanner::Scanner<Client> {
         .with_confirmations(cli.confirmations)
         .with_capacity(cli.batch_size)
         .with_start_from(start_block);
-    let magic = p2p::magic_from_network_name(&cli.p2p_network);
+    let magic = p2p::magic_from_network_name(&cli.network);
     let peer = if !cli.p2p_peer.is_empty() {
         Some(cli.p2p_peer.clone())
     } else {
-        derive_p2p_addr_from_rpc_url(&cli.rpc_url, &cli.p2p_network)
+        derive_p2p_addr_from_rpc_url(&cli.rpc_url, &cli.network)
     };
     if let Some(addr) = peer {
         match p2p::P2PFetcher::connect(&addr, magic) {
             Ok(f) => {
                 sc = sc.with_p2p(f);
-                log::info!("P2P enabled: {} ({})", addr, cli.p2p_network);
+                log::info!("P2P enabled: {} ({})", addr, cli.network);
             }
             Err(e) => {
                 log::warn!("P2P connect failed: {} - using RPC only", e);

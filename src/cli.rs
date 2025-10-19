@@ -79,7 +79,8 @@ pub struct Cli {
 
     #[arg(
         long,
-        value_name = "ADDR",
+        env = "BITCOIN_P2P_URL",
+        value_name = "URL",
         default_value = "",
         help = "Optional P2P peer address host:port to fetch blocks via P2P"
     )]
@@ -91,7 +92,7 @@ pub struct Cli {
         default_value = "mainnet",
         help = "Network for P2P magic: mainnet|testnet|signet|regtest"
     )]
-    pub p2p_network: String,
+    pub network: String,
 }
 
 pub fn parse() -> Cli {
