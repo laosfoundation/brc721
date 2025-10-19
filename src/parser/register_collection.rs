@@ -13,8 +13,8 @@ fn parse(tx: &Brc721Tx) -> Result<RegisterCollectionPayload, Brc721Error> {
         return Err(Brc721Error::ScriptTooShort);
     }
 
-    if bytes[0] != Brc721Command::RegisterCollection as u8 {
-        return Err(Brc721Error::WrongCommand(bytes[0]));
+    if tx[0] != Brc721Command::RegisterCollection as u8 {
+        return Err(Brc721Error::WrongCommand(tx[0]));
     }
 
     let collection_address = CollectionAddress::from_slice(&tx[1..21]);
