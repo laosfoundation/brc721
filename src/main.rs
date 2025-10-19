@@ -2,6 +2,7 @@ use bitcoincore_rpc::{Auth, Client};
 use std::sync::Arc;
 mod cli;
 mod core;
+mod p2p;
 mod parser;
 mod scanner;
 mod storage;
@@ -58,8 +59,53 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> scanner::Scanner<Client> {
     };
 
     let client = Client::new(&cli.rpc_url, auth).expect("failed to create RPC client");
-    scanner::Scanner::new(client)
+    let mut sc = scanner::Scanner::new(client)
         .with_confirmations(cli.confirmations)
         .with_capacity(cli.batch_size)
-        .with_start_from(start_block)
+        .with_start_from(start_block);
+    let magic = p2p::magic_from_network_name(&cli.p2p_network);
+    let peer = if !cli.p2p_peer.is_empty() {
+        Some(cli.p2p_peer.clone())
+    } else {
+        derive_p2p_addr_from_rpc_url(&cli.rpc_url, &cli.p2p_network)
+    };
+    if let Some(addr) = peer {
+        match p2p::P2PFetcher::connect(&addr, magic) {
+            Ok(f) => {
+                sc = sc.with_p2p(f);
+                log::info!("P2P enabled: {} ({})", addr, cli.p2p_network);
+            }
+            Err(e) => {
+                log::warn!("P2P connect failed: {} - using RPC only", e);
+            }
+        }
+    }
+    sc
+}
+
+fn derive_p2p_addr_from_rpc_url(rpc_url: &str, network: &str) -> Option<String> {
+    // Very small parser for forms like http://host:port or http://host
+    // Not robust to IPv6 literals without brackets; good enough for common cases
+    let s = rpc_url.trim();
+    let s = s
+        .strip_prefix("http://")
+        .or_else(|| s.strip_prefix("https://"))
+        .unwrap_or(s);
+    let host_port = s.split('/').next().unwrap_or("");
+    let host = if let Some((h, _p)) = host_port.rsplit_once('@') {
+        // strip user:pass@
+        h
+    } else {
+        host_port
+    };
+    let host = if let Some((h, _)) = host.split_once(':') {
+        h
+    } else {
+        host
+    };
+    if host.is_empty() {
+        return None;
+    }
+    let port = p2p::default_p2p_port_for_network(network);
+    Some(format!("{}:{}", host, port))
 }

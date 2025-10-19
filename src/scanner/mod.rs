@@ -1,3 +1,4 @@
+use crate::p2p::P2PFetcher;
 use bitcoin::{Block, BlockHash};
 use bitcoincore_rpc::{Client, Error as RpcError, RpcApi};
 
@@ -30,6 +31,7 @@ pub struct Scanner<C: BitcoinRpc> {
     confirmations: u64,
     current_height: u64,
     out: Vec<(u64, Block)>,
+    p2p: Option<P2PFetcher>,
 }
 
 impl<C: BitcoinRpc> Scanner<C> {
@@ -39,6 +41,7 @@ impl<C: BitcoinRpc> Scanner<C> {
             confirmations: 0,
             current_height: 0,
             out: Vec::new(),
+            p2p: None,
         }
     }
 
@@ -54,6 +57,11 @@ impl<C: BitcoinRpc> Scanner<C> {
 
     pub fn with_start_from(mut self, height: u64) -> Self {
         self.current_height = height;
+        self
+    }
+
+    pub fn with_p2p(mut self, fetcher: P2PFetcher) -> Self {
+        self.p2p = Some(fetcher);
         self
     }
 
@@ -73,39 +81,64 @@ impl<C: BitcoinRpc> Scanner<C> {
 
     fn collect_ready_blocks(&mut self) -> Result<&[(u64, Block)], RpcError> {
         self.out.clear();
-        for _ in 0..self.out.capacity() {
-            match self.next_ready_block()? {
-                Some((height, block)) => {
-                    self.out.push((height, block));
-                }
-                None => break,
-            }
-        }
-        Ok(self.out.as_slice())
-    }
-
-    fn next_ready_block(&mut self) -> Result<Option<(u64, Block)>, RpcError> {
         let tip = self.client.get_block_count()?;
         if tip < self.confirmations {
-            return Ok(None);
+            return Ok(self.out.as_slice());
         }
         let target = tip.saturating_sub(self.confirmations);
         if self.current_height > target {
-            return Ok(None);
+            return Ok(self.out.as_slice());
         }
-        let height = self.current_height;
-        let hash = self.client.get_block_hash(height)?;
-        let block = self.client.get_block(&hash)?;
-        self.current_height += 1;
-        Ok(Some((height, block)))
+        let avail = (target - self.current_height + 1) as usize;
+        let to_fetch = self.out.capacity().min(avail);
+        if to_fetch == 0 {
+            return Ok(self.out.as_slice());
+        }
+        let start = self.current_height;
+        let mut heights = Vec::with_capacity(to_fetch);
+        for i in 0..to_fetch {
+            heights.push(start + i as u64);
+        }
+        log::debug!("collecting {} blocks from height {}..=", to_fetch, start);
+        let mut hashes = Vec::with_capacity(to_fetch);
+        for h in &heights {
+            hashes.push(self.client.get_block_hash(*h)?);
+        }
+        if let Some(p2p) = self.p2p.as_mut() {
+            log::debug!("attempt p2p fetch for {} blocks", hashes.len());
+            match p2p.fetch_blocks(&hashes) {
+                Ok(blocks) => {
+                    log::info!("p2p fetched {} blocks", blocks.len());
+                    for (i, b) in blocks.into_iter().enumerate() {
+                        self.out.push((heights[i], b));
+                    }
+                    self.current_height += to_fetch as u64;
+                    return Ok(self.out.as_slice());
+                }
+                Err(e) => {
+                    log::warn!("p2p fetch failed, falling back to RPC: {}", e);
+                }
+            }
+        }
+        log::debug!("fetching {} blocks via RPC", hashes.len());
+        for (i, h) in hashes.iter().enumerate() {
+            let b = self.client.get_block(h)?;
+            self.out.push((heights[i], b));
+        }
+        self.current_height += to_fetch as u64;
+        Ok(self.out.as_slice())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{block::Header, block::Version, absolute::LockTime, transaction::Version as TxVersion, TxMerkleNode, CompactTarget, Transaction, TxIn, TxOut, Amount, Sequence, OutPoint, ScriptBuf};
     use bitcoin::hashes::Hash;
+    use bitcoin::{
+        absolute::LockTime, block::Header, block::Version, transaction::Version as TxVersion,
+        Amount, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxMerkleNode,
+        TxOut,
+    };
     use bitcoincore_rpc::Error as RpcError;
 
     struct MockRpc {
@@ -115,7 +148,10 @@ mod tests {
 
     impl MockRpc {
         fn new(tip: u64) -> Self {
-            Self { tip, blocks: std::collections::HashMap::new() }
+            Self {
+                tip,
+                blocks: std::collections::HashMap::new(),
+            }
         }
         fn with_block(mut self, height: u64, hash: BlockHash, block: Block) -> Self {
             self.blocks.insert(height, (hash, block));
@@ -124,21 +160,50 @@ mod tests {
     }
 
     impl BitcoinRpc for MockRpc {
-        fn get_block_count(&self) -> Result<u64, RpcError> { Ok(self.tip) }
-        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> { Ok(self.blocks.get(&height).unwrap().0) }
+        fn get_block_count(&self) -> Result<u64, RpcError> {
+            Ok(self.tip)
+        }
+        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
+            Ok(self.blocks.get(&height).unwrap().0)
+        }
         fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
             let (_h, b) = self.blocks.values().find(|(hh, _)| hh == hash).unwrap();
             Ok(b.clone())
         }
-        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> { Ok(()) }
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            Ok(())
+        }
     }
 
     fn dummy_block(prev: BlockHash) -> Block {
-        let header = Header { version: Version::TWO, prev_blockhash: prev, merkle_root: TxMerkleNode::all_zeros(), time: 0, bits: CompactTarget::from_consensus(0), nonce: 0 };
-        let txin = TxIn { previous_output: OutPoint::null(), script_sig: ScriptBuf::new(), sequence: Sequence::MAX, witness: bitcoin::Witness::default() };
-        let txout = TxOut { value: Amount::from_sat(0), script_pubkey: ScriptBuf::new() };
-        let tx = Transaction { version: TxVersion::TWO, lock_time: LockTime::ZERO, input: vec![txin], output: vec![txout] };
-        Block { header, txdata: vec![tx] }
+        let header = Header {
+            version: Version::TWO,
+            prev_blockhash: prev,
+            merkle_root: TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: CompactTarget::from_consensus(0),
+            nonce: 0,
+        };
+        let txin = TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        };
+        let txout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: ScriptBuf::new(),
+        };
+        let tx = Transaction {
+            version: TxVersion::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![txin],
+            output: vec![txout],
+        };
+        Block {
+            header,
+            txdata: vec![tx],
+        }
     }
 
     #[test]

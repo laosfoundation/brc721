@@ -76,6 +76,22 @@ pub struct Cli {
         help = "RPC password (user/pass auth)"
     )]
     pub rpc_pass: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ADDR",
+        default_value = "",
+        help = "Optional P2P peer address host:port to fetch blocks via P2P"
+    )]
+    pub p2p_peer: String,
+
+    #[arg(
+        long,
+        value_name = "NETWORK",
+        default_value = "mainnet",
+        help = "Network for P2P magic: mainnet|testnet|signet|regtest"
+    )]
+    pub p2p_network: String,
 }
 
 pub fn parse() -> Cli {
