@@ -75,9 +75,9 @@ fn init_tracing(cli: &cli::Cli) {
         .with(env_filter)
         .with(fmt_stderr);
     if let Some(layer) = file_layer {
-        registry.with(layer).init();
+        let _ = registry.with(layer).try_init();
     } else {
-        registry.init();
+        let _ = registry.try_init();
     }
 }
 
