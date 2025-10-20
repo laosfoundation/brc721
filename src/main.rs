@@ -43,42 +43,31 @@ fn init_tracing(cli: &cli::Cli) {
     let file_layer = {
         use std::fs::OpenOptions;
         use std::path::Path;
-        if let Some(parent) = Path::new(&cli.log_file).parent() {
-            if !parent.as_os_str().is_empty() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+        let path = Path::new(&cli.log_file);
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            let _ = std::fs::create_dir_all(parent);
         }
-        let file = OpenOptions::new()
+        OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&cli.log_file)
-            .ok();
-        if let Some(file) = file {
-            let (writer, guard) = tracing_appender::non_blocking(file);
-            std::mem::forget(guard);
-            Some(
+            .open(path)
+            .ok()
+            .map(|file| {
+                let (writer, guard) = tracing_appender::non_blocking(file);
+                std::mem::forget(guard);
                 tracing_subscriber::fmt::layer()
-                    .with_target(true)
                     .with_ansi(false)
-                    .with_writer(writer),
-            )
-        } else {
-            None
-        }
+                    .with_writer(writer)
+            })
     };
 
-    let fmt_stderr = tracing_subscriber::fmt::layer()
-        .with_target(true)
-        .with_writer(std::io::stderr);
+    let stderr_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
-    let registry = tracing_subscriber::registry()
+    let _ = tracing_subscriber::registry()
         .with(env_filter)
-        .with(fmt_stderr);
-    if let Some(layer) = file_layer {
-        let _ = registry.with(layer).try_init();
-    } else {
-        let _ = registry.try_init();
-    }
+        .with(stderr_layer)
+        .with(file_layer)
+        .try_init();
 }
 
 fn init_data_dir(cli: &cli::Cli) {
