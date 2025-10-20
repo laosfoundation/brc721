@@ -1,28 +1,25 @@
-use crate::types::{Brc721Command, CollectionAddress, RegisterCollectionPayload};
+use crate::types::{Brc721Command, Brc721Tx, CollectionAddress, RegisterCollectionPayload};
 
 use super::Brc721Error;
 
-pub fn digest(tx: &[u8]) -> Result<(), Brc721Error> {
+pub fn digest(tx: &Brc721Tx) -> Result<(), Brc721Error> {
     let payload = parse(tx)?;
     log::info!("📝 RegisterCollectionPayload: {:?}", payload);
     Ok(())
 }
 
-fn parse(tx: &[u8]) -> Result<RegisterCollectionPayload, Brc721Error> {
-    let bytes = tx;
-
-    if bytes.len() < 1 + 20 + 1 {
+fn parse(tx: &Brc721Tx) -> Result<RegisterCollectionPayload, Brc721Error> {
+    if tx.len() < 1 + 20 + 1 {
         return Err(Brc721Error::ScriptTooShort);
     }
 
-    if bytes[0] != Brc721Command::RegisterCollection as u8 {
-        return Err(Brc721Error::WrongCommand(bytes[2]));
+    if tx[0] != Brc721Command::RegisterCollection as u8 {
+        return Err(Brc721Error::WrongCommand(tx[0]));
     }
 
-    let addr_bytes = &bytes[1..21];
-    let collection_address = CollectionAddress::from_slice(addr_bytes);
+    let collection_address = CollectionAddress::from_slice(&tx[1..21]);
 
-    let rebase_flag = bytes[21];
+    let rebase_flag = tx[21];
     let rebaseable = match rebase_flag {
         0 => false,
         1 => true,

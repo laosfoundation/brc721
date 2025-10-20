@@ -3,6 +3,7 @@ use ethereum_types::H160;
 use std::convert::TryFrom;
 
 pub type CollectionAddress = H160;
+pub type Brc721Tx = [u8];
 
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
 
