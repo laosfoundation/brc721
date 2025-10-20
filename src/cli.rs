@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(
         short = 'b',
         long,
-        default_value_t = 1usize,
+        default_value_t = 10usize,
         value_name = "SIZE",
         help = "Process blocks in batches of SIZE"
     )]
@@ -52,12 +52,12 @@ pub struct Cli {
 
     #[arg(
         long,
-        env = "BITCOIN_RPC_URL",
-        default_value = "http://127.0.0.1:8332",
+        env = "BITCOIN_NODE_URL",
+        default_value = "http://127.0.0.1",
         value_name = "URL",
-        help = "Bitcoin Core RPC URL"
+        help = "Bitcoin node base URL (scheme + host, no port), e.g. http://127.0.0.1"
     )]
-    pub rpc_url: String,
+    pub node_url: String,
 
     #[arg(
         long,
@@ -70,12 +70,38 @@ pub struct Cli {
 
     #[arg(
         long,
+        env = "BITCOIN_RPC_PORT",
+        default_value_t = 8332u16,
+        value_name = "PORT",
+        help = "Bitcoin Core RPC port"
+    )]
+    pub rpc_port: u16,
+
+    #[arg(
+        long,
         env = "BITCOIN_RPC_PASS",
         value_name = "PASS",
         default_value = "dev",
         help = "RPC password (user/pass auth)"
     )]
     pub rpc_pass: Option<String>,
+
+    #[arg(
+        long,
+        env = "BITCOIN_P2P_PORT",
+        value_name = "PORT",
+        default_value_t = 8333u16,
+        help = "Bitcoin P2P port"
+    )]
+    pub p2p_port: u16,
+
+    #[arg(
+        long,
+        value_name = "NETWORK",
+        default_value = "mainnet",
+        help = "Network for P2P magic: mainnet|testnet|signet|regtest"
+    )]
+    pub network: String,
 }
 
 pub fn parse() -> Cli {

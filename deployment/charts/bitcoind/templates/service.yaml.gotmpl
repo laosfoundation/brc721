@@ -7,8 +7,11 @@ labels:
 spec:
   type: {{ .Values.bitcoind.service.type }}
   ports:
-  - port: 18443
-    protocol: TCP
-    name: rpc
+    - port: 18443
+      protocol: TCP
+      name: rpc
+    - port: 8333
+      protocol: TCP
+      name: p2p
   selector:
     app: bitcoind

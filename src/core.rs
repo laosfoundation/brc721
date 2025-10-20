@@ -1,18 +1,18 @@
 use crate::parser::Parser;
-use crate::scanner::Scanner;
+use crate::scanner::BlockScanner;
 use crate::storage::Storage;
 use std::sync::Arc;
 
-pub struct Core<C: crate::scanner::BitcoinRpc> {
+pub struct Core {
     storage: Arc<dyn Storage + Send + Sync>,
-    scanner: Scanner<C>,
+    scanner: Box<dyn BlockScanner + Send>,
     parser: Parser,
 }
 
-impl<C: crate::scanner::BitcoinRpc> Core<C> {
+impl Core {
     pub fn new(
         storage: Arc<dyn Storage + Send + Sync>,
-        scanner: Scanner<C>,
+        scanner: Box<dyn BlockScanner + Send>,
         parser: Parser,
     ) -> Self {
         Self {
