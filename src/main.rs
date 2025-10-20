@@ -15,8 +15,9 @@ fn main() {
 
     log::info!("🚀 Starting brc721");
     log::info!("🔗 Network: {}", cli.network);
-    log::info!("🔗 RPC URL: {}", cli.rpc_url);
-    log::info!("🔗 P2P peer: {}", cli.p2p_peer);
+    log::info!("🔗 Node URL: {}", cli.node_url);
+    log::info!("🔗 RPC port: {}", cli.rpc_port);
+    log::info!("🔗 P2P port: {}", cli.p2p_port);
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", cli.confirmations);
     log::info!("📂 Data dir: {}", cli.data_dir);
@@ -60,14 +61,14 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> Box<dyn scanner::BlockScann
         _ => Auth::None,
     };
 
-    let client = Client::new(&cli.rpc_url, auth).expect("failed to create RPC client");
+    let node_base = cli.node_url.trim_end_matches('/');
+    let rpc_url = format!("{}:{}", node_base, cli.rpc_port);
+    let client = Client::new(&rpc_url, auth).expect("failed to create RPC client");
+
     let magic = p2p::magic_from_network_name(&cli.network);
-    let peer = if !cli.p2p_peer.is_empty() {
-        Some(cli.p2p_peer.clone())
-    } else {
-        derive_p2p_addr_from_rpc_url(&cli.rpc_url, &cli.network)
-    };
-    if let Some(addr) = peer {
+    let host = derive_host_from_node_url(&cli.node_url);
+    if let Some(h) = host {
+        let addr = format!("{}:{}", h, cli.p2p_port);
         match scanner::P2PFetcher::connect(&addr, magic) {
             Ok(fetcher) => {
                 let sc = scanner::P2pScanner::new(client, fetcher)
@@ -89,8 +90,8 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> Box<dyn scanner::BlockScann
     Box::new(sc)
 }
 
-fn derive_p2p_addr_from_rpc_url(rpc_url: &str, network: &str) -> Option<String> {
-    let s = rpc_url.trim();
+fn derive_host_from_node_url(node_url: &str) -> Option<String> {
+    let s = node_url.trim();
     let s = s
         .strip_prefix("http://")
         .or_else(|| s.strip_prefix("https://"))
@@ -109,6 +110,5 @@ fn derive_p2p_addr_from_rpc_url(rpc_url: &str, network: &str) -> Option<String> 
     if host.is_empty() {
         return None;
     }
-    let port = p2p::default_p2p_port_for_network(network);
-    Some(format!("{}:{}", host, port))
+    Some(host.to_string())
 }

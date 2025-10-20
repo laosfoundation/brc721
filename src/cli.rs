@@ -52,12 +52,12 @@ pub struct Cli {
 
     #[arg(
         long,
-        env = "BITCOIN_RPC_URL",
-        default_value = "http://127.0.0.1:8332",
+        env = "BITCOIN_NODE_URL",
+        default_value = "http://127.0.0.1",
         value_name = "URL",
-        help = "Bitcoin Core RPC URL"
+        help = "Bitcoin node base URL (scheme + host, no port), e.g. http://127.0.0.1"
     )]
-    pub rpc_url: String,
+    pub node_url: String,
 
     #[arg(
         long,
@@ -70,6 +70,15 @@ pub struct Cli {
 
     #[arg(
         long,
+        env = "BITCOIN_RPC_PORT",
+        default_value_t = 8332u16,
+        value_name = "PORT",
+        help = "Bitcoin Core RPC port"
+    )]
+    pub rpc_port: u16,
+
+    #[arg(
+        long,
         env = "BITCOIN_RPC_PASS",
         value_name = "PASS",
         default_value = "dev",
@@ -79,12 +88,12 @@ pub struct Cli {
 
     #[arg(
         long,
-        env = "BITCOIN_P2P_URL",
-        value_name = "URL",
-        default_value = "",
-        help = "Optional P2P peer address host:port to fetch blocks via P2P"
+        env = "BITCOIN_P2P_PORT",
+        value_name = "PORT",
+        default_value_t = 8333u16,
+        help = "Bitcoin P2P port"
     )]
-    pub p2p_peer: String,
+    pub p2p_port: u16,
 
     #[arg(
         long,
