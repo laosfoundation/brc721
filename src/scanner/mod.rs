@@ -27,10 +27,12 @@ pub trait BlockScanner {
     fn next_blocks(&mut self) -> Result<&[(u64, Block)], RpcError>;
 }
 
-const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
+pub const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
 
+pub mod fetcher;
 pub mod p2p;
 pub mod rpc;
 
+pub use fetcher::P2PFetcher;
 pub use p2p::P2pScanner;
 pub use rpc::RpcScanner;

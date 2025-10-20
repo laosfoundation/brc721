@@ -1,5 +1,5 @@
 use super::{BitcoinRpc, BlockScanner, DEFAULT_WAIT_TIMEOUT_MS};
-use crate::p2p::P2PFetcher;
+use crate::scanner::P2PFetcher;
 use bitcoin::Block;
 use bitcoincore_rpc::Error as RpcError;
 
@@ -70,18 +70,11 @@ impl<C: BitcoinRpc> P2pScanner<C> {
                     self.out.push((heights[i], b));
                 }
                 self.current_height += to_fetch as u64;
-                return Ok(self.out.as_slice());
             }
             Err(e) => {
-                log::warn!("p2p fetch failed, falling back to RPC: {}", e);
+                log::warn!("p2p fetch failed: {}", e);
             }
         }
-        log::debug!("fetching {} blocks via RPC", hashes.len());
-        for (i, h) in hashes.iter().enumerate() {
-            let b = self.client.get_block(h)?;
-            self.out.push((heights[i], b));
-        }
-        self.current_height += to_fetch as u64;
         Ok(self.out.as_slice())
     }
 }

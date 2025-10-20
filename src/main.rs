@@ -68,7 +68,7 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> Box<dyn scanner::BlockScann
         derive_p2p_addr_from_rpc_url(&cli.rpc_url, &cli.network)
     };
     if let Some(addr) = peer {
-        match p2p::P2PFetcher::connect(&addr, magic) {
+        match scanner::P2PFetcher::connect(&addr, magic) {
             Ok(fetcher) => {
                 let sc = scanner::P2pScanner::new(client, fetcher)
                     .with_confirmations(cli.confirmations)
