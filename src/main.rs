@@ -54,17 +54,13 @@ fn init_storage(cli: &cli::Cli) -> Arc<dyn storage::Storage + Send + Sync> {
     Arc::new(sqlite)
 }
 
-fn init_scanner(cli: &cli::Cli, start_block: u64) -> scanner::Scanner<Client> {
+fn init_scanner(cli: &cli::Cli, start_block: u64) -> Box<dyn scanner::BlockScanner + Send> {
     let auth = match (&cli.rpc_user, &cli.rpc_pass) {
         (Some(user), Some(pass)) => Auth::UserPass(user.clone(), pass.clone()),
         _ => Auth::None,
     };
 
     let client = Client::new(&cli.rpc_url, auth).expect("failed to create RPC client");
-    let mut sc = scanner::Scanner::new(client)
-        .with_confirmations(cli.confirmations)
-        .with_capacity(cli.batch_size)
-        .with_start_from(start_block);
     let magic = p2p::magic_from_network_name(&cli.network);
     let peer = if !cli.p2p_peer.is_empty() {
         Some(cli.p2p_peer.clone())
@@ -73,21 +69,27 @@ fn init_scanner(cli: &cli::Cli, start_block: u64) -> scanner::Scanner<Client> {
     };
     if let Some(addr) = peer {
         match p2p::P2PFetcher::connect(&addr, magic) {
-            Ok(f) => {
-                sc = sc.with_p2p(f);
+            Ok(fetcher) => {
+                let sc = scanner::P2pScanner::new(client, fetcher)
+                    .with_confirmations(cli.confirmations)
+                    .with_capacity(cli.batch_size)
+                    .with_start_from(start_block);
                 log::info!("P2P enabled: {} ({})", addr, cli.network);
+                return Box::new(sc);
             }
             Err(e) => {
                 log::warn!("P2P connect failed: {} - using RPC only", e);
             }
         }
     }
-    sc
+    let sc = scanner::RpcScanner::new(client)
+        .with_confirmations(cli.confirmations)
+        .with_capacity(cli.batch_size)
+        .with_start_from(start_block);
+    Box::new(sc)
 }
 
 fn derive_p2p_addr_from_rpc_url(rpc_url: &str, network: &str) -> Option<String> {
-    // Very small parser for forms like http://host:port or http://host
-    // Not robust to IPv6 literals without brackets; good enough for common cases
     let s = rpc_url.trim();
     let s = s
         .strip_prefix("http://")
@@ -95,7 +97,6 @@ fn derive_p2p_addr_from_rpc_url(rpc_url: &str, network: &str) -> Option<String> 
         .unwrap_or(s);
     let host_port = s.split('/').next().unwrap_or("");
     let host = if let Some((h, _p)) = host_port.rsplit_once('@') {
-        // strip user:pass@
         h
     } else {
         host_port
