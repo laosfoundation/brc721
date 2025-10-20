@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(
         short = 'b',
         long,
-        default_value_t = 1usize,
+        default_value_t = 10usize,
         value_name = "SIZE",
         help = "Process blocks in batches of SIZE"
     )]
