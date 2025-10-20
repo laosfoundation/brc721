@@ -1,16 +1,18 @@
 use bitcoincore_rpc::{Auth, Client};
+use std::path::Path;
 use std::sync::Arc;
 mod cli;
 mod core;
 mod parser;
 mod scanner;
 mod storage;
+mod tracing;
 mod types;
 
 fn main() {
     let cli = cli::parse();
 
-    init_tracing(&cli);
+    tracing::init(Path::new(&cli.log_file));
 
     log::info!("🚀 Starting brc721");
     log::info!("🔗 RPC URL: {}", cli.rpc_url);
