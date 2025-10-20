@@ -14,9 +14,8 @@ fn main() {
 
     let cli = cli::parse();
 
-    if let Some(cli::Command::Wallet { network, cmd: wcmd }) = cli.cmd.clone() {
-        let net = wallet::parse_network(Some(network));
-        wallet::handle_wallet_command(&cli, net, wcmd);
+    if let Some(cli::Command::Wallet { cmd: wcmd }) = cli.cmd.clone() {
+        wallet::handle_wallet_command(&cli, wcmd);
         return;
     }
 

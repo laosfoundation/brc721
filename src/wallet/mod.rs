@@ -1,10 +1,9 @@
-pub mod network;
-pub mod paths;
-pub mod ops;
-pub mod types;
 pub mod cmd;
+pub mod network;
+pub mod ops;
+pub mod paths;
 pub mod tx;
+pub mod types;
 
-pub use network::parse_network;
-pub use ops::{init_wallet, next_address};
 pub use cmd::handle_wallet_command;
+pub use ops::{init_wallet, next_address};

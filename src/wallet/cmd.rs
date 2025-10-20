@@ -1,12 +1,16 @@
 use bitcoincore_rpc::{Auth, Client};
 
 use crate::cli;
-use crate::wallet::{init_wallet, next_address};
+use crate::wallet::{init_wallet, network, next_address};
 use bitcoin as _; // ensure bitcoin crate in scope for network type
 
-pub fn handle_wallet_command(cli: &cli::Cli, net: bitcoin::network::Network, wcmd: cli::WalletCmd) {
+pub fn handle_wallet_command(cli: &cli::Cli, wcmd: cli::WalletCmd) {
+    let net = network::parse_network(Some(cli.network.clone()));
     match wcmd {
-        cli::WalletCmd::Init { mnemonic, passphrase } => {
+        cli::WalletCmd::Init {
+            mnemonic,
+            passphrase,
+        } => {
             let _ = std::fs::create_dir_all(&cli.data_dir);
             match init_wallet(&cli.data_dir, net, mnemonic, passphrase) {
                 Ok(res) => {
@@ -51,7 +55,9 @@ pub fn handle_wallet_command(cli: &cli::Cli, net: bitcoin::network::Network, wcm
             };
             let client = Client::new(&cli.rpc_url, auth).expect("failed to create RPC client");
 
-            match crate::wallet::tx::send_register_collection(&client, &laos_hex, rebaseable, fee_rate) {
+            match crate::wallet::tx::send_register_collection(
+                &client, &laos_hex, rebaseable, fee_rate,
+            ) {
                 Ok(txid) => {
                     log::info!("broadcasted register-collection txid={}", txid);
                 }

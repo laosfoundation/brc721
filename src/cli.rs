@@ -79,6 +79,14 @@ pub struct Cli {
     )]
     pub rpc_pass: Option<String>,
 
+    #[arg(
+        long,
+        value_name = "NETWORK",
+        help = "bitcoin|testnet|signet|regtest",
+        default_value = "bitcoin"
+    )]
+    pub network: String,
+
     #[command(subcommand)]
     pub cmd: Option<Command>,
 }
@@ -86,13 +94,6 @@ pub struct Cli {
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
     Wallet {
-        #[arg(
-            long,
-            value_name = "NETWORK",
-            help = "bitcoin|testnet|signet|regtest",
-            default_value = "bitcoin"
-        )]
-        network: String,
         #[command(subcommand)]
         cmd: WalletCmd,
     },
