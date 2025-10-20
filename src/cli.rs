@@ -80,6 +80,14 @@ pub struct Cli {
     pub rpc_pass: Option<String>,
 
     #[arg(
+        long = "log-file",
+        env = "BRC721_LOG_FILE",
+        value_name = "PATH",
+        help = "Write logs to PATH (in addition to stderr)"
+    )]
+    pub log_file: Option<String>,
+
+    #[arg(
         long,
         value_name = "NETWORK",
         help = "bitcoin|testnet|signet|regtest",

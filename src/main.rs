@@ -1,4 +1,5 @@
 use bitcoincore_rpc::{Auth, Client};
+use std::path::Path;
 use std::sync::Arc;
 mod cli;
 
@@ -6,13 +7,15 @@ mod core;
 mod parser;
 mod scanner;
 mod storage;
+mod tracing;
 mod types;
 mod wallet;
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     let cli = cli::parse();
+
+    let log_path = cli.log_file.as_deref().map(Path::new);
+    tracing::init(log_path);
 
     if let Some(cli::Command::Wallet { cmd: wcmd }) = cli.cmd.clone() {
         wallet::handle_wallet_command(&cli, wcmd);
@@ -24,6 +27,9 @@ fn main() {
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", cli.confirmations);
     log::info!("📂 Data dir: {}", cli.data_dir);
+    if let Some(path) = cli.log_file.as_deref() {
+        log::info!("🗒️ Log file: {}", path);
+    }
 
     init_data_dir(&cli);
     let storage = init_storage(&cli);
