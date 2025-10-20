@@ -14,14 +14,10 @@ fn main() {
 
     let cli = cli::parse();
 
-    if let Some(cmd) = cli.cmd.clone() {
-        match cmd {
-            cli::Command::Wallet { network, cmd: wcmd } => {
-                let net = wallet::parse_network(Some(network));
-                wallet::handle_wallet_command(&cli, net, wcmd);
-                return;
-            }
-        }
+    if let Some(cli::Command::Wallet { network, cmd: wcmd }) = cli.cmd.clone() {
+        let net = wallet::parse_network(Some(network));
+        wallet::handle_wallet_command(&cli, net, wcmd);
+        return;
     }
 
     log::info!("🚀 Starting brc721");
