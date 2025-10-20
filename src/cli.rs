@@ -79,11 +79,11 @@ pub struct Cli {
 
     #[arg(
         long = "log-file",
-        default_value = "brc721.log",
+        env = "BRC721_LOG_FILE",
         value_name = "PATH",
         help = "Write logs to PATH (in addition to stderr)"
     )]
-    pub log_file: String,
+    pub log_file: Option<String>,
 }
 
 pub fn parse() -> Cli {
