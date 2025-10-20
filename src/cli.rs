@@ -76,6 +76,14 @@ pub struct Cli {
         help = "RPC password (user/pass auth)"
     )]
     pub rpc_pass: Option<String>,
+
+    #[arg(
+        long = "log-file",
+        env = "BRC721_LOG_FILE",
+        value_name = "PATH",
+        help = "Write logs to PATH (in addition to stderr)"
+    )]
+    pub log_file: Option<String>,
 }
 
 pub fn parse() -> Cli {
