@@ -1,8 +1,9 @@
 use bitcoincore_rpc::{Auth, Client};
 use std::path::Path;
 use std::sync::Arc;
-mod cli;
 
+mod cli;
+mod commands;
 mod core;
 mod parser;
 mod scanner;

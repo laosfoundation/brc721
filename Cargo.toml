@@ -21,6 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
+anyhow = "1.0.100"
 
 [dev-dependencies]
 hex = "0.4"
