@@ -39,7 +39,6 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("{addr}");
                 Ok(())
             }
-            cli::WalletCmd::RegisterCollection { .. } => todo!(),
         }
     }
 }

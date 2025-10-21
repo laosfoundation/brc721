@@ -38,27 +38,5 @@ pub fn handle_wallet_command(cli: &cli::Cli, wcmd: cli::WalletCmd) {
                 log::error!("wallet address error: {}", e);
             }
         },
-        cli::WalletCmd::RegisterCollection {
-            laos_hex,
-            rebaseable,
-            fee_rate,
-        } => {
-            let auth = match (&cli.rpc_user, &cli.rpc_pass) {
-                (Some(user), Some(pass)) => Auth::UserPass(user.clone(), pass.clone()),
-                _ => Auth::None,
-            };
-            let client = Client::new(&cli.rpc_url, auth).expect("failed to create RPC client");
-
-            match crate::wallet::tx::send_register_collection(
-                &client, &laos_hex, rebaseable, fee_rate,
-            ) {
-                Ok(txid) => {
-                    log::info!("broadcasted register-collection txid={}", txid);
-                }
-                Err(e) => {
-                    log::error!("failed to send register-collection: {}", e);
-                }
-            }
-        }
     }
 }

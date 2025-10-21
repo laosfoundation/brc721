@@ -27,6 +27,10 @@ fn main() -> Result<()> {
             cmd.run(&cli)?;
             return Ok(());
         }
+        Some(cli::Command::Tx { cmd }) => {
+            cmd.run(&cli)?;
+            return Ok(());
+        }
         None => {}
     }
 

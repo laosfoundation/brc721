@@ -105,6 +105,10 @@ pub enum Command {
         #[command(subcommand)]
         cmd: WalletCmd,
     },
+    Tx {
+        #[command(subcommand)]
+        cmd: TxCmd,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -126,6 +130,10 @@ pub enum WalletCmd {
         passphrase: Option<String>,
     },
     Address,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum TxCmd {
     RegisterCollection {
         #[arg(
             long = "laos-hex",
