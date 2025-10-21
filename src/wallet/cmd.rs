@@ -10,40 +10,34 @@ pub fn handle_wallet_command(cli: &cli::Cli, wcmd: cli::WalletCmd) {
         cli::WalletCmd::Init {
             mnemonic,
             passphrase,
-        } => {
-            let _ = std::fs::create_dir_all(&cli.data_dir);
-            match init_wallet(&cli.data_dir, net, mnemonic, passphrase) {
-                Ok(res) => {
-                    if res.created {
-                        if let Some(m) = res.mnemonic {
-                            log::info!(
-                                "initialized wallet db={} mnemonic=\"{}\"",
-                                res.db_path.display(),
-                                m
-                            );
-                        } else {
-                            log::info!("initialized wallet db={}", res.db_path.display());
-                        }
+        } => match init_wallet(&cli.data_dir, net, mnemonic, passphrase) {
+            Ok(res) => {
+                if res.created {
+                    if let Some(m) = res.mnemonic {
+                        log::info!(
+                            "initialized wallet db={} mnemonic=\"{}\"",
+                            res.db_path.display(),
+                            m
+                        );
                     } else {
-                        log::info!("wallet already initialized db={}", res.db_path.display());
+                        log::info!("initialized wallet db={}", res.db_path.display());
                     }
-                }
-                Err(e) => {
-                    log::error!("wallet init error: {}", e);
-                }
-            }
-        }
-        cli::WalletCmd::Address => {
-            let _ = std::fs::create_dir_all(&cli.data_dir);
-            match next_address(&cli.data_dir, net) {
-                Ok(addr) => {
-                    log::info!("{}", addr);
-                }
-                Err(e) => {
-                    log::error!("wallet address error: {}", e);
+                } else {
+                    log::info!("wallet already initialized db={}", res.db_path.display());
                 }
             }
-        }
+            Err(e) => {
+                log::error!("wallet init error: {}", e);
+            }
+        },
+        cli::WalletCmd::Address => match next_address(&cli.data_dir, net) {
+            Ok(addr) => {
+                log::info!("{}", addr);
+            }
+            Err(e) => {
+                log::error!("wallet address error: {}", e);
+            }
+        },
         cli::WalletCmd::RegisterCollection {
             laos_hex,
             rebaseable,

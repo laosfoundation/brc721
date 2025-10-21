@@ -16,10 +16,7 @@ fn main() {
     let log_path = cli.log_file.as_deref().map(Path::new);
     tracing::init(log_path);
 
-    if let Err(e) = std::fs::create_dir_all(&cli.data_dir) {
-        log::error!("Creating data_dir: {}", e);
-        return;
-    }
+    init_data_dir(&cli);
 
     if let Some(cli::Command::Wallet { cmd: wcmd }) = cli.cmd.clone() {
         wallet::handle_wallet_command(&cli, wcmd);
@@ -35,7 +32,6 @@ fn main() {
         log::info!("🗒️ Log file: {}", path);
     }
 
-    init_data_dir(&cli);
     let storage = init_storage(&cli);
     let starting_block = storage
         .load_last()
