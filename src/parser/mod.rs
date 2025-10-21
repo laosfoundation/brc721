@@ -89,8 +89,8 @@ fn get_first_output_if_op_return(tx: &Transaction) -> Option<&TxOut> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{ScriptBuf, TxOut, Transaction, TxIn, OutPoint, Block, Amount};
     use bitcoin::hashes::Hash;
+    use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
     use hex::FromHex;
 
     fn build_payload(addr20: [u8; 20], rebase: u8) -> Vec<u8> {
@@ -118,8 +118,16 @@ mod tests {
         let tx = Transaction {
             version: bitcoin::transaction::Version(2),
             lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![TxIn { previous_output: OutPoint::null(), script_sig: ScriptBuf::new(), sequence: bitcoin::Sequence(0xffffffff), witness: bitcoin::Witness::default() }],
-            output: vec![TxOut { value: Amount::from_sat(0), script_pubkey: script }],
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: bitcoin::Sequence(0xffffffff),
+                witness: bitcoin::Witness::default(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(0),
+                script_pubkey: script,
+            }],
         };
         let out0 = get_first_output_if_op_return(&tx).expect("must be op_return");
         let extracted = get_brc721_tx(out0).expect("must extract payload");
@@ -144,18 +152,33 @@ mod tests {
         let tx = Transaction {
             version: bitcoin::transaction::Version(2),
             lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![TxIn { previous_output: OutPoint::null(), script_sig: ScriptBuf::new(), sequence: bitcoin::Sequence(0xffffffff), witness: bitcoin::Witness::default() }],
-            output: vec![TxOut { value: Amount::from_sat(0), script_pubkey: script }],
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: bitcoin::Sequence(0xffffffff),
+                witness: bitcoin::Witness::default(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(0),
+                script_pubkey: script,
+            }],
         };
         let header = bitcoin::block::Header {
             version: bitcoin::block::Version::ONE,
-            prev_blockhash: bitcoin::BlockHash::from_raw_hash(bitcoin::hashes::sha256d::Hash::all_zeros()),
-            merkle_root: bitcoin::TxMerkleNode::from_raw_hash(bitcoin::hashes::sha256d::Hash::all_zeros()),
+            prev_blockhash: bitcoin::BlockHash::from_raw_hash(
+                bitcoin::hashes::sha256d::Hash::all_zeros(),
+            ),
+            merkle_root: bitcoin::TxMerkleNode::from_raw_hash(
+                bitcoin::hashes::sha256d::Hash::all_zeros(),
+            ),
             time: 0,
             bits: bitcoin::CompactTarget::from_consensus(0),
             nonce: 0,
         };
-        let block = Block { header, txdata: vec![tx] };
+        let block = Block {
+            header,
+            txdata: vec![tx],
+        };
         let parser = Parser;
         let r = parser.parse_block(&block);
         assert!(r.is_ok());

@@ -1,30 +1,40 @@
+use anyhow::Result;
 use bitcoincore_rpc::{Auth, Client};
 use std::path::Path;
 use std::sync::Arc;
+
 mod cli;
+mod commands;
 mod core;
 mod parser;
 mod scanner;
 mod storage;
 mod tracing;
 mod types;
+mod wallet;
 
-fn main() {
+fn main() -> Result<()> {
     let cli = cli::parse();
 
-    let log_path = cli.log_file.as_deref().map(Path::new);
-    tracing::init(log_path);
+    tracing::init(cli.log_file.as_deref().map(Path::new));
+
+    init_data_dir(&cli);
+
+    if let Some(cmd) = &cli.cmd {
+        cmd.run(&cli)?;
+        return Ok(());
+    }
 
     log::info!("🚀 Starting brc721");
     log::info!("🔗 RPC URL: {}", cli.rpc_url);
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", cli.confirmations);
     log::info!("📂 Data dir: {}", cli.data_dir);
+    log::info!("🧮 Batch size: {}", cli.batch_size);
     if let Some(path) = cli.log_file.as_deref() {
         log::info!("🗒️ Log file: {}", path);
     }
 
-    init_data_dir(&cli);
     let storage = init_storage(&cli);
     let starting_block = storage
         .load_last()
