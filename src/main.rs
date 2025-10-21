@@ -13,9 +13,13 @@ mod wallet;
 
 fn main() {
     let cli = cli::parse();
-
     let log_path = cli.log_file.as_deref().map(Path::new);
     tracing::init(log_path);
+
+    if let Err(e) = std::fs::create_dir_all(&cli.data_dir) {
+        log::error!("Creating data_dir: {}", e);
+        return;
+    }
 
     if let Some(cli::Command::Wallet { cmd: wcmd }) = cli.cmd.clone() {
         wallet::handle_wallet_command(&cli, wcmd);
