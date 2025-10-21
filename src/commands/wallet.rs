@@ -2,8 +2,6 @@ use super::CommandRunner;
 use crate::cli;
 use crate::wallet::{init_wallet, network, next_address};
 use anyhow::{Context, Result};
-use bitcoin::{self as _};
-use bitcoincore_rpc::{Auth, Client}; // ensure bitcoin crate in scope for network type
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, cli: &cli::Cli) -> Result<()> {
