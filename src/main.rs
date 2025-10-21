@@ -1,3 +1,4 @@
+use anyhow::Result;
 use bitcoincore_rpc::{Auth, Client};
 use std::path::Path;
 use std::sync::Arc;
@@ -12,16 +13,21 @@ mod tracing;
 mod types;
 mod wallet;
 
-fn main() {
+use commands::CommandRunner;
+
+fn main() -> Result<()> {
     let cli = cli::parse();
-    let log_path = cli.log_file.as_deref().map(Path::new);
-    tracing::init(log_path);
+
+    tracing::init(cli.log_file.as_deref().map(Path::new));
 
     init_data_dir(&cli);
 
-    if let Some(cli::Command::Wallet { cmd: wcmd }) = cli.cmd.clone() {
-        wallet::handle_wallet_command(&cli, wcmd);
-        return;
+    match &cli.cmd {
+        Some(cli::Command::Wallet { cmd }) => {
+            cmd.run(&cli)?;
+            return Ok(());
+        }
+        None => {}
     }
 
     log::info!("🚀 Starting brc721");
