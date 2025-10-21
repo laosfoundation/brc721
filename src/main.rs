@@ -30,6 +30,7 @@ fn main() -> Result<()> {
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", cli.confirmations);
     log::info!("📂 Data dir: {}", cli.data_dir);
+    log::info!("🧮 Batch size: {}", cli.batch_size);
     if let Some(path) = cli.log_file.as_deref() {
         log::info!("🗒️ Log file: {}", path);
     }
