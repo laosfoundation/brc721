@@ -13,8 +13,6 @@ mod tracing;
 mod types;
 mod wallet;
 
-use commands::CommandRunner;
-
 fn main() -> Result<()> {
     let cli = cli::parse();
 
@@ -22,16 +20,9 @@ fn main() -> Result<()> {
 
     init_data_dir(&cli);
 
-    match &cli.cmd {
-        Some(cli::Command::Wallet { cmd }) => {
-            cmd.run(&cli)?;
-            return Ok(());
-        }
-        Some(cli::Command::Tx { cmd }) => {
-            cmd.run(&cli)?;
-            return Ok(());
-        }
-        None => {}
+    if let Some(cmd) = &cli.cmd {
+        cmd.run(&cli)?;
+        return Ok(());
     }
 
     log::info!("🚀 Starting brc721");
