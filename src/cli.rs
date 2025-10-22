@@ -128,6 +128,25 @@ pub enum WalletCmd {
             required = false
         )]
         passphrase: Option<String>,
+        #[arg(
+            long = "watchonly",
+            value_name = "NAME",
+            default_value = "brc721-watchonly",
+            help = "Core watch-only wallet name"
+        )]
+        watchonly: String,
+        #[arg(
+            long = "gap",
+            default_value_t = 200usize,
+            help = "Import descriptor range 0..N in Core"
+        )]
+        gap: usize,
+        #[arg(
+            long = "rescan",
+            default_value_t = false,
+            help = "Full rescan from genesis for imported descriptors"
+        )]
+        rescan: bool,
     },
     Address {
         #[arg(
@@ -144,6 +163,7 @@ pub enum WalletCmd {
         )]
         change: bool,
     },
+    Balance,
 }
 
 #[derive(Subcommand, Debug, Clone)]
