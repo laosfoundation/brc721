@@ -111,13 +111,13 @@ pub fn wallet_balance(data_dir: &str, network: Network) -> Result<Balance> {
 }
 
 pub fn build_core_createwallet_params(name: &str) -> Vec<serde_json::Value> {
-    serde_json::vec![
+    vec![
         serde_json::json!(name),
         serde_json::json!(true),
         serde_json::json!(true),
         serde_json::json!(""),
         serde_json::json!(false),
-        serde_json::json!(true)
+        serde_json::json!(true),
     ]
 }
 
