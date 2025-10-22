@@ -129,7 +129,21 @@ pub enum WalletCmd {
         )]
         passphrase: Option<String>,
     },
-    Address,
+    Address {
+        #[arg(
+            long,
+            value_name = "INDEX",
+            help = "Peek address at INDEX without advancing",
+            required = false
+        )]
+        peek: Option<u32>,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Use change (internal) keychain"
+        )]
+        change: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

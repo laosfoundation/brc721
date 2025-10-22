@@ -12,6 +12,7 @@ mod storage;
 mod tracing;
 pub mod types;
 mod wallet;
+mod network;
 
 fn main() -> Result<()> {
     let cli = cli::parse();

@@ -51,9 +51,10 @@ pub fn init_wallet(
     })
 }
 
-pub fn next_address(
+pub fn derive_next_address(
     data_dir: &str,
     network: Network,
+    keychain: KeychainKind,
 ) -> Result<String> {
     let db_path = wallet_db_path(data_dir, network);
     let mut conn = Connection::open(&db_path)?;
@@ -63,7 +64,28 @@ pub fn next_address(
         .load_wallet(&mut conn)?
         .ok_or_else(|| anyhow!("wallet not initialized"))?;
 
-    let addr = wallet.reveal_next_address(KeychainKind::External).address.to_string();
+    let addr = wallet
+        .reveal_next_address(keychain)
+        .address
+        .to_string();
     let _ = wallet.persist(&mut conn)?;
+    Ok(addr)
+}
+
+pub fn peek_address(
+    data_dir: &str,
+    network: Network,
+    keychain: KeychainKind,
+    index: u32,
+) -> Result<String> {
+    let db_path = wallet_db_path(data_dir, network);
+    let mut conn = Connection::open(&db_path)?;
+
+    let wallet = LoadParams::new()
+        .check_network(network)
+        .load_wallet(&mut conn)?
+        .ok_or_else(|| anyhow!("wallet not initialized"))?;
+
+    let addr = wallet.peek_address(keychain, index).to_string();
     Ok(addr)
 }
