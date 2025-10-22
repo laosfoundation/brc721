@@ -18,16 +18,12 @@ pub type RegisterCollectionTx = [u8; 22];
 impl RegisterCollectionMessage {
     pub const LEN: usize = 1 + 20 + 1;
 
-    pub fn encode_array(&self) -> RegisterCollectionTx {
+    pub fn encode(&self) -> RegisterCollectionTx {
         let mut arr = [0u8; Self::LEN];
         arr[0] = Brc721Command::RegisterCollection as u8;
         arr[1..21].copy_from_slice(self.collection_address.as_bytes());
         arr[21] = if self.rebaseable { 1 } else { 0 };
         arr
-    }
-
-    pub fn encode(&self) -> Vec<u8> {
-        self.encode_array().to_vec()
     }
 
     pub fn decode<T: AsRef<[u8]>>(tx: T) -> Result<Self, MessageDecodeError> {
