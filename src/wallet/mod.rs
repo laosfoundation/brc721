@@ -2,4 +2,4 @@ pub mod paths;
 pub mod service;
 pub mod types;
 
-pub use service::{derive_next_address, init_wallet, peek_address};
+pub use service::{derive_next_address, init_wallet, peek_address, wallet_balance};

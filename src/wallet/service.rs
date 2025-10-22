@@ -1,7 +1,7 @@
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic, WordCount},
     template::Bip86,
-    CreateParams, KeychainKind, LoadParams,
+    Balance, CreateParams, KeychainKind, LoadParams,
 };
 use bitcoin::Network;
 use rusqlite::Connection;
@@ -88,4 +88,19 @@ pub fn peek_address(
 
     let addr = wallet.peek_address(keychain, index).to_string();
     Ok(addr)
+}
+
+pub fn wallet_balance(
+    data_dir: &str,
+    network: Network,
+) -> Result<Balance> {
+    let db_path = wallet_db_path(data_dir, network);
+    let mut conn = Connection::open(&db_path)?;
+
+    let wallet = LoadParams::new()
+        .check_network(network)
+        .load_wallet(&mut conn)?
+        .ok_or_else(|| anyhow!("wallet not initialized"))?;
+
+    Ok(wallet.balance())
 }
