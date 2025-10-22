@@ -29,3 +29,7 @@ target/
 .DS_Store
 .brc721/
 .serena/
+CRUSH.md
+.env
+.crush/
+brc721.log
