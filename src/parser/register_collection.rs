@@ -1,35 +1,21 @@
-use crate::types::{Brc721Command, Brc721Tx, CollectionAddress, RegisterCollectionPayload};
+use crate::types::{Brc721Tx, RegisterCollectionMessage};
 
 use super::Brc721Error;
 
 pub fn digest(tx: &Brc721Tx) -> Result<(), Brc721Error> {
     let payload = parse(tx)?;
-    log::info!("📝 RegisterCollectionPayload: {:?}", payload);
+    log::info!("📝 RegisterCollectionMessage: {:?}", payload);
     Ok(())
 }
 
-fn parse(tx: &Brc721Tx) -> Result<RegisterCollectionPayload, Brc721Error> {
-    if tx.len() < 1 + 20 + 1 {
-        return Err(Brc721Error::ScriptTooShort);
+fn parse(tx: &Brc721Tx) -> Result<RegisterCollectionMessage, Brc721Error> {
+    use crate::types::MessageDecodeError;
+    match RegisterCollectionMessage::decode(tx) {
+        Ok(msg) => Ok(msg),
+        Err(MessageDecodeError::ScriptTooShort) => Err(Brc721Error::ScriptTooShort),
+        Err(MessageDecodeError::WrongCommand(b)) => Err(Brc721Error::WrongCommand(b)),
+        Err(MessageDecodeError::InvalidRebaseFlag(b)) => Err(Brc721Error::InvalidRebaseFlag(b)),
     }
-
-    if tx[0] != Brc721Command::RegisterCollection as u8 {
-        return Err(Brc721Error::WrongCommand(tx[0]));
-    }
-
-    let collection_address = CollectionAddress::from_slice(&tx[1..21]);
-
-    let rebase_flag = tx[21];
-    let rebaseable = match rebase_flag {
-        0 => false,
-        1 => true,
-        other => return Err(Brc721Error::InvalidRebaseFlag(other)),
-    };
-
-    Ok(RegisterCollectionPayload {
-        collection_address,
-        rebaseable,
-    })
 }
 
 #[cfg(test)]
@@ -60,5 +46,27 @@ mod tests {
             CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
         );
         assert!(register_collection.rebaseable)
+    }
+
+    #[test]
+    fn test_encode_array_round_trip() {
+        let msg = RegisterCollectionMessage {
+            collection_address: CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap(),
+            rebaseable: false,
+        };
+        let arr = msg.encode_array();
+        let decoded = RegisterCollectionMessage::decode(arr).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn test_round_trip_encode_decode() {
+        let msg = RegisterCollectionMessage {
+            collection_address: CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap(),
+            rebaseable: true,
+        };
+        let bytes = msg.encode();
+        let decoded = RegisterCollectionMessage::decode(&bytes).unwrap();
+        assert_eq!(decoded, msg);
     }
 }
