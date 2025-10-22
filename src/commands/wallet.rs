@@ -12,7 +12,6 @@ impl CommandRunner for cli::WalletCmd {
                 passphrase,
             } => {
                 let res = init_wallet(&cli.data_dir, net, mnemonic.clone(), passphrase.clone())
-                    .map_err(anyhow::Error::msg)
                     .context("Initializing wallet")?;
                 if res.created {
                     if let Some(m) = res.mnemonic {
@@ -32,7 +31,6 @@ impl CommandRunner for cli::WalletCmd {
             }
             cli::WalletCmd::Address => {
                 let addr = next_address(&cli.data_dir, net)
-                    .map_err(anyhow::Error::msg)
                     .context("deriving next address")?;
                 log::info!("{addr}");
                 Ok(())

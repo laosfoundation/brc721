@@ -1,5 +1,3 @@
-use std::io;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     pub height: u64,
@@ -7,6 +5,6 @@ pub struct Block {
 }
 
 pub trait Storage {
-    fn load_last(&self) -> io::Result<Option<Block>>;
-    fn save_last(&self, height: u64, hash: &str) -> io::Result<()>;
+    fn load_last(&self) -> anyhow::Result<Option<Block>>;
+    fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()>;
 }

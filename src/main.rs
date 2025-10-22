@@ -10,7 +10,7 @@ mod parser;
 mod scanner;
 mod storage;
 mod tracing;
-mod types;
+pub mod types;
 mod wallet;
 
 fn main() -> Result<()> {

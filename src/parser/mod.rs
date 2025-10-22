@@ -19,6 +19,16 @@ pub enum Brc721Error {
     InvalidRebaseFlag(u8),
 }
 
+impl From<crate::types::MessageDecodeError> for Brc721Error {
+    fn from(value: crate::types::MessageDecodeError) -> Self {
+        match value {
+            crate::types::MessageDecodeError::ScriptTooShort => Brc721Error::ScriptTooShort,
+            crate::types::MessageDecodeError::WrongCommand(b) => Brc721Error::WrongCommand(b),
+            crate::types::MessageDecodeError::InvalidRebaseFlag(b) => Brc721Error::InvalidRebaseFlag(b),
+        }
+    }
+}
+
 pub struct Parser;
 
 impl Parser {
@@ -136,7 +146,6 @@ mod tests {
 
     #[test]
     fn test_script_hex_starts_with_6a5f16_and_matches_expected() {
-        // payload: 00 | ffff0123ffffffffffffffffffffffff3210ffff | 00
         let addr = <[u8; 20]>::from_hex("ffff0123ffffffffffffffffffffffff3210ffff").unwrap();
         let payload = build_payload(addr, 0x00);
         let script = script_for_payload(&payload);

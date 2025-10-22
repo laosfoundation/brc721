@@ -16,16 +16,17 @@ impl SqliteStorage {
         }
     }
 
-    pub fn reset_all(&self) -> std::io::Result<()> {
+    pub fn reset_all(&self) -> anyhow::Result<()> {
         if !std::path::Path::new(&self.path).exists() {
             return Ok(());
         }
-        std::fs::remove_file(&self.path)
+        std::fs::remove_file(&self.path)?;
+        Ok(())
     }
 
-    pub fn init(&self) -> std::io::Result<()> {
-        self.with_conn(|_conn| Ok(()))
-            .map_err(|e| std::io::Error::other(e.to_string()))
+    pub fn init(&self) -> anyhow::Result<()> {
+        self.with_conn(|_conn| Ok(()))?;
+        Ok(())
     }
 
     fn with_conn<F, T>(&self, f: F) -> rusqlite::Result<T>
@@ -54,8 +55,8 @@ impl SqliteStorage {
 }
 
 impl Storage for SqliteStorage {
-    fn load_last(&self) -> std::io::Result<Option<Block>> {
-        let r = self.with_conn(|conn| {
+    fn load_last(&self) -> anyhow::Result<Option<Block>> {
+        let opt = self.with_conn(|conn| {
             conn.query_row(
                 "SELECT height, hash FROM chain_state WHERE id = 1",
                 [],
@@ -69,26 +70,20 @@ impl Storage for SqliteStorage {
                 },
             )
             .optional()
-        });
-        match r {
-            Ok(opt) => Ok(opt),
-            Err(e) => Err(std::io::Error::other(e.to_string())),
-        }
+        })?;
+        Ok(opt)
     }
 
-    fn save_last(&self, height: u64, hash: &str) -> std::io::Result<()> {
-        let r = self.with_conn(|conn| {
+    fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
+        self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash",
                 params![height as i64, hash],
             )?;
             Ok(())
-        });
-        match r {
-            Ok(()) => Ok(()),
-            Err(e) => Err(std::io::Error::other(e.to_string())),
-        }
+        })?;
+        Ok(())
     }
 }
 
