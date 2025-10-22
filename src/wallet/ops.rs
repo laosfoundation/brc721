@@ -5,6 +5,7 @@ use bdk_wallet::{
 };
 use bitcoin::Network;
 use rusqlite::Connection;
+use anyhow::{Result, anyhow};
 
 use super::paths::wallet_db_path;
 use super::types::InitResult;
@@ -14,14 +15,13 @@ pub fn init_wallet(
     network: Network,
     mnemonic_str: Option<String>,
     passphrase: Option<String>,
-) -> Result<InitResult, String> {
+) -> Result<InitResult> {
     let db_path = wallet_db_path(data_dir, network);
-    let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let mut conn = Connection::open(&db_path)?;
 
     if let Some(_wallet) = LoadParams::new()
         .check_network(network)
-        .load_wallet(&mut conn)
-        .map_err(|e| format!("{}", e))?
+        .load_wallet(&mut conn)?
     {
         return Ok(InitResult {
             created: false,
@@ -31,9 +31,9 @@ pub fn init_wallet(
     }
 
     let mnemonic = match mnemonic_str {
-        Some(s) => Mnemonic::parse(s).map_err(|e| format!("{}", e))?,
+        Some(s) => Mnemonic::parse(s)?,
         None => <Mnemonic as bdk_wallet::keys::GeneratableKey<bdk_wallet::miniscript::Tap>>::generate((WordCount::Words12, Language::English))
-            .map_err(|e| format!("{:?}", e))?
+            .map_err(|e| e.map(Into::into).unwrap_or_else(|| anyhow!("failed to generate mnemonic")))?
             .into_key(),
     };
 
@@ -42,8 +42,7 @@ pub fn init_wallet(
 
     let _wallet = CreateParams::new(ext, int)
         .network(network)
-        .create_wallet(&mut conn)
-        .map_err(|e| format!("{}", e))?;
+        .create_wallet(&mut conn)?;
 
     Ok(InitResult {
         created: true,
@@ -55,17 +54,16 @@ pub fn init_wallet(
 pub fn next_address(
     data_dir: &str,
     network: Network,
-) -> Result<String, String> {
+) -> Result<String> {
     let db_path = wallet_db_path(data_dir, network);
-    let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let mut conn = Connection::open(&db_path)?;
 
     let mut wallet = LoadParams::new()
         .check_network(network)
-        .load_wallet(&mut conn)
-        .map_err(|e| format!("{}", e))?
-        .ok_or_else(|| "wallet not initialized".to_string())?;
+        .load_wallet(&mut conn)?
+        .ok_or_else(|| anyhow!("wallet not initialized"))?;
 
     let addr = wallet.reveal_next_address(KeychainKind::External).address.to_string();
-    let _ = wallet.persist(&mut conn).map_err(|e| format!("{}", e))?;
+    let _ = wallet.persist(&mut conn)?;
     Ok(addr)
 }

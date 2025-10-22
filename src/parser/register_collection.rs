@@ -9,13 +9,7 @@ pub fn digest(tx: &Brc721Tx) -> Result<(), Brc721Error> {
 }
 
 fn parse(tx: &Brc721Tx) -> Result<RegisterCollectionMessage, Brc721Error> {
-    use crate::types::MessageDecodeError;
-    match RegisterCollectionMessage::decode(tx) {
-        Ok(msg) => Ok(msg),
-        Err(MessageDecodeError::ScriptTooShort) => Err(Brc721Error::ScriptTooShort),
-        Err(MessageDecodeError::WrongCommand(b)) => Err(Brc721Error::WrongCommand(b)),
-        Err(MessageDecodeError::InvalidRebaseFlag(b)) => Err(Brc721Error::InvalidRebaseFlag(b)),
-    }
+    Ok(RegisterCollectionMessage::decode(tx)?)
 }
 
 #[cfg(test)]
