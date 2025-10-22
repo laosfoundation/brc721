@@ -66,8 +66,9 @@ impl CommandRunner for cli::TxCmd {
                 let _ = wallet.persist(&mut conn)?;
 
                 let auth = match (&cli.rpc_user, &cli.rpc_pass) {
-                    (Some(user), Some(pass)) =>
-                        bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
+                    (Some(user), Some(pass)) => {
+                        bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone())
+                    }
                     _ => bitcoincore_rpc::Auth::None,
                 };
                 let rpc = bitcoincore_rpc::Client::new(&cli.rpc_url, auth)
