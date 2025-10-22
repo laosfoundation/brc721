@@ -51,10 +51,13 @@ mod tests {
     #[test]
     fn test_encode_array_round_trip() {
         let msg = RegisterCollectionMessage {
-            collection_address: CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap(),
+            collection_address: CollectionAddress::from_str(
+                "ffff0123ffffffffffffffffffffffff3210ffff",
+            )
+            .unwrap(),
             rebaseable: false,
         };
-        let arr = msg.encode_array();
+        let arr = msg.encode();
         let decoded = RegisterCollectionMessage::decode(arr).unwrap();
         assert_eq!(decoded, msg);
     }
@@ -62,11 +65,14 @@ mod tests {
     #[test]
     fn test_round_trip_encode_decode() {
         let msg = RegisterCollectionMessage {
-            collection_address: CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap(),
+            collection_address: CollectionAddress::from_str(
+                "ffff0123ffffffffffffffffffffffff3210ffff",
+            )
+            .unwrap(),
             rebaseable: true,
         };
         let bytes = msg.encode();
-        let decoded = RegisterCollectionMessage::decode(&bytes).unwrap();
+        let decoded = RegisterCollectionMessage::decode(bytes).unwrap();
         assert_eq!(decoded, msg);
     }
 }
