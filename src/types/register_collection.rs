@@ -59,7 +59,10 @@ mod tests {
 
     #[test]
     fn encode_decode_no_rebase() {
-        let m = RegisterCollectionMessage { collection_address: addr(), rebaseable: false };
+        let m = RegisterCollectionMessage {
+            collection_address: addr(),
+            rebaseable: false,
+        };
         let arr = m.encode();
         assert_eq!(arr.len(), RegisterCollectionMessage::LEN);
         assert_eq!(arr[0], Brc721Command::RegisterCollection as u8);
@@ -71,7 +74,10 @@ mod tests {
 
     #[test]
     fn encode_decode_rebase_true() {
-        let m = RegisterCollectionMessage { collection_address: addr(), rebaseable: true };
+        let m = RegisterCollectionMessage {
+            collection_address: addr(),
+            rebaseable: true,
+        };
         let arr = m.encode();
         assert_eq!(arr[21], 1);
         let dec = RegisterCollectionMessage::decode(arr).unwrap();
@@ -80,24 +86,61 @@ mod tests {
 
     #[test]
     fn decode_wrong_command() {
-        let mut arr = RegisterCollectionMessage { collection_address: addr(), rebaseable: true }.encode();
+        let mut arr = RegisterCollectionMessage {
+            collection_address: addr(),
+            rebaseable: true,
+        }
+        .encode();
         arr[0] = 0xFF;
         let e = RegisterCollectionMessage::decode(arr).unwrap_err();
-        match e { MessageDecodeError::WrongCommand(b) => assert_eq!(b, 0xFF), _ => panic!() }
+        match e {
+            MessageDecodeError::WrongCommand(b) => assert_eq!(b, 0xFF),
+            _ => panic!(),
+        }
     }
 
     #[test]
     fn decode_script_too_short() {
-        let bytes = &RegisterCollectionMessage { collection_address: addr(), rebaseable: false }.encode()[..RegisterCollectionMessage::LEN-1];
+        let bytes = &RegisterCollectionMessage {
+            collection_address: addr(),
+            rebaseable: false,
+        }
+        .encode()[..RegisterCollectionMessage::LEN - 1];
         let e = RegisterCollectionMessage::decode(bytes).unwrap_err();
-        match e { MessageDecodeError::ScriptTooShort => {}, _ => panic!() }
+        match e {
+            MessageDecodeError::ScriptTooShort => {}
+            _ => panic!(),
+        }
     }
 
     #[test]
     fn decode_invalid_rebase_flag() {
-        let mut arr = RegisterCollectionMessage { collection_address: addr(), rebaseable: true }.encode();
+        let mut arr = RegisterCollectionMessage {
+            collection_address: addr(),
+            rebaseable: true,
+        }
+        .encode();
         arr[21] = 2;
         let e = RegisterCollectionMessage::decode(arr).unwrap_err();
-        match e { MessageDecodeError::InvalidRebaseFlag(b) => assert_eq!(b, 2), _ => panic!() }
+        match e {
+            MessageDecodeError::InvalidRebaseFlag(b) => assert_eq!(b, 2),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_encode_array_bytes() {
+        let msg = RegisterCollectionMessage {
+            collection_address: CollectionAddress::from_str(
+                "ffff0123ffffffffffffffffffffffff3210ffff",
+            )
+            .unwrap(),
+            rebaseable: true,
+        };
+        let bytes = msg.encode();
+        assert_eq!(
+            hex::encode(bytes),
+            "00ffff0123ffffffffffffffffffffffff3210ffff01"
+        );
     }
 }

@@ -26,9 +26,16 @@ mod tests {
 
     #[test]
     fn test_parse_register_collection_no_rebaseable() {
-        let tx = hex::decode("00ffff0123ffffffffffffffffffffffff3210ffff00").unwrap();
+        let msg = RegisterCollectionMessage {
+            collection_address: CollectionAddress::from_str(
+                "ffff0123ffffffffffffffffffffffff3210ffff",
+            )
+            .unwrap(),
+            rebaseable: false,
+        }
+        .encode();
 
-        let register_collection = parse(&tx).unwrap();
+        let register_collection = parse(&msg).unwrap();
         assert_eq!(
             register_collection.collection_address,
             CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
@@ -38,41 +45,20 @@ mod tests {
 
     #[test]
     fn test_parse_register_collection_rebaseable() {
-        let tx = hex::decode("00ffff0123ffffffffffffffffffffffff3210ffff01").unwrap();
-
-        let register_collection = parse(&tx).unwrap();
-        assert_eq!(
-            register_collection.collection_address,
-            CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
-        );
-        assert!(register_collection.rebaseable)
-    }
-
-    #[test]
-    fn test_encode_array_round_trip() {
-        let msg = RegisterCollectionMessage {
-            collection_address: CollectionAddress::from_str(
-                "ffff0123ffffffffffffffffffffffff3210ffff",
-            )
-            .unwrap(),
-            rebaseable: false,
-        };
-        let arr = msg.encode();
-        let decoded = RegisterCollectionMessage::decode(arr).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn test_round_trip_encode_decode() {
         let msg = RegisterCollectionMessage {
             collection_address: CollectionAddress::from_str(
                 "ffff0123ffffffffffffffffffffffff3210ffff",
             )
             .unwrap(),
             rebaseable: true,
-        };
-        let bytes = msg.encode();
-        let decoded = RegisterCollectionMessage::decode(bytes).unwrap();
-        assert_eq!(decoded, msg);
+        }
+        .encode();
+
+        let register_collection = parse(&msg).unwrap();
+        assert_eq!(
+            register_collection.collection_address,
+            CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
+        );
+        assert!(register_collection.rebaseable)
     }
 }
