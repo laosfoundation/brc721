@@ -101,10 +101,18 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    #[command(
+        about = "Wallet management commands",
+        long_about = "Create or import a mnemonic and manage a corresponding Bitcoin Core watch-only wallet, derive addresses, and inspect balances."
+    )]
     Wallet {
         #[command(subcommand)]
         cmd: WalletCmd,
     },
+    #[command(
+        about = "Transaction-related commands",
+        long_about = "Build and submit protocol transactions, such as registering BRC-721 collections."
+    )]
     Tx {
         #[command(subcommand)]
         cmd: TxCmd,
@@ -113,6 +121,10 @@ pub enum Command {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum WalletCmd {
+    #[command(
+        about = "Initialize wallet and Core watch-only wallet",
+        long_about = "Create or import a BIP39 mnemonic and set up a corresponding Bitcoin Core watch-only wallet with descriptors. Optionally import an existing mnemonic and passphrase, set a custom Core wallet name, and trigger a full rescan."
+    )]
     Init {
         #[arg(
             long,
@@ -143,6 +155,10 @@ pub enum WalletCmd {
         )]
         rescan: bool,
     },
+    #[command(
+        about = "Get a receive or change address",
+        long_about = "Derive and display the next receive address by default, or peek at a specific index without advancing. Use --change to derive from the internal (change) keychain."
+    )]
     Address {
         #[arg(
             long,
@@ -154,7 +170,15 @@ pub enum WalletCmd {
         #[arg(long, default_value_t = false, help = "Use change (internal) keychain")]
         change: bool,
     },
+    #[command(
+        about = "Show wallet balance",
+        long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."
+    )]
     Balance,
+    #[command(
+        about = "List known wallets",
+        long_about = "List discovered or configured wallets. With --all, include unloaded wallets found on disk (requires admin privileges)."
+    )]
     List {
         #[arg(
             long = "all",
@@ -167,6 +191,10 @@ pub enum WalletCmd {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum TxCmd {
+    #[command(
+        about = "Register a BRC-721 collection",
+        long_about = "Create and broadcast a transaction that registers a BRC-721 collection, linking a 20-byte EVM (H160) address. Optionally mark the collection as rebaseable and set a custom fee rate (sat/vB)."
+    )]
     RegisterCollection {
         #[arg(
             long = "laos-hex",
