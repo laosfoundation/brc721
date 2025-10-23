@@ -42,18 +42,14 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("watch-only wallet '{}' ready in Core", watchonly);
                 Ok(())
             }
-            cli::WalletCmd::Address { peek, change } => {
+            cli::WalletCmd::Address { peek: _, change } => {
                 let keychain = if *change {
                     KeychainKind::Internal
                 } else {
                     KeychainKind::External
                 };
                 let w = Wallet::new(&cli.data_dir, net);
-                let addr = if let Some(index) = peek {
-                    w.address_peek(keychain, *index).context("peeking address")?
-                } else {
-                    w.address_next(keychain).context("deriving next address")?
-                };
+                let addr = w.address(keychain).context("getting address")?;
                 log::info!("{addr}");
                 Ok(())
             }

@@ -63,21 +63,7 @@ impl Wallet {
         Ok(types::InitResult { created: true, mnemonic: Some(mnemonic), db_path })
     }
 
-    pub fn address_next(&self, keychain: KeychainKind) -> Result<String> {
-        let db_path = wallet_db_path(self.data_dir_str(), self.network);
-        let mut conn = Connection::open(&db_path)?;
-
-        let mut wallet = LoadParams::new()
-            .check_network(self.network)
-            .load_wallet(&mut conn)?
-            .ok_or_else(|| anyhow!("wallet not initialized"))?;
-
-        let addr = wallet.reveal_next_address(keychain).address.to_string();
-        let _ = wallet.persist(&mut conn)?;
-        Ok(addr)
-    }
-
-    pub fn address_peek(&self, keychain: KeychainKind, index: u32) -> Result<String> {
+    pub fn address(&self, keychain: KeychainKind) -> Result<String> {
         let db_path = wallet_db_path(self.data_dir_str(), self.network);
         let mut conn = Connection::open(&db_path)?;
 
@@ -86,7 +72,7 @@ impl Wallet {
             .load_wallet(&mut conn)?
             .ok_or_else(|| anyhow!("wallet not initialized"))?;
 
-        let addr = wallet.peek_address(keychain, index).to_string();
+        let addr = wallet.peek_address(keychain, 0).to_string();
         Ok(addr)
     }
 
@@ -247,5 +233,48 @@ impl Wallet {
             .context("importing public descriptors to Core")?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{distributions::Alphanumeric, Rng};
+
+    fn temp_data_dir() -> PathBuf {
+        let mut base = std::env::temp_dir();
+        let suffix: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(12)
+            .map(char::from)
+            .collect();
+        base.push(format!("brc721-test-{}", suffix));
+        std::fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    #[test]
+    fn wallet_single_address_is_deterministic() {
+        let data_dir = temp_data_dir();
+        let net = bitcoin::Network::Regtest;
+        let w = Wallet::new(&data_dir, net);
+
+        let mnemonic = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
+        let res = w.init(mnemonic, None).expect("init ok");
+        assert!(res.db_path.exists());
+
+        let ext1 = w.address(KeychainKind::External).expect("ext addr");
+        let ext2 = w.address(KeychainKind::External).expect("ext addr again");
+        assert_eq!(ext1, ext2, "external address should be stable");
+
+        let int1 = w.address(KeychainKind::Internal).expect("int addr");
+        let int2 = w.address(KeychainKind::Internal).expect("int addr again");
+        assert_eq!(int1, int2, "internal address should be stable");
+
+        assert_ne!(ext1, int1, "external and internal addresses differ");
+
+        let w2 = Wallet::new(&data_dir, net);
+        let ext_again = w2.address(KeychainKind::External).expect("ext addr after reload");
+        assert_eq!(ext1, ext_again, "address should be deterministic across instances");
     }
 }
