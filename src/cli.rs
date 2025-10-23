@@ -159,6 +159,10 @@ pub enum WalletCmd {
         change: bool,
     },
     Balance,
+    List {
+        #[arg(long = "all", default_value_t = false, help = "Include unloaded wallets found on disk")]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

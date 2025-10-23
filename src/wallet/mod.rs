@@ -89,7 +89,7 @@ impl Wallet {
             .context("ensuring Core watch-only wallet")?;
 
         let (ext_with_cs, int_with_cs) = self
-            .load_public_descriptors_with_checksum()
+            .public_descriptors_with_checksum()
             .context("loading public descriptors")?;
 
         self.import_public_descriptors(
@@ -131,7 +131,7 @@ impl Wallet {
         self.data_dir.to_str().unwrap_or("")
     }
 
-    fn load_public_descriptors_with_checksum(&self) -> Result<(String, String)> {
+    pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
         let db_path = wallet_db_path(self.data_dir_str(), self.network);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
