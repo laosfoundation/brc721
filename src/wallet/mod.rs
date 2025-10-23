@@ -8,8 +8,10 @@ use bdk_wallet::{
     CreateParams, KeychainKind, LoadParams,
 };
 use bitcoin::{Amount, Network};
-use std::path::PathBuf;
+use bitcoincore_rpc::RpcApi;
 use rusqlite::Connection;
+use serde_json::json;
+use std::path::PathBuf;
 
 use paths::wallet_db_path;
 
@@ -20,10 +22,17 @@ pub struct Wallet {
 
 impl Wallet {
     pub fn new<P: Into<PathBuf>>(data_dir: P, network: Network) -> Self {
-        Self { data_dir: data_dir.into(), network }
+        Self {
+            data_dir: data_dir.into(),
+            network,
+        }
     }
 
-    pub fn init(&self, mnemonic: Option<String>, passphrase: Option<String>) -> Result<types::InitResult> {
+    pub fn init(
+        &self,
+        mnemonic: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<types::InitResult> {
         let db_path = wallet_db_path(self.data_dir_str(), self.network);
         let mut conn = Connection::open(&db_path)?;
 
@@ -38,29 +47,34 @@ impl Wallet {
             });
         }
 
-        let mnemonic = match mnemonic {
-            Some(s) => Mnemonic::parse(s)?,
-            None => {
-                <Mnemonic as bdk_wallet::keys::GeneratableKey<bdk_wallet::miniscript::Tap>>::generate((
-                    WordCount::Words12,
-                    Language::English,
-                ))
+        let mnemonic =
+            match mnemonic {
+                Some(s) => Mnemonic::parse(s)?,
+                None => <Mnemonic as bdk_wallet::keys::GeneratableKey<
+                    bdk_wallet::miniscript::Tap,
+                >>::generate((WordCount::Words12, Language::English))
                 .map_err(|e| {
                     e.map(Into::into)
                         .unwrap_or_else(|| anyhow!("failed to generate mnemonic"))
                 })?
-                .into_key()
-            }
-        };
+                .into_key(),
+            };
 
-        let ext = Bip86((mnemonic.clone(), passphrase.clone()), KeychainKind::External);
+        let ext = Bip86(
+            (mnemonic.clone(), passphrase.clone()),
+            KeychainKind::External,
+        );
         let int = Bip86((mnemonic.clone(), passphrase), KeychainKind::Internal);
 
         let _wallet = CreateParams::new(ext, int)
             .network(self.network)
             .create_wallet(&mut conn)?;
 
-        Ok(types::InitResult { created: true, mnemonic: Some(mnemonic), db_path })
+        Ok(types::InitResult {
+            created: true,
+            mnemonic: Some(mnemonic),
+            db_path,
+        })
     }
 
     pub fn address(&self, keychain: KeychainKind) -> Result<String> {
@@ -91,108 +105,6 @@ impl Wallet {
         let (ext_with_cs, int_with_cs) = self
             .public_descriptors_with_checksum()
             .context("loading public descriptors")?;
-
-        self.import_public_descriptors(
-            base_url,
-            rpc_user,
-            rpc_pass,
-            wallet_name,
-            &ext_with_cs,
-            &int_with_cs,
-            rescan,
-        )
-        .context("importing public descriptors")?;
-
-        Ok(())
-    }
-
-    pub fn core_balance(
-        &self,
-        rpc_url: &str,
-        rpc_user: &Option<String>,
-        rpc_pass: &Option<String>,
-        wallet_name: &str,
-    ) -> Result<Amount> {
-        use bitcoincore_rpc::RpcApi;
-
-        let auth = match (rpc_user, rpc_pass) {
-            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
-            _ => bitcoincore_rpc::Auth::None,
-        };
-        let base = rpc_url.trim_end_matches('/').to_string();
-        let wallet_url = format!("{}/wallet/{}", base, wallet_name);
-        let rpc = bitcoincore_rpc::Client::new(&wallet_url, auth)
-            .context("creating wallet RPC client")?;
-        let bal = rpc.get_balance(None, None)?;
-        Ok(bal)
-    }
-
-    fn data_dir_str(&self) -> &str {
-        self.data_dir.to_str().unwrap_or("")
-    }
-
-    pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
-        let db_path = wallet_db_path(self.data_dir_str(), self.network);
-        let mut conn = Connection::open(&db_path)
-            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
-
-        let wallet = LoadParams::new()
-            .check_network(self.network)
-            .load_wallet(&mut conn)?
-            .ok_or_else(|| anyhow!("wallet not initialized"))?;
-
-        let ext_desc = wallet.public_descriptor(KeychainKind::External).to_string();
-        let int_desc = wallet.public_descriptor(KeychainKind::Internal).to_string();
-        let ext_cs = wallet.descriptor_checksum(KeychainKind::External);
-        let int_cs = wallet.descriptor_checksum(KeychainKind::Internal);
-
-        Ok((format!("{}#{}", ext_desc, ext_cs), format!("{}#{}", int_desc, int_cs)))
-    }
-
-    fn ensure_core_watchonly(
-        &self,
-        base_url: &str,
-        rpc_user: &Option<String>,
-        rpc_pass: &Option<String>,
-        wallet_name: &str,
-    ) -> Result<()> {
-        use bitcoincore_rpc::RpcApi;
-        use serde_json::json;
-
-        let auth = match (rpc_user, rpc_pass) {
-            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
-            _ => bitcoincore_rpc::Auth::None,
-        };
-        let root = bitcoincore_rpc::Client::new(base_url, auth)
-            .context("creating root RPC client")?;
-
-        let _ = root.call::<serde_json::Value>(
-            "createwallet",
-            &[
-                json!(wallet_name),
-                json!(true),  // disable_private_keys
-                json!(true),  // blank
-                json!(""),    // passphrase
-                json!(false), // avoid_reuse
-                json!(true),  // descriptors
-            ],
-        );
-
-        Ok(())
-    }
-
-    fn import_public_descriptors(
-        &self,
-        base_url: &str,
-        rpc_user: &Option<String>,
-        rpc_pass: &Option<String>,
-        wallet_name: &str,
-        ext_with_cs: &str,
-        int_with_cs: &str,
-        rescan: bool,
-    ) -> Result<()> {
-        use bitcoincore_rpc::RpcApi;
-        use serde_json::json;
 
         let auth = match (rpc_user, rpc_pass) {
             (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
@@ -228,6 +140,79 @@ impl Wallet {
         let _res: serde_json::Value = wallet_rpc
             .call("importdescriptors", &[imports])
             .context("importing public descriptors to Core")?;
+
+        Ok(())
+    }
+
+    pub fn core_balance(
+        &self,
+        rpc_url: &str,
+        rpc_user: &Option<String>,
+        rpc_pass: &Option<String>,
+        wallet_name: &str,
+    ) -> Result<Amount> {
+        let auth = match (rpc_user, rpc_pass) {
+            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
+            _ => bitcoincore_rpc::Auth::None,
+        };
+        let base = rpc_url.trim_end_matches('/').to_string();
+        let wallet_url = format!("{}/wallet/{}", base, wallet_name);
+        let rpc = bitcoincore_rpc::Client::new(&wallet_url, auth)
+            .context("creating wallet RPC client")?;
+        let bal = rpc.get_balance(None, None)?;
+        Ok(bal)
+    }
+
+    fn data_dir_str(&self) -> &str {
+        self.data_dir.to_str().unwrap_or("")
+    }
+
+    pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
+        let db_path = wallet_db_path(self.data_dir_str(), self.network);
+        let mut conn = Connection::open(&db_path)
+            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
+
+        let wallet = LoadParams::new()
+            .check_network(self.network)
+            .load_wallet(&mut conn)?
+            .ok_or_else(|| anyhow!("wallet not initialized"))?;
+
+        let ext_desc = wallet.public_descriptor(KeychainKind::External).to_string();
+        let int_desc = wallet.public_descriptor(KeychainKind::Internal).to_string();
+        let ext_cs = wallet.descriptor_checksum(KeychainKind::External);
+        let int_cs = wallet.descriptor_checksum(KeychainKind::Internal);
+
+        Ok((
+            format!("{}#{}", ext_desc, ext_cs),
+            format!("{}#{}", int_desc, int_cs),
+        ))
+    }
+
+    fn ensure_core_watchonly(
+        &self,
+        base_url: &str,
+        rpc_user: &Option<String>,
+        rpc_pass: &Option<String>,
+        wallet_name: &str,
+    ) -> Result<()> {
+        let auth = match (rpc_user, rpc_pass) {
+            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
+            _ => bitcoincore_rpc::Auth::None,
+        };
+        let root =
+            bitcoincore_rpc::Client::new(base_url, auth).context("creating root RPC client")?;
+
+        let _ = root.call::<serde_json::Value>(
+            "createwallet",
+            &[
+                json!(wallet_name),
+                json!(true),  // disable_private_keys
+                json!(true),  // blank
+                json!(""),    // passphrase
+                json!(false), // avoid_reuse
+                json!(true),  // descriptors
+            ],
+        );
 
         Ok(())
     }
@@ -271,7 +256,12 @@ mod tests {
         assert_ne!(ext1, int1, "external and internal addresses differ");
 
         let w2 = Wallet::new(&data_dir, net);
-        let ext_again = w2.address(KeychainKind::External).expect("ext addr after reload");
-        assert_eq!(ext1, ext_again, "address should be deterministic across instances");
+        let ext_again = w2
+            .address(KeychainKind::External)
+            .expect("ext addr after reload");
+        assert_eq!(
+            ext1, ext_again,
+            "address should be deterministic across instances"
+        );
     }
 }

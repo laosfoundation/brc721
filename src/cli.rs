@@ -151,18 +151,16 @@ pub enum WalletCmd {
             required = false
         )]
         peek: Option<u32>,
-        #[arg(
-            long,
-            default_value_t = false,
-            help = "Use change (internal) keychain"
-        )]
+        #[arg(long, default_value_t = false, help = "Use change (internal) keychain")]
         change: bool,
     },
     Balance,
     List {
-        #[arg(long = "admin", default_value_t = false, help = "Admin view: include all loaded wallets (and --all for on-disk)")]
-        admin: bool,
-        #[arg(long = "all", default_value_t = false, help = "Include unloaded wallets found on disk (admin only)")]
+        #[arg(
+            long = "all",
+            default_value_t = false,
+            help = "Include unloaded wallets found on disk (admin only)"
+        )]
         all: bool,
     },
 }

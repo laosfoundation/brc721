@@ -32,7 +32,8 @@ impl CommandRunner for cli::WalletCmd {
                 let wo_name = match watchonly.clone() {
                     Some(name) => name,
                     None => {
-                        let (ext_with_cs, _int_with_cs) = w.public_descriptors_with_checksum()
+                        let (ext_with_cs, _int_with_cs) = w
+                            .public_descriptors_with_checksum()
                             .context("loading public descriptors")?;
                         let mut hasher = sha2::Sha256::new();
                         use sha2::Digest;
@@ -66,15 +67,16 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("{addr}");
                 Ok(())
             }
-            cli::WalletCmd::List { admin, all } => {
+            cli::WalletCmd::List { all } => {
                 use bitcoincore_rpc::RpcApi;
                 let auth = match (&cli.rpc_user, &cli.rpc_pass) {
-                    (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
+                    (Some(user), Some(pass)) => {
+                        bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone())
+                    }
                     _ => bitcoincore_rpc::Auth::None,
                 };
                 let base_url = cli.rpc_url.trim_end_matches('/').to_string();
 
-                let w = Wallet::new(&cli.data_dir, net);
                 let local_path = crate::wallet::paths::wallet_db_path(&cli.data_dir, net);
                 let local_exists = std::fs::metadata(&local_path).is_ok();
                 if local_exists {
@@ -91,10 +93,19 @@ impl CommandRunner for cli::WalletCmd {
                     let wcli = bitcoincore_rpc::Client::new(&wallet_url, auth.clone())
                         .context("creating wallet RPC client")?;
                     let info: serde_json::Value = wcli.call("getwalletinfo", &[])?;
-                    let pk_enabled = info.get("private_keys_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-                    let descriptors = info.get("descriptors").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let pk_enabled = info
+                        .get("private_keys_enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    let descriptors = info
+                        .get("descriptors")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     let watch_only = !pk_enabled;
-                    println!("  name={} watch_only={} descriptors={}", name, watch_only, descriptors);
+                    println!(
+                        "  name={} watch_only={} descriptors={}",
+                        name, watch_only, descriptors
+                    );
                 }
 
                 if *all {
@@ -124,4 +135,3 @@ impl CommandRunner for cli::WalletCmd {
         }
     }
 }
-
