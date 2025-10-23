@@ -156,20 +156,10 @@ pub enum WalletCmd {
         rescan: bool,
     },
     #[command(
-        about = "Get a receive or change address",
-        long_about = "Derive and display the next receive address by default, or peek at a specific index without advancing. Use --change to derive from the internal (change) keychain."
+        about = "Get a receive address",
+        long_about = "Derive and display the next receive address."
     )]
-    Address {
-        #[arg(
-            long,
-            value_name = "INDEX",
-            help = "Peek address at INDEX without advancing",
-            required = false
-        )]
-        peek: Option<u32>,
-        #[arg(long, default_value_t = false, help = "Use change (internal) keychain")]
-        change: bool,
-    },
+    Address,
     #[command(
         about = "Show wallet balance",
         long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."

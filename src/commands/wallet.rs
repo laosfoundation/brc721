@@ -56,12 +56,8 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("watch-only wallet '{}' ready in Core", wo_name);
                 Ok(())
             }
-            cli::WalletCmd::Address { peek: _, change } => {
-                let keychain = if *change {
-                    KeychainKind::Internal
-                } else {
-                    KeychainKind::External
-                };
+            cli::WalletCmd::Address => {
+                let keychain = KeychainKind::External;
                 let w = Wallet::new(&cli.data_dir, net);
                 let addr = w.address(keychain).context("getting address")?;
                 log::info!("{addr}");
