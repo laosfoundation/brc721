@@ -63,7 +63,7 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("{addr}");
                 Ok(())
             }
-            cli::WalletCmd::List { all } => {
+            cli::WalletCmd::List => {
                 use bitcoincore_rpc::RpcApi;
                 let auth = match (&cli.rpc_user, &cli.rpc_pass) {
                     (Some(user), Some(pass)) => {
@@ -104,19 +104,7 @@ impl CommandRunner for cli::WalletCmd {
                     );
                 }
 
-                if *all {
-                    println!("Core (on-disk):");
-                    let dir: serde_json::Value = root.call("listwalletdir", &[])?;
-                    if let Some(arr) = dir.get("wallets").and_then(|v| v.as_array()) {
-                        for w in arr {
-                            if let Some(name) = w.get("name").and_then(|v| v.as_str()) {
-                                if !loaded.iter().any(|lw| lw == name) {
-                                    println!("  name={} unloaded", name);
-                                }
-                            }
-                        }
-                    }
-                }
+
                 Ok(())
             }
             cli::WalletCmd::Balance => {

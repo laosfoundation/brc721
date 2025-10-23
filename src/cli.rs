@@ -167,16 +167,9 @@ pub enum WalletCmd {
     Balance,
     #[command(
         about = "List known wallets",
-        long_about = "List discovered or configured wallets. With --all, include unloaded wallets found on disk (requires admin privileges)."
+        long_about = "List discovered or configured wallets loaded in Bitcoin Core and the local database."
     )]
-    List {
-        #[arg(
-            long = "all",
-            default_value_t = false,
-            help = "Include unloaded wallets found on disk (admin only)"
-        )]
-        all: bool,
-    },
+    List,
 }
 
 #[derive(Subcommand, Debug, Clone)]
