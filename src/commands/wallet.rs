@@ -13,7 +13,6 @@ impl CommandRunner for cli::WalletCmd {
                 mnemonic,
                 passphrase,
                 watchonly,
-                gap,
                 rescan,
             } => {
                 let w = Wallet::new(&cli.data_dir, net);
@@ -34,7 +33,6 @@ impl CommandRunner for cli::WalletCmd {
                     &cli.rpc_user,
                     &cli.rpc_pass,
                     watchonly,
-                    *gap,
                     *rescan,
                 )
                 .context("setting up Core watch-only wallet")?;

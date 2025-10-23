@@ -135,12 +135,7 @@ pub enum WalletCmd {
             help = "Core watch-only wallet name"
         )]
         watchonly: String,
-        #[arg(
-            long = "gap",
-            default_value_t = 200usize,
-            help = "Import descriptor range 0..N in Core"
-        )]
-        gap: usize,
+
         #[arg(
             long = "rescan",
             default_value_t = false,

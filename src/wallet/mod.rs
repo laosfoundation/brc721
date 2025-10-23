@@ -82,7 +82,6 @@ impl Wallet {
         rpc_user: &Option<String>,
         rpc_pass: &Option<String>,
         wallet_name: &str,
-        gap: usize,
         rescan: bool,
     ) -> Result<()> {
         let base_url = rpc_url.trim_end_matches('/');
@@ -100,7 +99,6 @@ impl Wallet {
             wallet_name,
             &ext_with_cs,
             &int_with_cs,
-            gap,
             rescan,
         )
         .context("importing public descriptors")?;
@@ -191,7 +189,6 @@ impl Wallet {
         wallet_name: &str,
         ext_with_cs: &str,
         int_with_cs: &str,
-        gap: usize,
         rescan: bool,
     ) -> Result<()> {
         use bitcoincore_rpc::RpcApi;
@@ -206,7 +203,7 @@ impl Wallet {
         let wallet_rpc = bitcoincore_rpc::Client::new(&wallet_url, auth)
             .context("creating wallet RPC client")?;
 
-        let end = (gap as u32).saturating_sub(1);
+        let end = 0u32;
         let ts_val = if rescan { json!(0) } else { json!("now") };
 
         let imports = json!([
