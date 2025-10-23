@@ -78,8 +78,6 @@ impl CommandRunner for cli::WalletCmd {
                 let local_path = crate::wallet::paths::wallet_db_path(&cli.data_dir, net);
                 let local_exists = std::fs::metadata(&local_path).is_ok();
                 if local_exists {
-                    // presence checked further below while iterating loaded wallets via listdescriptors
-                    let _ = w.public_descriptors_with_checksum();
                     println!("Local:");
                     println!("  network={} path={}", cli.network, local_path.display());
                 }
@@ -88,38 +86,7 @@ impl CommandRunner for cli::WalletCmd {
                     .context("creating root RPC client")?;
                 let loaded: Vec<String> = root.list_wallets()?;
                 println!("Core (loaded):");
-                // We will also determine if the local wallet descriptors are present in any loaded wallet
-                let mut local_ext: Option<String> = None;
-                let mut local_int: Option<String> = None;
-                if local_exists {
-                    if let Ok((e, i)) = w.public_descriptors_with_checksum() {
-                        local_ext = Some(e);
-                        local_int = Some(i);
-                    }
-                }
-                let local_ext_base = local_ext.as_ref().map(|s| s.split('#').next().unwrap_or("").to_string());
-                let local_int_base = local_int.as_ref().map(|s| s.split('#').next().unwrap_or("").to_string());
-
-                // Scope to our default watch-only wallet unless admin
-                let target_watch_name = if *admin {
-                    None
-                } else if local_exists {
-                    if let Some(ref ext) = local_ext {
-                        let mut hasher = sha2::Sha256::new();
-                        use sha2::Digest;
-                        hasher.update(ext.as_bytes());
-                        let hash = hasher.finalize();
-                        let short = hex::encode(&hash[..4]);
-                        Some(format!("brc721-{}-{}", short, cli.network))
-                    } else { None }
-                } else { None };
-
-                let mut watched_any = false;
-                let mut watchers: Vec<String> = Vec::new();
                 for name in &loaded {
-                    if let Some(ref only) = target_watch_name {
-                        if name != only { continue; }
-                    }
                     let wallet_url = format!("{}/wallet/{}", base_url, name);
                     let wcli = bitcoincore_rpc::Client::new(&wallet_url, auth.clone())
                         .context("creating wallet RPC client")?;
@@ -127,39 +94,7 @@ impl CommandRunner for cli::WalletCmd {
                     let pk_enabled = info.get("private_keys_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
                     let descriptors = info.get("descriptors").and_then(|v| v.as_bool()).unwrap_or(false);
                     let watch_only = !pk_enabled;
-
-                    // Try listdescriptors to see if this wallet watches our descriptors
-                    let mut watches_local = false;
-                    if descriptors {
-                        if let Ok(descs) = wcli.call::<serde_json::Value>("listdescriptors", &[]) {
-                            if let (Some(ref ext_base), Some(ref int_base)) = (&local_ext_base, &local_int_base) {
-                                if let Some(arr) = descs.get("descriptors").and_then(|v| v.as_array()) {
-                                    for d in arr {
-                                        if let Some(desc_str) = d.get("desc").and_then(|v| v.as_str()) {
-                                            let remote_base = desc_str.split('#').next().unwrap_or("");
-                                            if remote_base == ext_base || remote_base == int_base {
-                                                watches_local = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if watches_local {
-                        watched_any = true;
-                        watchers.push(name.clone());
-                    }
-
-                    println!("  name={} watch_only={} descriptors={} watches_local={}",
-                        name, watch_only, descriptors, watches_local);
-                }
-                if local_exists {
-                    println!("Local watch status: watched_by_core={}{}",
-                        watched_any,
-                        if watched_any { format!(" ({})", watchers.join(", ")) } else { String::new() }
-                    );
+                    println!("  name={} watch_only={} descriptors={}", name, watch_only, descriptors);
                 }
 
                 if *all {
@@ -189,3 +124,4 @@ impl CommandRunner for cli::WalletCmd {
         }
     }
 }
+
