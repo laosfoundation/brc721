@@ -28,16 +28,31 @@ impl CommandRunner for cli::WalletCmd {
                     log::info!("wallet already initialized db={}", res.db_path.display());
                 }
 
+                // compute default watch-only wallet name if not provided
+                let wo_name = match watchonly.clone() {
+                    Some(name) => name,
+                    None => {
+                        let (ext_with_cs, _int_with_cs) = w.public_descriptors_with_checksum()
+                            .context("loading public descriptors")?;
+                        let mut hasher = sha2::Sha256::new();
+                        use sha2::Digest;
+                        hasher.update(ext_with_cs.as_bytes());
+                        let hash = hasher.finalize();
+                        let short = hex::encode(&hash[..4]);
+                        format!("brc721-{}-{}", short, cli.network)
+                    }
+                };
+
                 w.setup_watchonly(
                     &cli.rpc_url,
                     &cli.rpc_user,
                     &cli.rpc_pass,
-                    watchonly,
+                    &wo_name,
                     *rescan,
                 )
                 .context("setting up Core watch-only wallet")?;
 
-                log::info!("watch-only wallet '{}' ready in Core", watchonly);
+                log::info!("watch-only wallet '{}' ready in Core", wo_name);
                 Ok(())
             }
             cli::WalletCmd::Address { peek: _, change } => {
@@ -51,7 +66,7 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("{addr}");
                 Ok(())
             }
-            cli::WalletCmd::List { all } => {
+            cli::WalletCmd::List { admin, all } => {
                 use bitcoincore_rpc::RpcApi;
                 let auth = match (&cli.rpc_user, &cli.rpc_pass) {
                     (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
@@ -82,9 +97,29 @@ impl CommandRunner for cli::WalletCmd {
                         local_int = Some(i);
                     }
                 }
+                let local_ext_base = local_ext.as_ref().map(|s| s.split('#').next().unwrap_or("").to_string());
+                let local_int_base = local_int.as_ref().map(|s| s.split('#').next().unwrap_or("").to_string());
+
+                // Scope to our default watch-only wallet unless admin
+                let target_watch_name = if *admin {
+                    None
+                } else if local_exists {
+                    if let Some(ref ext) = local_ext {
+                        let mut hasher = sha2::Sha256::new();
+                        use sha2::Digest;
+                        hasher.update(ext.as_bytes());
+                        let hash = hasher.finalize();
+                        let short = hex::encode(&hash[..4]);
+                        Some(format!("brc721-{}-{}", short, cli.network))
+                    } else { None }
+                } else { None };
+
                 let mut watched_any = false;
                 let mut watchers: Vec<String> = Vec::new();
                 for name in &loaded {
+                    if let Some(ref only) = target_watch_name {
+                        if name != only { continue; }
+                    }
                     let wallet_url = format!("{}/wallet/{}", base_url, name);
                     let wcli = bitcoincore_rpc::Client::new(&wallet_url, auth.clone())
                         .context("creating wallet RPC client")?;
@@ -97,11 +132,12 @@ impl CommandRunner for cli::WalletCmd {
                     let mut watches_local = false;
                     if descriptors {
                         if let Ok(descs) = wcli.call::<serde_json::Value>("listdescriptors", &[]) {
-                            if let (Some(ref ext), Some(ref int)) = (&local_ext, &local_int) {
+                            if let (Some(ref ext_base), Some(ref int_base)) = (&local_ext_base, &local_int_base) {
                                 if let Some(arr) = descs.get("descriptors").and_then(|v| v.as_array()) {
                                     for d in arr {
                                         if let Some(desc_str) = d.get("desc").and_then(|v| v.as_str()) {
-                                            if desc_str == ext || desc_str == int {
+                                            let remote_base = desc_str.split('#').next().unwrap_or("");
+                                            if remote_base == ext_base || remote_base == int_base {
                                                 watches_local = true;
                                                 break;
                                             }

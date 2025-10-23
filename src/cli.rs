@@ -131,10 +131,10 @@ pub enum WalletCmd {
         #[arg(
             long = "watchonly",
             value_name = "NAME",
-            default_value = "brc721-watchonly",
-            help = "Core watch-only wallet name"
+            help = "Core watch-only wallet name (optional, defaults to a unique name)",
+            required = false
         )]
-        watchonly: String,
+        watchonly: Option<String>,
 
         #[arg(
             long = "rescan",
@@ -160,7 +160,9 @@ pub enum WalletCmd {
     },
     Balance,
     List {
-        #[arg(long = "all", default_value_t = false, help = "Include unloaded wallets found on disk")]
+        #[arg(long = "admin", default_value_t = false, help = "Admin view: include all loaded wallets (and --all for on-disk)")]
+        admin: bool,
+        #[arg(long = "all", default_value_t = false, help = "Include unloaded wallets found on disk (admin only)")]
         all: bool,
     },
 }
