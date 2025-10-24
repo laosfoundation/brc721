@@ -12,6 +12,7 @@ use bitcoincore_rpc::RpcApi;
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
+use crate::wallet::types::CoreRpc;
 
 use paths::wallet_db_path;
 
@@ -156,10 +157,8 @@ impl Wallet {
             _ => bitcoincore_rpc::Auth::None,
         };
         let base = rpc_url.trim_end_matches('/').to_string();
-        let wallet_url = format!("{}/wallet/{}", base, wallet_name);
-        let rpc = bitcoincore_rpc::Client::new(&wallet_url, auth)
-            .context("creating wallet RPC client")?;
-        let bal = rpc.get_balance(None, None)?;
+        let rpc = crate::wallet::types::RealCoreRpc::new(base, auth);
+        let bal = CoreRpc::get_wallet_balance(&rpc, wallet_name)?;
         Ok(bal)
     }
 

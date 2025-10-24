@@ -4,6 +4,7 @@ use crate::network;
 use crate::wallet::Wallet;
 use anyhow::{Context, Result};
 use bdk_wallet::KeychainKind;
+use crate::wallet::types::CoreRpc;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, cli: &cli::Cli) -> Result<()> {
@@ -80,15 +81,11 @@ impl CommandRunner for cli::WalletCmd {
                     println!("  network={} path={}", cli.network, local_path.display());
                 }
 
-                let root = bitcoincore_rpc::Client::new(&base_url, auth.clone())
-                    .context("creating root RPC client")?;
-                let loaded: Vec<String> = root.list_wallets()?;
+                let rpc = crate::wallet::types::RealCoreRpc::new(base_url.clone(), auth.clone());
+                let loaded: Vec<String> = CoreRpc::list_wallets(&rpc)?;
                 println!("Core (loaded):");
                 for name in &loaded {
-                    let wallet_url = format!("{}/wallet/{}", base_url, name);
-                    let wcli = bitcoincore_rpc::Client::new(&wallet_url, auth.clone())
-                        .context("creating wallet RPC client")?;
-                    let info: serde_json::Value = wcli.call("getwalletinfo", &[])?;
+                    let info = CoreRpc::get_wallet_info(&rpc, name)?;
                     let pk_enabled = info
                         .get("private_keys_enabled")
                         .and_then(|v| v.as_bool())
