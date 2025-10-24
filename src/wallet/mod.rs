@@ -74,8 +74,10 @@ impl Wallet {
     }
 
     pub fn address(&self, keychain: KeychainKind) -> Result<Address> {
-        let wallet = self.load_wallet_or_err()?;
-        let addr = wallet.peek_address(keychain, 0).address;
+        let mut wallet = self.load_wallet_or_err()?;
+        let addr = wallet.reveal_next_address(keychain).address;
+        let mut conn = self.open_conn()?;
+        wallet.persist(&mut conn)?;
         Ok(addr)
     }
 
@@ -240,21 +242,22 @@ mod tests {
 
         let ext1 = w.address(KeychainKind::External).expect("ext addr");
         let ext2 = w.address(KeychainKind::External).expect("ext addr again");
-        assert_eq!(ext1, ext2, "external address should be stable");
+        assert_ne!(ext1, ext2, "external address should advance");
 
         let int1 = w.address(KeychainKind::Internal).expect("int addr");
         let int2 = w.address(KeychainKind::Internal).expect("int addr again");
-        assert_eq!(int1, int2, "internal address should be stable");
+        assert_ne!(int1, int2, "internal address should advance");
 
         assert_ne!(ext1, int1, "external and internal addresses differ");
 
+        let _ext3 = w.address(KeychainKind::External).expect("third ext addr");
         let w2 = Wallet::new(&data_dir, net);
         let ext_again = w2
             .address(KeychainKind::External)
             .expect("ext addr after reload");
-        assert_eq!(
-            ext1, ext_again,
-            "address should be deterministic across instances"
+        assert_ne!(
+            ext2, ext_again,
+            "derivation state should advance across instances"
         );
     }
 

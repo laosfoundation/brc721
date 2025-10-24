@@ -148,8 +148,8 @@ pub enum WalletCmd {
         rescan: bool,
     },
     #[command(
-        about = "Get a receive address",
-        long_about = "Derive and display the next receive address."
+        about = "Get a new receive address",
+        long_about = "Advance derivation and display the next unused receive address (state is persisted)."
     )]
     Address,
     #[command(
