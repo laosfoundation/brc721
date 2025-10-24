@@ -1,13 +1,13 @@
 pub mod brc721_command;
 pub mod register_collection;
 
+use bitcoin::absolute::LockTime;
 use bitcoin::opcodes;
-pub use brc721_command::Brc721Command;
 use bitcoin::script::{Builder, PushBytesBuf};
+use bitcoin::transaction::Version;
 use bitcoin::ScriptBuf;
 use bitcoin::{Amount, Transaction, TxOut};
-use bitcoin::absolute::LockTime;
-use bitcoin::transaction::Version;
+pub use brc721_command::Brc721Command;
 use ethereum_types::H160;
 pub use register_collection::{
     MessageDecodeError, RegisterCollectionMessage, RegisterCollectionTx,
@@ -32,7 +32,10 @@ pub fn build_register_collection_tx(msg: &RegisterCollectionMessage) -> Transact
         version: Version(2),
         lock_time: LockTime::ZERO,
         input: vec![],
-        output: vec![TxOut { value: Amount::from_sat(0), script_pubkey: script }],
+        output: vec![TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: script,
+        }],
     }
 }
 

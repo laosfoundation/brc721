@@ -1,6 +1,7 @@
 pub mod paths;
 pub mod types;
 
+use crate::wallet::types::CoreRpc;
 use anyhow::{anyhow, Context, Result};
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic, WordCount},
@@ -12,7 +13,6 @@ use bitcoincore_rpc::RpcApi;
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
-use crate::wallet::types::CoreRpc;
 
 use paths::wallet_db_path;
 

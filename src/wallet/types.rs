@@ -1,7 +1,7 @@
 use bdk_wallet::keys::bip39::Mnemonic;
 use bitcoin::Amount;
-use std::path::PathBuf;
 use bitcoincore_rpc::RpcApi;
+use std::path::PathBuf;
 
 pub struct InitResult {
     pub created: bool,

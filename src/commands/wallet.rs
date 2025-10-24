@@ -1,14 +1,13 @@
 use super::CommandRunner;
-use crate::cli;
-use crate::network;
+use crate::wallet::types::CoreRpc;
 use crate::wallet::Wallet;
+use crate::{cli, context};
 use anyhow::{Context, Result};
 use bdk_wallet::KeychainKind;
-use crate::wallet::types::CoreRpc;
 
 impl CommandRunner for cli::WalletCmd {
-    fn run(&self, cli: &cli::Cli) -> Result<()> {
-        let net = network::parse_network(Some(cli.network.clone()));
+    fn run(&self, ctx: &context::Context) -> Result<()> {
+        let net = ctx.network;
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
@@ -16,7 +15,7 @@ impl CommandRunner for cli::WalletCmd {
                 watchonly,
                 rescan,
             } => {
-                let w = Wallet::new(&cli.data_dir, net);
+                let w = Wallet::new(&ctx.data_dir, net);
                 let res = w
                     .init(mnemonic.clone(), passphrase.clone())
                     .context("Initializing wallet")?;
@@ -29,7 +28,6 @@ impl CommandRunner for cli::WalletCmd {
                     log::info!("wallet already initialized db={}", res.db_path.display());
                 }
 
-                // compute default watch-only wallet name if not provided
                 let wo_name = match watchonly.clone() {
                     Some(name) => name,
                     None => {
@@ -41,47 +39,41 @@ impl CommandRunner for cli::WalletCmd {
                         hasher.update(ext_with_cs.as_bytes());
                         let hash = hasher.finalize();
                         let short = hex::encode(&hash[..4]);
-                        format!("brc721-{}-{}", short, cli.network)
+                        format!("brc721-{}-{}", short, ctx.network)
                     }
                 };
 
-                w.setup_watchonly(
-                    &cli.rpc_url,
-                    &cli.rpc_user,
-                    &cli.rpc_pass,
-                    &wo_name,
-                    *rescan,
-                )
-                .context("setting up Core watch-only wallet")?;
+                let (rpc_user, rpc_pass) = match &ctx.auth {
+                    bitcoincore_rpc::Auth::UserPass(user, pass) => {
+                        (Some(user.clone()), Some(pass.clone()))
+                    }
+                    _ => (None, None),
+                };
+                w.setup_watchonly(&ctx.rpc_url, &rpc_user, &rpc_pass, &wo_name, *rescan)
+                    .context("setting up Core watch-only wallet")?;
 
                 log::info!("watch-only wallet '{}' ready in Core", wo_name);
                 Ok(())
             }
             cli::WalletCmd::Address => {
                 let keychain = KeychainKind::External;
-                let w = Wallet::new(&cli.data_dir, net);
+                let w = Wallet::new(&ctx.data_dir, net);
                 let addr = w.address(keychain).context("getting address")?;
                 log::info!("{addr}");
                 Ok(())
             }
             cli::WalletCmd::List => {
-                use bitcoincore_rpc::RpcApi;
-                let auth = match (&cli.rpc_user, &cli.rpc_pass) {
-                    (Some(user), Some(pass)) => {
-                        bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone())
-                    }
-                    _ => bitcoincore_rpc::Auth::None,
-                };
-                let base_url = cli.rpc_url.trim_end_matches('/').to_string();
+                let base_url = ctx.rpc_url.trim_end_matches('/').to_string();
 
-                let local_path = crate::wallet::paths::wallet_db_path(&cli.data_dir, net);
+                let local_path = crate::wallet::paths::wallet_db_path(&ctx.data_dir, net);
                 let local_exists = std::fs::metadata(&local_path).is_ok();
                 if local_exists {
                     println!("Local:");
-                    println!("  network={} path={}", cli.network, local_path.display());
+                    println!("  network={} path={}", ctx.network, local_path.display());
                 }
 
-                let rpc = crate::wallet::types::RealCoreRpc::new(base_url.clone(), auth.clone());
+                let rpc =
+                    crate::wallet::types::RealCoreRpc::new(base_url.clone(), ctx.auth.clone());
                 let loaded: Vec<String> = CoreRpc::list_wallets(&rpc)?;
                 println!("Core (loaded):");
                 for name in &loaded {
@@ -101,14 +93,19 @@ impl CommandRunner for cli::WalletCmd {
                     );
                 }
 
-
                 Ok(())
             }
             cli::WalletCmd::Balance => {
-                let w = Wallet::new(&cli.data_dir, net);
+                let w = Wallet::new(&ctx.data_dir, net);
                 let wallet_name = "brc721-watchonly";
+                let (user, pass) = match &ctx.auth {
+                    bitcoincore_rpc::Auth::UserPass(user, pass) => {
+                        (Some(user.clone()), Some(pass.clone()))
+                    }
+                    _ => (None, None),
+                };
                 let bal = w
-                    .core_balance(&cli.rpc_url, &cli.rpc_user, &cli.rpc_pass, wallet_name)
+                    .core_balance(&ctx.rpc_url, &user, &pass, wallet_name)
                     .context("reading core balance")?;
                 log::info!("{bal}");
                 Ok(())

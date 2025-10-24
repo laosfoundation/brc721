@@ -24,7 +24,9 @@ impl From<crate::types::MessageDecodeError> for Brc721Error {
         match value {
             crate::types::MessageDecodeError::ScriptTooShort => Brc721Error::ScriptTooShort,
             crate::types::MessageDecodeError::WrongCommand(b) => Brc721Error::WrongCommand(b),
-            crate::types::MessageDecodeError::InvalidRebaseFlag(b) => Brc721Error::InvalidRebaseFlag(b),
+            crate::types::MessageDecodeError::InvalidRebaseFlag(b) => {
+                Brc721Error::InvalidRebaseFlag(b)
+            }
         }
     }
 }
