@@ -5,16 +5,15 @@ use std::sync::Arc;
 
 mod cli;
 mod commands;
+mod context;
 mod core;
+mod network;
 mod parser;
 mod scanner;
 mod storage;
 mod tracing;
 pub mod types;
 mod wallet;
-mod network;
-mod context;
-
 
 fn main() -> Result<()> {
     let cli = cli::parse();

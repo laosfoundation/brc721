@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use bitcoin::Network;
+use std::path::{Path, PathBuf};
 
 pub fn wallet_db_path<P: AsRef<Path>>(data_dir: P, network: Network) -> PathBuf {
     let mut p = PathBuf::from(data_dir.as_ref());
