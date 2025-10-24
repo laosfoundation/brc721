@@ -69,6 +69,12 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("{bal}");
                 Ok(())
             }
+            cli::WalletCmd::Xpub => {
+                let (ext, int) = w.public_descriptors_with_checksum()?;
+                log::info!("external: {ext}");
+                log::info!("internal: {int}");
+                Ok(())
+            }
         }
     }
 }
