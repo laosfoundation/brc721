@@ -1,21 +1,22 @@
 pub mod paths;
 pub mod types;
 
-use crate::wallet::types::CoreRpc;
+use crate::wallet::types::{CoreAdmin, CoreRpc, CoreWalletInfo, RealCoreAdmin};
 use anyhow::{anyhow, Context, Result};
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic, WordCount},
     template::Bip86,
-    CreateParams, KeychainKind, LoadParams,
+    CreateParams, KeychainKind, LoadParams, PersistedWallet,
 };
-use bitcoin::{Amount, Network};
-use bitcoincore_rpc::{Auth, RpcApi};
+use bitcoin::{Address, Amount, Network};
+use bitcoincore_rpc::Auth;
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
 
 use paths::wallet_db_path;
 
+#[derive(Debug)]
 pub struct Wallet {
     data_dir: PathBuf,
     network: Network,
@@ -34,8 +35,8 @@ impl Wallet {
         mnemonic: Option<String>,
         passphrase: Option<String>,
     ) -> Result<types::InitResult> {
-        let db_path = wallet_db_path(self.data_dir_str(), self.network);
-        let mut conn = Connection::open(&db_path)?;
+        let db_path = self.local_db_path();
+        let mut conn = self.open_conn()?;
 
         if let Some(_wallet) = LoadParams::new()
             .check_network(self.network)
@@ -48,23 +49,17 @@ impl Wallet {
             });
         }
 
-        let mnemonic =
-            match mnemonic {
-                Some(s) => Mnemonic::parse(s)?,
-                None => <Mnemonic as bdk_wallet::keys::GeneratableKey<
-                    bdk_wallet::miniscript::Tap,
-                >>::generate((WordCount::Words12, Language::English))
-                .map_err(|e| {
-                    e.map(Into::into)
-                        .unwrap_or_else(|| anyhow!("failed to generate mnemonic"))
-                })?
-                .into_key(),
-            };
+        let mnemonic = match mnemonic {
+            Some(s) => Mnemonic::parse(s)?,
+            None => <Mnemonic as bdk_wallet::keys::GeneratableKey<bdk_wallet::miniscript::Tap>>::generate((
+                WordCount::Words12,
+                Language::English,
+            ))
+            .map_err(|e| e.map(Into::into).unwrap_or_else(|| anyhow!("failed to generate mnemonic")))?
+            .into_key(),
+        };
 
-        let ext = Bip86(
-            (mnemonic.clone(), passphrase.clone()),
-            KeychainKind::External,
-        );
+        let ext = Bip86((mnemonic.clone(), passphrase.clone()), KeychainKind::External);
         let int = Bip86((mnemonic.clone(), passphrase), KeychainKind::Internal);
 
         let _wallet = CreateParams::new(ext, int)
@@ -78,24 +73,36 @@ impl Wallet {
         })
     }
 
-    pub fn address(&self, keychain: KeychainKind) -> Result<String> {
-        let db_path = wallet_db_path(self.data_dir_str(), self.network);
-        let mut conn = Connection::open(&db_path)?;
-
-        let wallet = LoadParams::new()
-            .check_network(self.network)
-            .load_wallet(&mut conn)?
-            .ok_or_else(|| anyhow!("wallet not initialized"))?;
-
-        let addr = wallet.peek_address(keychain, 0).to_string();
+    pub fn address(&self, keychain: KeychainKind) -> Result<Address> {
+        let wallet = self.load_wallet_or_err()?;
+        let addr = wallet.peek_address(keychain, 0).address;
         Ok(addr)
     }
 
     pub fn local_db_path(&self) -> PathBuf {
-        wallet_db_path(self.data_dir_str(), self.network)
+        wallet_db_path(&self.data_dir, self.network)
     }
 
-    pub fn list_core_wallets<R: CoreRpc>(&self, rpc: &R) -> Result<Vec<(String, bool, bool)>> {
+    fn open_conn(&self) -> Result<Connection> {
+        let db_path = self.local_db_path();
+        Connection::open(&db_path)
+            .with_context(|| format!("opening wallet db at {}", db_path.display()))
+    }
+
+    fn try_load_wallet(&self) -> Result<Option<PersistedWallet<Connection>>> {
+        let mut conn = self.open_conn()?;
+        let wallet = LoadParams::new()
+            .check_network(self.network)
+            .load_wallet(&mut conn)?;
+        Ok(wallet)
+    }
+
+    fn load_wallet_or_err(&self) -> Result<PersistedWallet<Connection>> {
+        self.try_load_wallet()?
+            .ok_or_else(|| anyhow!("wallet not initialized"))
+    }
+
+    pub fn list_core_wallets<R: CoreRpc>(&self, rpc: &R) -> Result<Vec<CoreWalletInfo>> {
         let loaded = CoreRpc::list_wallets(rpc)?;
         let mut out = Vec::with_capacity(loaded.len());
         for name in loaded {
@@ -109,38 +116,43 @@ impl Wallet {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let watch_only = !pk_enabled;
-            out.push((name, watch_only, descriptors));
+            out.push(CoreWalletInfo {
+                name,
+                watch_only,
+                descriptors,
+            });
         }
         Ok(out)
     }
 
-    pub fn setup_watchonly(
+    pub fn setup_watchonly(&self, rpc_url: &str, auth: &Auth, wallet_name: &str, rescan: bool) -> Result<()> {
+        let base_url = rpc_url.trim_end_matches('/').to_string();
+        let admin = RealCoreAdmin::new(base_url, auth.clone());
+        self.setup_watchonly_with(&admin, wallet_name, 1000, rescan)
+    }
+
+    pub fn setup_watchonly_with<A: CoreAdmin>(
         &self,
-        rpc_url: &str,
-        auth: &Auth,
+        admin: &A,
         wallet_name: &str,
+        range_end: u32,
         rescan: bool,
     ) -> Result<()> {
-        let base_url = rpc_url.trim_end_matches('/');
-        self.ensure_core_watchonly(base_url, auth, wallet_name)
+        admin
+            .ensure_watchonly_descriptor_wallet(wallet_name)
             .context("ensuring Core watch-only wallet")?;
 
         let (ext_with_cs, int_with_cs) = self
             .public_descriptors_with_checksum()
             .context("loading public descriptors")?;
 
-        let wallet_url = format!("{}/wallet/{}", base_url.trim_end_matches('/'), wallet_name);
-        let wallet_rpc = bitcoincore_rpc::Client::new(&wallet_url, auth.clone())
-            .context("creating wallet RPC client")?;
-
-        let end = 0u32;
         let ts_val = if rescan { json!(0) } else { json!("now") };
 
         let imports = json!([
             {
                 "desc": ext_with_cs,
                 "active": true,
-                "range": [0, end],
+                "range": [0, range_end],
                 "timestamp": ts_val,
                 "internal": false,
                 "label": "brc721-external"
@@ -148,15 +160,15 @@ impl Wallet {
             {
                 "desc": int_with_cs,
                 "active": true,
-                "range": [0, end],
+                "range": [0, range_end],
                 "timestamp": ts_val,
                 "internal": true,
                 "label": "brc721-internal"
             }
         ]);
 
-        let _res: serde_json::Value = wallet_rpc
-            .call("importdescriptors", &[imports])
+        admin
+            .import_descriptors(wallet_name, imports)
             .context("importing public descriptors to Core")?;
 
         Ok(())
@@ -169,19 +181,8 @@ impl Wallet {
         Ok(bal)
     }
 
-    fn data_dir_str(&self) -> &str {
-        self.data_dir.to_str().unwrap_or("")
-    }
-
     pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
-        let db_path = wallet_db_path(self.data_dir_str(), self.network);
-        let mut conn = Connection::open(&db_path)
-            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
-
-        let wallet = LoadParams::new()
-            .check_network(self.network)
-            .load_wallet(&mut conn)?
-            .ok_or_else(|| anyhow!("wallet not initialized"))?;
+        let wallet = self.load_wallet_or_err()?;
 
         let ext_desc = wallet.public_descriptor(KeychainKind::External).to_string();
         let int_desc = wallet.public_descriptor(KeychainKind::Internal).to_string();
@@ -195,38 +196,16 @@ impl Wallet {
     }
 
     pub fn generate_wallet_name(&self) -> Result<String> {
-        // Retrieve public descriptors with checksum (external and internal)
         let (ext_with_cs, _int_with_cs) = self
             .public_descriptors_with_checksum()
             .context("loading public descriptors")?;
-        // Prepare to create a short, unique wallet name based on hashed descriptor
         let mut hasher = sha2::Sha256::new();
         use sha2::Digest;
         hasher.update(ext_with_cs.as_bytes());
         let hash = hasher.finalize();
-        // Use first 4 bytes of the hash as a short identifier
         let short = hex::encode(&hash[..4]);
         let wallet_name = format!("brc721-{}-{}", short, self.network);
         Ok(wallet_name)
-    }
-
-    fn ensure_core_watchonly(&self, base_url: &str, auth: &Auth, wallet_name: &str) -> Result<()> {
-        let root = bitcoincore_rpc::Client::new(base_url, auth.clone())
-            .context("creating root RPC client")?;
-
-        let _ = root.call::<serde_json::Value>(
-            "createwallet",
-            &[
-                json!(wallet_name),
-                json!(true),  // disable_private_keys
-                json!(true),  // blank
-                json!(""),    // passphrase
-                json!(false), // avoid_reuse
-                json!(true),  // descriptors
-            ],
-        );
-
-        Ok(())
     }
 }
 
@@ -234,6 +213,8 @@ impl Wallet {
 mod tests {
     use super::*;
     use rand::{distributions::Alphanumeric, Rng};
+    use serde_json::json;
+    use std::sync::Mutex;
 
     fn temp_data_dir() -> PathBuf {
         let mut base = std::env::temp_dir();
@@ -275,5 +256,157 @@ mod tests {
             ext1, ext_again,
             "address should be deterministic across instances"
         );
+    }
+
+    #[test]
+    fn passphrase_affects_derived_addresses() {
+        let net = bitcoin::Network::Regtest;
+        let mnemonic = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
+
+        let dir1 = temp_data_dir();
+        let w1 = Wallet::new(&dir1, net);
+        w1.init(mnemonic.clone(), Some("pass1".to_string())).unwrap();
+        let a1 = w1.address(KeychainKind::External).unwrap();
+
+        let dir2 = temp_data_dir();
+        let w2 = Wallet::new(&dir2, net);
+        w2.init(mnemonic.clone(), Some("pass2".to_string())).unwrap();
+        let a2 = w2.address(KeychainKind::External).unwrap();
+
+        assert_ne!(a1, a2, "different passphrases should yield different descriptors/addresses");
+    }
+
+    #[test]
+    fn generate_wallet_name_is_stable_and_unique() {
+        let net = bitcoin::Network::Regtest;
+        let mnemonic1 = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
+        let mnemonic2 = Some("legal winner thank year wave sausage worth useful legal winner thank yellow".to_string());
+
+        let dir1 = temp_data_dir();
+        let w1 = Wallet::new(&dir1, net);
+        w1.init(mnemonic1, None).unwrap();
+        let n1a = w1.generate_wallet_name().unwrap();
+        let n1b = w1.generate_wallet_name().unwrap();
+        assert_eq!(n1a, n1b, "name should be deterministic");
+
+        let dir2 = temp_data_dir();
+        let w2 = Wallet::new(&dir2, net);
+        w2.init(mnemonic2, None).unwrap();
+        let n2 = w2.generate_wallet_name().unwrap();
+
+        assert_ne!(n1a, n2, "different descriptors should produce different names");
+    }
+
+    #[test]
+    fn public_descriptors_error_if_uninitialized() {
+        let dir = temp_data_dir();
+        let w = Wallet::new(&dir, bitcoin::Network::Regtest);
+        let res = w.public_descriptors_with_checksum();
+        assert!(res.is_err(), "should error when wallet not initialized");
+    }
+
+    struct MockRpc {
+        wallets: Vec<String>,
+        infos: std::collections::HashMap<String, serde_json::Value>,
+    }
+
+    impl CoreRpc for MockRpc {
+        fn list_wallets(&self) -> anyhow::Result<Vec<String>> {
+            Ok(self.wallets.clone())
+        }
+        fn get_wallet_info(&self, name: &str) -> anyhow::Result<serde_json::Value> {
+            Ok(self.infos.get(name).cloned().unwrap_or_else(|| json!({})))
+        }
+        fn get_wallet_balance(&self, _name: &str) -> anyhow::Result<Amount> {
+            Ok(Amount::from_sat(0))
+        }
+    }
+
+    #[test]
+    fn list_core_wallets_interprets_flags() {
+        let dir = temp_data_dir();
+        let w = Wallet::new(&dir, bitcoin::Network::Regtest);
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(
+            "wo-desc".to_string(),
+            json!({"private_keys_enabled": false, "descriptors": true}),
+        );
+        infos.insert(
+            "legacy".to_string(),
+            json!({"private_keys_enabled": true, "descriptors": false}),
+        );
+        let rpc = MockRpc {
+            wallets: vec!["wo-desc".into(), "legacy".into()],
+            infos,
+        };
+        let listed = w.list_core_wallets(&rpc).unwrap();
+        assert_eq!(listed.len(), 2);
+        let a = &listed[0];
+        assert_eq!(a.name, "wo-desc");
+        assert_eq!(a.watch_only, true);
+        assert_eq!(a.descriptors, true);
+        let b = &listed[1];
+        assert_eq!(b.name, "legacy");
+        assert_eq!(b.watch_only, false);
+        assert_eq!(b.descriptors, false);
+    }
+
+    struct MockAdmin {
+        pub ensured: Mutex<Vec<String>>,
+        pub imports: Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl CoreAdmin for MockAdmin {
+        fn ensure_watchonly_descriptor_wallet(&self, wallet_name: &str) -> anyhow::Result<()> {
+            self.ensured.lock().unwrap().push(wallet_name.to_string());
+            Ok(())
+        }
+        fn import_descriptors(&self, wallet_name: &str, imports: serde_json::Value) -> anyhow::Result<()> {
+            self.imports
+                .lock()
+                .unwrap()
+                .push((wallet_name.to_string(), imports));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn setup_watchonly_builds_imports_correctly() {
+        let dir = temp_data_dir();
+        let net = bitcoin::Network::Regtest;
+        let w = Wallet::new(&dir, net);
+        let mnemonic = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
+        w.init(mnemonic, None).unwrap();
+
+        let admin = MockAdmin {
+            ensured: Mutex::new(vec![]),
+            imports: Mutex::new(vec![]),
+        };
+
+        let name = w.generate_wallet_name().unwrap();
+        w.setup_watchonly_with(&admin, &name, 5, false).unwrap();
+
+        let ensured = admin.ensured.lock().unwrap();
+        assert_eq!(ensured.as_slice(), &[name.clone()]);
+        drop(ensured);
+
+        let imports = admin.imports.lock().unwrap();
+        assert_eq!(imports.len(), 1);
+        let (n, v) = &imports[0];
+        assert_eq!(n, &name);
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        for entry in arr {
+            assert_eq!(entry.get("active").unwrap(), &json!(true));
+            assert_eq!(entry.get("range").unwrap(), &json!([0, 5]));
+            assert!(entry.get("desc").unwrap().as_str().unwrap().contains("#"));
+        }
+        let ext = &arr[0];
+        assert_eq!(ext.get("internal").unwrap(), &json!(false));
+        assert_eq!(ext.get("label").unwrap(), &json!("brc721-external"));
+        let int = &arr[1];
+        assert_eq!(int.get("internal").unwrap(), &json!(true));
+        assert_eq!(int.get("label").unwrap(), &json!("brc721-internal"));
+        assert_eq!(int.get("timestamp").unwrap(), &json!("now"));
     }
 }

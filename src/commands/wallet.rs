@@ -15,13 +15,11 @@ impl CommandRunner for cli::WalletCmd {
                 passphrase,
                 rescan,
             } => {
-                // Initialize the wallet with the specified mnemonic and passphrase
                 let res = w
                     .init(mnemonic.clone(), passphrase.clone())
                     .context("Initializing wallet")?;
                 if res.created {
                     log::info!("initialized wallet db={}", res.db_path.display());
-                    // Optionally print the mnemonic if a new wallet was created
                     if let Some(m) = res.mnemonic {
                         println!("{}", m);
                     }
@@ -31,7 +29,6 @@ impl CommandRunner for cli::WalletCmd {
 
                 let wo_name = w.generate_wallet_name()?;
 
-                // Set up a watch-only wallet in Core with the generated name
                 w.setup_watchonly(&ctx.rpc_url, &ctx.auth, &wo_name, *rescan)
                     .context("setting up Core watch-only wallet")?;
 
@@ -55,10 +52,10 @@ impl CommandRunner for cli::WalletCmd {
                 let rpc = crate::wallet::types::RealCoreRpc::new(base_url, ctx.auth.clone());
                 let listed = w.list_core_wallets(&rpc)?;
                 println!("Core (loaded):");
-                for (name, watch_only, descriptors) in listed {
+                for info in listed {
                     println!(
                         "  name={} watch_only={} descriptors={}",
-                        name, watch_only, descriptors
+                        info.name, info.watch_only, info.descriptors
                     );
                 }
 
