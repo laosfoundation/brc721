@@ -7,14 +7,14 @@ use bdk_wallet::KeychainKind;
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
         let net = ctx.network;
+        let w = Wallet::new(&ctx.data_dir, net);
+
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
                 passphrase,
                 rescan,
             } => {
-                // Create a new wallet instance with the data directory and network
-                let w = Wallet::new(&ctx.data_dir, net);
                 // Initialize the wallet with the specified mnemonic and passphrase
                 let res = w
                     .init(mnemonic.clone(), passphrase.clone())
@@ -40,13 +40,11 @@ impl CommandRunner for cli::WalletCmd {
             }
             cli::WalletCmd::Address => {
                 let keychain = KeychainKind::External;
-                let w = Wallet::new(&ctx.data_dir, net);
                 let addr = w.address(keychain).context("getting address")?;
                 log::info!("{addr}");
                 Ok(())
             }
             cli::WalletCmd::List => {
-                let w = Wallet::new(&ctx.data_dir, net);
                 let local_path = w.local_db_path();
                 if std::fs::metadata(&local_path).is_ok() {
                     println!("Local:");
@@ -58,22 +56,18 @@ impl CommandRunner for cli::WalletCmd {
                 let listed = w.list_core_wallets(&rpc)?;
                 println!("Core (loaded):");
                 for (name, watch_only, descriptors) in listed {
-                    println!("  name={} watch_only={} descriptors={}", name, watch_only, descriptors);
+                    println!(
+                        "  name={} watch_only={} descriptors={}",
+                        name, watch_only, descriptors
+                    );
                 }
 
                 Ok(())
             }
             cli::WalletCmd::Balance => {
-                let w = Wallet::new(&ctx.data_dir, net);
                 let wallet_name = "brc721-watchonly";
-                let (user, pass) = match &ctx.auth {
-                    bitcoincore_rpc::Auth::UserPass(user, pass) => {
-                        (Some(user.clone()), Some(pass.clone()))
-                    }
-                    _ => (None, None),
-                };
                 let bal = w
-                    .core_balance(&ctx.rpc_url, &user, &pass, wallet_name)
+                    .core_balance(&ctx.rpc_url, &ctx.auth, wallet_name)
                     .context("reading core balance")?;
                 log::info!("{bal}");
                 Ok(())

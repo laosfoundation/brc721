@@ -162,19 +162,9 @@ impl Wallet {
         Ok(())
     }
 
-    pub fn core_balance(
-        &self,
-        rpc_url: &str,
-        rpc_user: &Option<String>,
-        rpc_pass: &Option<String>,
-        wallet_name: &str,
-    ) -> Result<Amount> {
-        let auth = match (rpc_user, rpc_pass) {
-            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
-            _ => bitcoincore_rpc::Auth::None,
-        };
+    pub fn core_balance(&self, rpc_url: &str, auth: &Auth, wallet_name: &str) -> Result<Amount> {
         let base = rpc_url.trim_end_matches('/').to_string();
-        let rpc = crate::wallet::types::RealCoreRpc::new(base, auth);
+        let rpc = crate::wallet::types::RealCoreRpc::new(base, auth.clone());
         let bal = CoreRpc::get_wallet_balance(&rpc, wallet_name)?;
         Ok(bal)
     }
