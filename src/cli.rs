@@ -167,6 +167,19 @@ pub enum WalletCmd {
         long_about = "Display the external and internal BIP86 extended public keys (xpub-like) for the wallet."
     )]
     Xpub,
+    #[command(
+        about = "Send bitcoin to an address",
+        long_about = "Spend from the local descriptor wallet by building, signing and broadcasting a simple payment. Uses Esplora for UTXO/fees and broadcasts via its API.")]
+    Send {
+        #[arg(long, value_name = "ADDRESS", help = "Destination address")]
+        to: String,
+        #[arg(long, value_name = "SATOSHI", help = "Amount in satoshis")]
+        amount: u64,
+        #[arg(long = "fee-rate", value_name = "SAT/VB", required = false, help = "Fee rate in sat/vB (optional)")]
+        fee_rate: Option<f64>,
+        #[arg(long = "esplora", env = "ESPLORA_URL", value_name = "URL", default_value = "https://blockstream.info/api", help = "Esplora base URL")]
+        esplora: String,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

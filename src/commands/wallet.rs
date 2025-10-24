@@ -3,6 +3,8 @@ use crate::wallet::Wallet;
 use crate::{cli, context};
 use anyhow::{Context, Result};
 use bdk_wallet::KeychainKind;
+use std::str::FromStr;
+use bitcoin::address::NetworkUnchecked;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
@@ -33,6 +35,18 @@ impl CommandRunner for cli::WalletCmd {
                     .context("setting up Core watch-only wallet")?;
 
                 log::info!("watch-only wallet '{}' ready in Core", wo_name);
+                Ok(())
+            }
+            cli::WalletCmd::Send { to, amount, fee_rate, esplora } => {
+                let addr_un = bitcoin::Address::<NetworkUnchecked>::from_str(to)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let addr = addr_un
+                    .require_network(ctx.network)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let txid = w
+                    .send(esplora, &addr, bitcoin::Amount::from_sat(*amount), *fee_rate)
+                    .context("wallet send")?;
+                log::info!("{txid}");
                 Ok(())
             }
             cli::WalletCmd::Address => {

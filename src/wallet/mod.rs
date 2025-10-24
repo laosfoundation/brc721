@@ -14,6 +14,8 @@ use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
 
+use bitcoin::FeeRate;
+
 use paths::wallet_db_path;
 
 #[derive(Debug)]
@@ -208,6 +210,44 @@ impl Wallet {
         let short = hex::encode(&hash[..4]);
         let wallet_name = format!("brc721-{}-{}", short, self.network);
         Ok(wallet_name)
+    }
+
+    pub fn send(&self, esplora_base: &str, to: &Address, amount: Amount, fee_rate: Option<f64>) -> Result<bitcoin::Txid> {
+        let mut wallet = self.load_wallet_or_err()?;
+        let mut conn = self.open_conn()?;
+
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_base)
+            .build_blocking();
+        use bdk_esplora::EsploraExt as _;
+        let stop_gap = 50usize;
+        let parallel = 4usize;
+        let req = wallet.start_full_scan().build();
+        let response = client.full_scan(req, stop_gap, parallel).map_err(|e| anyhow!("esplora full_scan error: {e}"))?;
+        let update = bdk_wallet::Update::from(response);
+        wallet.apply_update(update)?;
+        wallet.persist(&mut conn)?;
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(to.script_pubkey(), amount);
+        if let Some(fr) = fee_rate {
+            let fr_u64 = fr as u64;
+            builder.fee_rate(FeeRate::from_sat_per_vb(fr_u64).ok_or_else(|| anyhow!("invalid fee rate"))?);
+        }
+        let psbt = builder.finish().map_err(|e| anyhow!("build tx error: {e}"))?;
+
+        let mut psbt = psbt;
+        let _finalized = wallet
+            .sign(&mut psbt, Default::default())
+            .map_err(|e| anyhow!("sign error: {e}"))?;
+        let tx = psbt.extract_tx().map_err(|e| anyhow!("extract tx error: {e}"))?;
+
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_base)
+            .build_blocking();
+        client.broadcast(&tx)
+            .map_err(|e| anyhow!("broadcast error: {e}"))?;
+
+        wallet.persist(&mut conn)?;
+        Ok(tx.compute_txid())
     }
 }
 
