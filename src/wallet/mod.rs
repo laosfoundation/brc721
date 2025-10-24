@@ -91,6 +91,29 @@ impl Wallet {
         Ok(addr)
     }
 
+    pub fn local_db_path(&self) -> PathBuf {
+        wallet_db_path(self.data_dir_str(), self.network)
+    }
+
+    pub fn list_core_wallets<R: CoreRpc>(&self, rpc: &R) -> Result<Vec<(String, bool, bool)>> {
+        let loaded = CoreRpc::list_wallets(rpc)?;
+        let mut out = Vec::with_capacity(loaded.len());
+        for name in loaded {
+            let info = CoreRpc::get_wallet_info(rpc, &name)?;
+            let pk_enabled = info
+                .get("private_keys_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let descriptors = info
+                .get("descriptors")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let watch_only = !pk_enabled;
+            out.push((name, watch_only, descriptors));
+        }
+        Ok(out)
+    }
+
     pub fn setup_watchonly(
         &self,
         rpc_url: &str,

@@ -1,5 +1,4 @@
 use super::CommandRunner;
-use crate::wallet::types::CoreRpc;
 use crate::wallet::Wallet;
 use crate::{cli, context};
 use anyhow::{Context, Result};
@@ -47,34 +46,19 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::List => {
-                let base_url = ctx.rpc_url.trim_end_matches('/').to_string();
-
-                let local_path = crate::wallet::paths::wallet_db_path(&ctx.data_dir, net);
-                let local_exists = std::fs::metadata(&local_path).is_ok();
-                if local_exists {
+                let w = Wallet::new(&ctx.data_dir, net);
+                let local_path = w.local_db_path();
+                if std::fs::metadata(&local_path).is_ok() {
                     println!("Local:");
                     println!("  network={} path={}", ctx.network, local_path.display());
                 }
 
-                let rpc =
-                    crate::wallet::types::RealCoreRpc::new(base_url.clone(), ctx.auth.clone());
-                let loaded: Vec<String> = CoreRpc::list_wallets(&rpc)?;
+                let base_url = ctx.rpc_url.trim_end_matches('/').to_string();
+                let rpc = crate::wallet::types::RealCoreRpc::new(base_url, ctx.auth.clone());
+                let listed = w.list_core_wallets(&rpc)?;
                 println!("Core (loaded):");
-                for name in &loaded {
-                    let info = CoreRpc::get_wallet_info(&rpc, name)?;
-                    let pk_enabled = info
-                        .get("private_keys_enabled")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true);
-                    let descriptors = info
-                        .get("descriptors")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let watch_only = !pk_enabled;
-                    println!(
-                        "  name={} watch_only={} descriptors={}",
-                        name, watch_only, descriptors
-                    );
+                for (name, watch_only, descriptors) in listed {
+                    println!("  name={} watch_only={} descriptors={}", name, watch_only, descriptors);
                 }
 
                 Ok(())
