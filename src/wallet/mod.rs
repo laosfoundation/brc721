@@ -181,6 +181,22 @@ impl Wallet {
         ))
     }
 
+    pub fn generate_wallet_name(&self) -> Result<String> {
+        // Retrieve public descriptors with checksum (external and internal)
+        let (ext_with_cs, _int_with_cs) = self
+            .public_descriptors_with_checksum()
+            .context("loading public descriptors")?;
+        // Prepare to create a short, unique wallet name based on hashed descriptor
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest;
+        hasher.update(ext_with_cs.as_bytes());
+        let hash = hasher.finalize();
+        // Use first 4 bytes of the hash as a short identifier
+        let short = hex::encode(&hash[..4]);
+        let wallet_name = format!("brc721-{}-{}", short, self.network);
+        Ok(wallet_name)
+    }
+
     fn ensure_core_watchonly(&self, base_url: &str, auth: &Auth, wallet_name: &str) -> Result<()> {
         let root = bitcoincore_rpc::Client::new(base_url, auth.clone())
             .context("creating root RPC client")?;

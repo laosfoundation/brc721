@@ -14,12 +14,15 @@ impl CommandRunner for cli::WalletCmd {
                 passphrase,
                 rescan,
             } => {
+                // Create a new wallet instance with the data directory and network
                 let w = Wallet::new(&ctx.data_dir, net);
+                // Initialize the wallet with the specified mnemonic and passphrase
                 let res = w
                     .init(mnemonic.clone(), passphrase.clone())
                     .context("Initializing wallet")?;
                 if res.created {
                     log::info!("initialized wallet db={}", res.db_path.display());
+                    // Optionally print the mnemonic if a new wallet was created
                     if let Some(m) = res.mnemonic {
                         println!("{}", m);
                     }
@@ -27,16 +30,9 @@ impl CommandRunner for cli::WalletCmd {
                     log::info!("wallet already initialized db={}", res.db_path.display());
                 }
 
-                let (ext_with_cs, _int_with_cs) = w
-                    .public_descriptors_with_checksum()
-                    .context("loading public descriptors")?;
-                let mut hasher = sha2::Sha256::new();
-                use sha2::Digest;
-                hasher.update(ext_with_cs.as_bytes());
-                let hash = hasher.finalize();
-                let short = hex::encode(&hash[..4]);
-                let wo_name = format!("brc721-{}-{}", short, ctx.network);
+                let wo_name = w.generate_wallet_name()?;
 
+                // Set up a watch-only wallet in Core with the generated name
                 w.setup_watchonly(&ctx.rpc_url, &ctx.auth, &wo_name, *rescan)
                     .context("setting up Core watch-only wallet")?;
 
