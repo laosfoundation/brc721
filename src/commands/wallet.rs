@@ -21,7 +21,7 @@ impl CommandRunner for cli::WalletCmd {
                 if res.created {
                     log::info!("initialized wallet db={}", res.db_path.display());
                     if let Some(m) = res.mnemonic {
-                        println!("{}", m);
+                        log::info!("{}", m);
                     }
                 } else {
                     log::info!("wallet already initialized db={}", res.db_path.display());
@@ -44,16 +44,16 @@ impl CommandRunner for cli::WalletCmd {
             cli::WalletCmd::List => {
                 let local_path = w.local_db_path();
                 if std::fs::metadata(&local_path).is_ok() {
-                    println!("Local:");
-                    println!("  network={} path={}", ctx.network, local_path.display());
+                    log::info!("Local:");
+                    log::info!("  network={} path={}", ctx.network, local_path.display());
                 }
 
                 let base_url = ctx.rpc_url.trim_end_matches('/').to_string();
                 let rpc = crate::wallet::types::RealCoreRpc::new(base_url, ctx.auth.clone());
                 let listed = w.list_core_wallets(&rpc)?;
-                println!("Core (loaded):");
+                log::info!("Core (loaded):");
                 for info in listed {
-                    println!(
+                    log::info!(
                         "  name={} watch_only={} descriptors={}",
                         info.name, info.watch_only, info.descriptors
                     );
