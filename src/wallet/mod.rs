@@ -343,12 +343,12 @@ mod tests {
         assert_eq!(listed.len(), 2);
         let a = &listed[0];
         assert_eq!(a.name, "wo-desc");
-        assert_eq!(a.watch_only, true);
-        assert_eq!(a.descriptors, true);
+        assert!(a.watch_only);
+        assert!(a.descriptors);
         let b = &listed[1];
         assert_eq!(b.name, "legacy");
-        assert_eq!(b.watch_only, false);
-        assert_eq!(b.descriptors, false);
+        assert!(!b.watch_only);
+        assert!(!b.descriptors);
     }
 
     struct MockAdmin {
@@ -387,7 +387,7 @@ mod tests {
         w.setup_watchonly_with(&admin, &name, 5, false).unwrap();
 
         let ensured = admin.ensured.lock().unwrap();
-        assert_eq!(ensured.as_slice(), &[name.clone()]);
+        assert_eq!(ensured.as_slice(), std::slice::from_ref(&name));
         drop(ensured);
 
         let imports = admin.imports.lock().unwrap();
