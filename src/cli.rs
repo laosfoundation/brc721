@@ -141,14 +141,6 @@ pub enum WalletCmd {
         )]
         passphrase: Option<String>,
         #[arg(
-            long = "watchonly",
-            value_name = "NAME",
-            help = "Core watch-only wallet name (optional, defaults to a unique name)",
-            required = false
-        )]
-        watchonly: Option<String>,
-
-        #[arg(
             long = "rescan",
             default_value_t = false,
             help = "Full rescan from genesis for imported descriptors"

@@ -12,7 +12,6 @@ impl CommandRunner for cli::WalletCmd {
             cli::WalletCmd::Init {
                 mnemonic,
                 passphrase,
-                watchonly,
                 rescan,
             } => {
                 let w = Wallet::new(&ctx.data_dir, net);
@@ -28,20 +27,15 @@ impl CommandRunner for cli::WalletCmd {
                     log::info!("wallet already initialized db={}", res.db_path.display());
                 }
 
-                let wo_name = match watchonly.clone() {
-                    Some(name) => name,
-                    None => {
-                        let (ext_with_cs, _int_with_cs) = w
-                            .public_descriptors_with_checksum()
-                            .context("loading public descriptors")?;
-                        let mut hasher = sha2::Sha256::new();
-                        use sha2::Digest;
-                        hasher.update(ext_with_cs.as_bytes());
-                        let hash = hasher.finalize();
-                        let short = hex::encode(&hash[..4]);
-                        format!("brc721-{}-{}", short, ctx.network)
-                    }
-                };
+                let (ext_with_cs, _int_with_cs) = w
+                    .public_descriptors_with_checksum()
+                    .context("loading public descriptors")?;
+                let mut hasher = sha2::Sha256::new();
+                use sha2::Digest;
+                hasher.update(ext_with_cs.as_bytes());
+                let hash = hasher.finalize();
+                let short = hex::encode(&hash[..4]);
+                let wo_name = format!("brc721-{}-{}", short, ctx.network);
 
                 let (rpc_user, rpc_pass) = match &ctx.auth {
                     bitcoincore_rpc::Auth::UserPass(user, pass) => {
