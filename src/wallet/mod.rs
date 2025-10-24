@@ -9,7 +9,7 @@ use bdk_wallet::{
     CreateParams, KeychainKind, LoadParams,
 };
 use bitcoin::{Amount, Network};
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{Auth, RpcApi};
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
@@ -94,26 +94,20 @@ impl Wallet {
     pub fn setup_watchonly(
         &self,
         rpc_url: &str,
-        rpc_user: &Option<String>,
-        rpc_pass: &Option<String>,
+        auth: &Auth,
         wallet_name: &str,
         rescan: bool,
     ) -> Result<()> {
         let base_url = rpc_url.trim_end_matches('/');
-        self.ensure_core_watchonly(base_url, rpc_user, rpc_pass, wallet_name)
+        self.ensure_core_watchonly(base_url, auth, wallet_name)
             .context("ensuring Core watch-only wallet")?;
 
         let (ext_with_cs, int_with_cs) = self
             .public_descriptors_with_checksum()
             .context("loading public descriptors")?;
 
-        let auth = match (rpc_user, rpc_pass) {
-            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
-            _ => bitcoincore_rpc::Auth::None,
-        };
-
         let wallet_url = format!("{}/wallet/{}", base_url.trim_end_matches('/'), wallet_name);
-        let wallet_rpc = bitcoincore_rpc::Client::new(&wallet_url, auth)
+        let wallet_rpc = bitcoincore_rpc::Client::new(&wallet_url, auth.clone())
             .context("creating wallet RPC client")?;
 
         let end = 0u32;
@@ -187,19 +181,9 @@ impl Wallet {
         ))
     }
 
-    fn ensure_core_watchonly(
-        &self,
-        base_url: &str,
-        rpc_user: &Option<String>,
-        rpc_pass: &Option<String>,
-        wallet_name: &str,
-    ) -> Result<()> {
-        let auth = match (rpc_user, rpc_pass) {
-            (Some(user), Some(pass)) => bitcoincore_rpc::Auth::UserPass(user.clone(), pass.clone()),
-            _ => bitcoincore_rpc::Auth::None,
-        };
-        let root =
-            bitcoincore_rpc::Client::new(base_url, auth).context("creating root RPC client")?;
+    fn ensure_core_watchonly(&self, base_url: &str, auth: &Auth, wallet_name: &str) -> Result<()> {
+        let root = bitcoincore_rpc::Client::new(base_url, auth.clone())
+            .context("creating root RPC client")?;
 
         let _ = root.call::<serde_json::Value>(
             "createwallet",

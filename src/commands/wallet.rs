@@ -37,13 +37,7 @@ impl CommandRunner for cli::WalletCmd {
                 let short = hex::encode(&hash[..4]);
                 let wo_name = format!("brc721-{}-{}", short, ctx.network);
 
-                let (rpc_user, rpc_pass) = match &ctx.auth {
-                    bitcoincore_rpc::Auth::UserPass(user, pass) => {
-                        (Some(user.clone()), Some(pass.clone()))
-                    }
-                    _ => (None, None),
-                };
-                w.setup_watchonly(&ctx.rpc_url, &rpc_user, &rpc_pass, &wo_name, *rescan)
+                w.setup_watchonly(&ctx.rpc_url, &ctx.auth, &wo_name, *rescan)
                     .context("setting up Core watch-only wallet")?;
 
                 log::info!("watch-only wallet '{}' ready in Core", wo_name);
