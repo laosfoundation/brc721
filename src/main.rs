@@ -14,13 +14,13 @@ pub mod types;
 mod wallet;
 mod network;
 mod context;
-mod configuration;
+
 
 fn main() -> Result<()> {
     let cli = cli::parse();
     let ctx = context::Context::from_cli(&cli);
 
-    tracing::init(ctx.config.log_file.as_deref().map(Path::new));
+    tracing::init(ctx.log_file.as_deref().map(Path::new));
 
     init_data_dir(&ctx);
 
@@ -30,12 +30,12 @@ fn main() -> Result<()> {
     }
 
     log::info!("🚀 Starting brc721");
-    log::info!("🔗 RPC URL: {}", ctx.config.rpc_url);
+    log::info!("🔗 RPC URL: {}", ctx.rpc_url);
     log::info!("🔐 Auth: user/pass");
-    log::info!("🧮 Confirmations: {}", ctx.config.confirmations);
-    log::info!("📂 Data dir: {}", ctx.config.data_dir);
-    log::info!("🧮 Batch size: {}", ctx.config.batch_size);
-    if let Some(path) = ctx.config.log_file.as_deref() {
+    log::info!("🧮 Confirmations: {}", ctx.confirmations);
+    log::info!("📂 Data dir: {}", ctx.data_dir);
+    log::info!("🧮 Batch size: {}", ctx.batch_size);
+    if let Some(path) = ctx.log_file.as_deref() {
         log::info!("📝 Log file: {}", path);
     }
 
@@ -44,7 +44,7 @@ fn main() -> Result<()> {
         .load_last()
         .unwrap_or_default()
         .map(|last| last.height + 1)
-        .unwrap_or(ctx.config.start);
+        .unwrap_or(ctx.start);
     let scanner = init_scanner(&ctx, starting_block);
     let parser = parser::Parser {};
 
@@ -53,18 +53,18 @@ fn main() -> Result<()> {
 }
 
 fn init_data_dir(ctx: &context::Context) {
-    let data_dir = std::path::PathBuf::from(&ctx.config.data_dir);
+    let data_dir = std::path::PathBuf::from(&ctx.data_dir);
     let _ = std::fs::create_dir_all(&data_dir);
 }
 
 fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Sync> {
-    let data_dir = std::path::PathBuf::from(&ctx.config.data_dir);
+    let data_dir = std::path::PathBuf::from(&ctx.data_dir);
     let db_path = data_dir
         .join("brc721.sqlite")
         .to_string_lossy()
         .into_owned();
     let sqlite = storage::SqliteStorage::new(&db_path);
-    if ctx.config.reset {
+    if ctx.reset {
         let _ = sqlite.reset_all();
     }
     let _ = sqlite.init();
@@ -72,9 +72,9 @@ fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Syn
 }
 
 fn init_scanner(ctx: &context::Context, start_block: u64) -> scanner::Scanner<Client> {
-    let client = Client::new(&ctx.config.rpc_url, ctx.config.auth.clone()).expect("failed to create RPC client");
+    let client = Client::new(&ctx.rpc_url, ctx.auth.clone()).expect("failed to create RPC client");
     scanner::Scanner::new(client)
-        .with_confirmations(ctx.config.confirmations)
-        .with_capacity(ctx.config.batch_size)
+        .with_confirmations(ctx.confirmations)
+        .with_capacity(ctx.batch_size)
         .with_start_from(start_block)
 }
