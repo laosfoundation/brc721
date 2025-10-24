@@ -6,13 +6,13 @@ use bdk_wallet::KeychainKind;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
-        let net = ctx.config.network;
+        let net = ctx.network;
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
                 passphrase,
             } => {
-                let res = init_wallet(&ctx.config.data_dir, net, mnemonic.clone(), passphrase.clone())
+                let res = init_wallet(&ctx.data_dir, net, mnemonic.clone(), passphrase.clone())
                     .context("Initializing wallet")?;
                 if res.created {
                     log::info!("initialized wallet db={}", res.db_path.display());
@@ -32,10 +32,10 @@ impl CommandRunner for cli::WalletCmd {
                     KeychainKind::External
                 };
                 let addr = if let Some(index) = peek {
-                    peek_address(&ctx.config.data_dir, net, keychain, *index)
+                    peek_address(&ctx.data_dir, net, keychain, *index)
                         .context("peeking address")?
                 } else {
-                    derive_next_address(&ctx.config.data_dir, net, keychain)
+                    derive_next_address(&ctx.data_dir, net, keychain)
                         .context("deriving next address")?
                 };
                 log::info!("{addr}");
