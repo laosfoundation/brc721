@@ -27,8 +27,11 @@ mod tests {
             .expect("new address")
             .assume_checked();
         client.generate_to_address(101, &addr).expect("mine");
+        let balances = client.get_balances().expect("balances");
 
-        let balance = client.get_balance(None, None).expect("balance");
-        assert_eq!(balance.to_btc(), 50.0);
+        assert_eq!(balances.mine.trusted.to_btc(), 50.0);
+        assert_eq!(balances.mine.immature.to_btc(), 5000.0);
+        assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
+        assert!(balances.watchonly.is_none());
     }
 }
