@@ -10,39 +10,58 @@ mod tests {
 
     #[test]
     fn test_watchonly_balance() {
-        // 1. Start a corepc-node instance
+        // Start a corepc-node instance
         let conf = Conf::default();
-        let bitcoind = Node::with_conf(corepc_node::downloaded_exe_path().unwrap(), &conf).unwrap();
+        let bitcoind = Node::with_conf(corepc_node::downloaded_exe_path().unwrap(), &conf)
+            .expect("Failed to start corepc-node instance");
         let rpc_url = bitcoind.rpc_url();
         let auth = Auth::CookieFile(bitcoind.params.cookie_file.clone());
 
-        // 2. Instantiate the application's Wallet
+        // Instantiate the application's Wallet
         let temp_dir = Builder::new().prefix("brc721-test").tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
         let network = Network::Regtest;
         let wallet = Wallet::new(data_dir, network);
 
-        // 3. Call wallet.init(...) to create the local wallet files
-        wallet.init(None, None).unwrap();
-        let wallet_name = wallet.generate_wallet_name().unwrap();
+        // Initialize local wallet files
+        wallet
+            .init(None, None)
+            .expect("Failed to initialize wallet");
+        let wallet_name = wallet
+            .generate_wallet_name()
+            .expect("Failed to generate wallet name");
 
-        // 4. Set the watch_only
+        // Set the wallet as watch-only
         wallet
             .setup_watchonly(&rpc_url, &auth, &wallet_name, false)
-            .unwrap();
+            .expect("Failed to set up watch-only wallet");
 
-        // get the balance
-        let rpc_url = format!("{}/{}/{}", bitcoind.rpc_url(), "wallet", wallet_name);
-        let client = Client::new(&rpc_url, auth.clone()).unwrap();
-        let balance = client.get_balance(None, None).unwrap();
-        assert_eq!(balance, Amount::from_btc(0.0).unwrap());
+        // Create a new client for the watch-only wallet
+        let wallet_rpc_url = format!("{}/{}/{}", bitcoind.rpc_url(), "wallet", wallet_name);
+        let client =
+            Client::new(&wallet_rpc_url, auth.clone()).expect("Failed to create wallet client");
 
-        let address = wallet.address(KeychainKind::External).unwrap();
+        // Check initial balance is zero
+        let initial_balance = client
+            .get_balance(None, None)
+            .expect("Failed to get initial wallet balance");
+        assert_eq!(initial_balance, Amount::from_btc(0.0).unwrap());
 
-        // 5. Use the corepc-node client to mine 101 blocks to this new address
-        bitcoind.client.generate_to_address(101, &address).unwrap();
+        // Generate an external address
+        let address = wallet
+            .address(KeychainKind::External)
+            .expect("Failed to get external address");
 
-        let balance = client.get_balance(None, None).unwrap();
-        assert_eq!(balance, Amount::from_btc(101.0).unwrap());
+        // Mine 101 blocks to the new address
+        bitcoind
+            .client
+            .generate_to_address(101, &address)
+            .expect("Failed to mine blocks to address");
+
+        // Check updated balance
+        let updated_balance = client
+            .get_balance(None, None)
+            .expect("Failed to get updated wallet balance");
+        assert_eq!(updated_balance, Amount::from_btc(101.0).unwrap());
     }
 }
