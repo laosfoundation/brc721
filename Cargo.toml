@@ -26,4 +26,5 @@ anyhow = "1.0.100"
 sha2 = "0.10.9"
 
 [dev-dependencies]
+corepc-node = { version = "0.8.0", features = ["26_2", "download"] }
 hex = "0.4"
