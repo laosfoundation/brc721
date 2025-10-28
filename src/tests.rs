@@ -1,165 +1,69 @@
 #[cfg(test)]
 mod tests {
+    use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
+    use bdk_wallet::template::DescriptorTemplate;
     use bdk_wallet::{
         bip39::{Language, Mnemonic},
         template::Bip86,
         KeychainKind, Wallet,
     };
     use bitcoin::bip32::Xpriv;
-    use bitcoin::Network;
+    use bitcoin::{Network, Transaction};
     use bitcoincore_rpc::{Auth, Client, RpcApi};
     use corepc_node::Node;
+    use std::sync::Arc;
 
     #[test]
-    fn my_test() {
+    fn test_balances_using_local_wallet() {
         // the seed
         let mnemonic = Mnemonic::parse_in(Language::English,
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
     ).unwrap();
         let network = Network::Regtest;
-        let password = String::new();
-        let seed = mnemonic.to_seed(password);
+        let seed = mnemonic.to_seed(String::new()); // empty password
         let xprv = Xpriv::new_master(network, &seed).expect("master_key");
-        let external = Bip86(xprv, KeychainKind::External).build(network);
-    }
+        let descriptor = Bip86(xprv, KeychainKind::External)
+            .build(network)
+            .expect("external descriptor")
+            .0;
+        let change_descriptor = Bip86(xprv, KeychainKind::Internal)
+            .build(network)
+            .expect("internal descriptor")
+            .0;
+        let mut wallet = Wallet::create(descriptor.clone(), change_descriptor)
+            .network(network)
+            .create_wallet_no_persist()
+            .expect("wallet");
 
-    #[test]
-    fn watch_only_wallet_balance_minimal_3() {
-        use bitcoincore_rpc::{Auth, Client, RpcApi};
-        use corepc_node::Node;
-
-        // 1) start node (downloaded regtest node)
-        let node = Node::from_downloaded().expect("failed to download node");
-        let auth = Auth::CookieFile(node.params.cookie_file.clone());
-        let core = Client::new(&node.rpc_url(), auth.clone()).expect("rpc client");
-
-        // 2) create a wallet that will receive/mine coins ("funding")
-        core.create_wallet("funding", None, None, None, None)
-            .expect("create funding wallet");
-        let funding_rpc = Client::new(
-            &format!("{}/wallet/{}", node.rpc_url(), "funding"),
-            auth.clone(),
-        )
-        .expect("funding wallet rpc");
-
-        // 3) get an address from funding wallet and mine coinbase to it (101 blocks -> mature)
-        let addr = funding_rpc
-            .get_new_address(None, None)
-            .expect("new addr")
-            .assume_checked();
-        core.generate_to_address(101, &addr).expect("mine to addr");
-
-        // 4) create watch-only wallet (disable private keys)
-        core.create_wallet("watch", Some(true), None, None, None)
-            .expect("create watch wallet");
-        let watch_rpc = Client::new(
-            &format!("{}/wallet/{}", node.rpc_url(), "watch"),
-            auth.clone(),
-        )
-        .expect("watch wallet rpc");
-
-        // 5) import the funding address into the watch wallet as watch-only and rescan so it sees the funds
-        //    (rescan can take some time; here we just call it — regtest is tiny so it's instant)
-        watch_rpc
-            .import_address(&addr, None, Some(true))
-            .expect("import address");
-
-        // 6) query the watch-only wallet balance
-        //    Use get_balance(None, None) which returns a bitcoin::Amount
-        let balance = watch_rpc.get_balance(None, None).expect("get balance");
-
-        // Minimal assertion: balance must be greater than zero
-        assert!(balance.to_sat() > 0, "watch-only wallet should have funds");
-
-        // Print for human debugging
-        eprintln!("watch-only wallet balance (satoshis): {}", balance.to_sat());
-    }
-
-    #[test]
-    fn watch_only_wallet_balance_minimal() {
-        use bitcoincore_rpc::{Auth, Client, RpcApi};
-        use corepc_node::Node;
-
-        // 1) boot regtest node
-        let node = Node::from_downloaded().expect("node");
-        let auth = Auth::CookieFile(node.params.cookie_file.clone());
-        let core = Client::new(&node.rpc_url(), auth.clone()).expect("rpc");
-
-        // 2) funding wallet (has privkeys) -> gets mined coins
-        core.create_wallet("funding", None, None, None, None)
-            .expect("funding wallet");
-        let frpc = Client::new(
-            &format!("{}/wallet/{}", node.rpc_url(), "funding"),
-            auth.clone(),
-        )
-        .expect("funding rpc");
-        let mine_addr = frpc
-            .get_new_address(None, None)
-            .expect("addr")
-            .assume_checked();
-        core.generate_to_address(101, &mine_addr).expect("mine 101");
-
-        // 3) watch-only wallet (no privkeys)
-        //    createwallet name disable_private_keys=true
-        core.create_wallet("watch", Some(true), None, None, None)
-            .expect("watch wallet");
-        let wrpc = Client::new(&format!("{}/wallet/{}", node.rpc_url(), "watch"), auth)
-            .expect("watch rpc");
-
-        // 4) import address and rescan so it sees past funds
-        wrpc.import_address(&mine_addr, None, Some(true))
-            .expect("import+rescan");
-
-        // 5) check balance
-        let bal = wrpc.get_balance(None, None).expect("balance");
-        assert!(bal.to_sat() > 0, "watch-only balance should be > 0");
-        eprintln!("watch-only balance (sats): {}", bal.to_sat());
-    }
-
-    #[test]
-    fn watch_only_balance_descriptor_wallet_minimal_4() {
-        use bitcoincore_rpc::{Auth, Client, RpcApi};
-        use corepc_node::Node;
-        use serde_json::json;
+        // --------------------
 
         let node = Node::from_downloaded().unwrap();
         let auth = Auth::CookieFile(node.params.cookie_file.clone());
-        let core = Client::new(&node.rpc_url(), auth.clone()).unwrap();
+        let rpc_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
 
-        // Wallet with keys just to get an address to watch
-        core.create_wallet("funding", None, None, None, None)
-            .unwrap();
-        let frpc = Client::new(
-            &format!("{}/wallet/{}", node.rpc_url(), "funding"),
-            auth.clone(),
-        )
-        .unwrap();
-        let addr = frpc.get_new_address(None, None).unwrap().assume_checked();
+        assert_eq!(wallet.balance().total().to_btc(), 0.0);
+        let address = wallet.reveal_next_address(KeychainKind::External);
 
-        // Watch-only, descriptor wallet
-        core.create_wallet("watch", Some(true), None, None, None)
-            .unwrap();
-        let wrpc = Client::new(
-            &format!("{}/wallet/{}", node.rpc_url(), "watch"),
-            auth.clone(),
-        )
-        .unwrap();
+        rpc_client.generate_to_address(100, &address).expect("mint");
+        assert_eq!(wallet.balance().total().to_btc(), 0.0);
 
-        // Import the single address via descriptor
-        let req = json!([{
-            "desc": format!("addr({})", addr),
-            "timestamp": "now",
-            "active": true
-        }]);
-        wrpc.call::<serde_json::Value>("importdescriptors", &[req])
-            .unwrap();
+        let wallet_tip = wallet.latest_checkpoint();
+        let mut emitter = Emitter::new(
+            &rpc_client,
+            wallet_tip.clone(),
+            wallet_tip.height(),
+            NO_EXPECTED_MEMPOOL_TXS,
+        );
 
-        // Fund after import so no rescan needed
-        core.generate_to_address(101, &addr).unwrap();
+        while let Some(block) = emitter.next_block().unwrap() {
+            wallet
+                .apply_block_connected_to(&block.block, block.block_height(), block.connected_to())
+                .unwrap()
+        }
 
-        // Check balance
-        let bal = wrpc.get_balance(None, None).unwrap();
-        assert!(bal.to_sat() > 0, "watch-only balance should be > 0");
+        let mempool_emissions: Vec<(Arc<Transaction>, u64)> = emitter.mempool().unwrap().update;
+        wallet.apply_unconfirmed_txs(mempool_emissions);
+        assert_eq!(wallet.balance().total().to_btc(), 5000.0);
     }
 
     #[test]
