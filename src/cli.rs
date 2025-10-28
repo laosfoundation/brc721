@@ -156,6 +156,11 @@ pub enum WalletCmd {
         long_about = "Display the external and internal BIP86 extended public keys (xpub-like) for the wallet."
     )]
     Xpub,
+    #[command(
+        about = "Sync wallet with Core node",
+        long_about = "Sync the local BDK wallet state by streaming blocks and mempool from the configured Bitcoin Core RPC, updating balances and indexes."
+    )]
+    Sync,
 }
 
 #[derive(Subcommand, Debug, Clone)]

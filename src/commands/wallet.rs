@@ -45,6 +45,10 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("internal: {int}");
                 Ok(())
             }
+            cli::WalletCmd::Sync => {
+                w.sync(&ctx.rpc_url, ctx.auth.clone())?;
+                Ok(())
+            }
         }
     }
 }

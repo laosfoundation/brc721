@@ -2,14 +2,18 @@ pub mod paths;
 pub mod types;
 
 use anyhow::{anyhow, Context, Result};
+use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic, WordCount},
     template::Bip86,
     Balance, CreateParams, KeychainKind, LoadParams, PersistedWallet,
 };
+use bitcoin::Transaction;
 use bitcoin::{Address, Network};
+use bitcoincore_rpc::Auth;
 use rusqlite::Connection;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use paths::wallet_db_path;
 
@@ -124,6 +128,53 @@ impl Wallet {
             format!("{}#{}", ext_desc, ext_cs),
             format!("{}#{}", int_desc, int_cs),
         ))
+    }
+
+    pub fn sync(&self, rpc_url: &str, auth: Auth) -> Result<()> {
+        let mut wallet = self.load_wallet_or_err()?;
+        let wallet_tip = wallet.latest_checkpoint();
+        log::info!("sync: connecting to {}", rpc_url);
+        let client = bitcoincore_rpc::Client::new(rpc_url, auth)?;
+        log::info!(
+            "sync: starting from checkpoint height {}",
+            wallet_tip.height()
+        );
+        let mut conn = self.open_conn()?;
+        let mut emitter = Emitter::new(
+            &client,
+            wallet_tip.clone(),
+            wallet_tip.height(),
+            NO_EXPECTED_MEMPOOL_TXS,
+        );
+
+        let mut applied_blocks: u64 = 0;
+        let mut last_height = wallet_tip.height();
+        while let Some(block) = emitter.next_block()? {
+            log::info!("{}", block.block_height());
+            last_height = block.block_height();
+            wallet.apply_block_connected_to(
+                &block.block,
+                block.block_height(),
+                block.connected_to(),
+            )?;
+            wallet.persist(&mut conn)?;
+            applied_blocks += 1;
+        }
+        log::info!(
+            "sync: applied {} blocks, new tip height {}",
+            applied_blocks,
+            last_height
+        );
+
+        let mempool_emissions: Vec<(Arc<Transaction>, u64)> = emitter.mempool()?.update;
+        let mempool_count = mempool_emissions.len();
+        wallet.apply_unconfirmed_txs(mempool_emissions);
+        log::info!("sync: applied {} mempool txs", mempool_count);
+
+        wallet.persist(&mut conn)?;
+        let bal = wallet.balance();
+        log::info!("sync: balance {bal}");
+        Ok(())
     }
 }
 
