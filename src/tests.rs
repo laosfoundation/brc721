@@ -15,13 +15,18 @@ mod tests {
 
     #[test]
     fn test_balances_using_local_wallet() {
-        // the seed
-        let mnemonic = Mnemonic::parse_in(Language::English,
-        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-    ).unwrap();
+        // Parse a deterministic mnemonic (12-word BIP39 seed phrase).
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).unwrap();
         let network = Network::Regtest;
+
+        // Derive the seed from the mnemonic.
         let seed = mnemonic.to_seed(String::new()); // empty password
         let xprv = Xpriv::new_master(network, &seed).expect("master_key");
+
+        // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
         let descriptor = Bip86(xprv, KeychainKind::External)
             .build(network)
             .expect("external descriptor")
@@ -30,6 +35,8 @@ mod tests {
             .build(network)
             .expect("internal descriptor")
             .0;
+
+        // Create the wallet without persisting state to disk.
         let mut wallet = Wallet::create(descriptor.clone(), change_descriptor)
             .network(network)
             .create_wallet_no_persist()
@@ -37,16 +44,21 @@ mod tests {
 
         // --------------------
 
+        // Connect to a local regtest node.
         let node = Node::from_downloaded().unwrap();
         let auth = Auth::CookieFile(node.params.cookie_file.clone());
         let rpc_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
 
+        // Ensure wallet is empty.
         assert_eq!(wallet.balance().total().to_btc(), 0.0);
+
+        // Get a new address and mine 100 blocks to it.
         let address = wallet.reveal_next_address(KeychainKind::External);
-
         rpc_client.generate_to_address(100, &address).expect("mint");
+        // Balance is still zero (wallet has not synced the blockchain yet).
         assert_eq!(wallet.balance().total().to_btc(), 0.0);
 
+        // Get the current height (tip) and set up a block emitter for syncing.
         let wallet_tip = wallet.latest_checkpoint();
         let mut emitter = Emitter::new(
             &rpc_client,
@@ -55,14 +67,18 @@ mod tests {
             NO_EXPECTED_MEMPOOL_TXS,
         );
 
+        // Apply each new block from the emitter to the wallet.
         while let Some(block) = emitter.next_block().unwrap() {
             wallet
                 .apply_block_connected_to(&block.block, block.block_height(), block.connected_to())
                 .unwrap()
         }
 
+        // Apply any unconfirmed mempool transactions (should be none in this test).
         let mempool_emissions: Vec<(Arc<Transaction>, u64)> = emitter.mempool().unwrap().update;
         wallet.apply_unconfirmed_txs(mempool_emissions);
+
+        // Balance should now reflect the mined coins (100 blocks x 50 = 5000 BTC).
         assert_eq!(wallet.balance().total().to_btc(), 5000.0);
     }
 
