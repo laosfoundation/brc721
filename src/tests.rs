@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test_cases {
+mod integration {
     use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
     use bdk_wallet::template::DescriptorTemplate;
     use bdk_wallet::{
