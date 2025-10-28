@@ -123,7 +123,7 @@ pub enum Command {
 pub enum WalletCmd {
     #[command(
         about = "Initialize wallet and Core watch-only wallet",
-        long_about = "Create or import a BIP39 mnemonic and set up a corresponding Bitcoin Core watch-only wallet with descriptors. Optionally import an existing mnemonic and passphrase, set a custom Core wallet name, and trigger a full rescan."
+        long_about = "Create or import a BIP39 mnemonic and set up a corresponding Bitcoin Core watch-only wallet with descriptors. Optionally import an existing mnemonic and passphrase, set a custom Core wallet name."
     )]
     Init {
         #[arg(
@@ -140,12 +140,6 @@ pub enum WalletCmd {
             required = false
         )]
         passphrase: Option<String>,
-        #[arg(
-            long = "rescan",
-            default_value_t = false,
-            help = "Full rescan from genesis for imported descriptors"
-        )]
-        rescan: bool,
     },
     #[command(
         about = "Get a new receive address",
@@ -157,11 +151,6 @@ pub enum WalletCmd {
         long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."
     )]
     Balance,
-    #[command(
-        about = "List known wallets",
-        long_about = "List discovered or configured wallets loaded in Bitcoin Core and the local database."
-    )]
-    List,
     #[command(
         about = "Show extended public keys",
         long_about = "Display the external and internal BIP86 extended public keys (xpub-like) for the wallet."
