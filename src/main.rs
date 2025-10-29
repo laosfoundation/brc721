@@ -17,7 +17,7 @@ mod wallet;
 
 fn main() -> Result<()> {
     let cli = cli::parse();
-    let ctx = context::Context::from_cli(&cli);
+    let ctx = context::Context::try_from_cli(&cli)?;
 
     tracing::init(ctx.log_file.as_deref().map(Path::new));
 
@@ -71,7 +71,8 @@ fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Syn
 }
 
 fn init_scanner(ctx: &context::Context, start_block: u64) -> scanner::Scanner<Client> {
-    let client = Client::new(&ctx.rpc_url, ctx.auth.clone()).expect("failed to create RPC client");
+    let client = Client::new(&ctx.rpc_url.to_string(), ctx.auth.clone())
+        .expect("failed to create RPC client");
     scanner::Scanner::new(client)
         .with_confirmations(ctx.confirmations)
         .with_capacity(ctx.batch_size)

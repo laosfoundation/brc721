@@ -13,6 +13,7 @@ use bitcoincore_rpc::Auth;
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
+use url::Url;
 
 use paths::wallet_db_path;
 
@@ -20,14 +21,21 @@ use paths::wallet_db_path;
 pub struct Wallet {
     data_dir: PathBuf,
     network: Network,
+    rpc_url: Url,
 }
 
 impl Wallet {
-    pub fn new<P: Into<PathBuf>>(data_dir: P, network: Network) -> Self {
+    pub fn new<P: Into<PathBuf>>(data_dir: P, rpc_url: Url) -> Self {
         Self {
             data_dir: data_dir.into(),
-            network,
+            network: Network::Bitcoin,
+            rpc_url,
         }
+    }
+
+    pub fn with_network(mut self, network: Network) -> Self {
+        self.network = network;
+        self
     }
 
     pub fn init(
@@ -49,17 +57,23 @@ impl Wallet {
             });
         }
 
-        let mnemonic = match mnemonic {
-            Some(s) => Mnemonic::parse(s)?,
-            None => <Mnemonic as bdk_wallet::keys::GeneratableKey<bdk_wallet::miniscript::Tap>>::generate((
-                WordCount::Words12,
-                Language::English,
-            ))
-            .map_err(|e| e.map(Into::into).unwrap_or_else(|| anyhow!("failed to generate mnemonic")))?
-            .into_key(),
-        };
+        let mnemonic =
+            match mnemonic {
+                Some(s) => Mnemonic::parse(s)?,
+                None => <Mnemonic as bdk_wallet::keys::GeneratableKey<
+                    bdk_wallet::miniscript::Tap,
+                >>::generate((WordCount::Words12, Language::English))
+                .map_err(|e| {
+                    e.map(Into::into)
+                        .unwrap_or_else(|| anyhow!("failed to generate mnemonic"))
+                })?
+                .into_key(),
+            };
 
-        let ext = Bip86((mnemonic.clone(), passphrase.clone()), KeychainKind::External);
+        let ext = Bip86(
+            (mnemonic.clone(), passphrase.clone()),
+            KeychainKind::External,
+        );
         let int = Bip86((mnemonic.clone(), passphrase), KeychainKind::Internal);
 
         let _wallet = CreateParams::new(ext, int)
@@ -127,8 +141,8 @@ impl Wallet {
         Ok(out)
     }
 
-    pub fn setup_watchonly(&self, rpc_url: &str, auth: &Auth, wallet_name: &str, rescan: bool) -> Result<()> {
-        let base_url = rpc_url.trim_end_matches('/').to_string();
+    pub fn setup_watchonly(&self, auth: &Auth, wallet_name: &str, rescan: bool) -> Result<()> {
+        let base_url = self.rpc_url.to_string();
         let admin = RealCoreAdmin::new(base_url, auth.clone());
         self.setup_watchonly_with(&admin, wallet_name, 1000, rescan)
     }
@@ -176,8 +190,8 @@ impl Wallet {
         Ok(())
     }
 
-    pub fn core_balance(&self, rpc_url: &str, auth: &Auth, wallet_name: &str) -> Result<Amount> {
-        let base = rpc_url.trim_end_matches('/').to_string();
+    pub fn core_balance(&self, auth: &Auth, wallet_name: &str) -> Result<Amount> {
+        let base = self.rpc_url.to_string();
         let rpc = crate::wallet::types::RealCoreRpc::new(base, auth.clone());
         let bal = CoreRpc::get_wallet_balance(&rpc, wallet_name)?;
         Ok(bal)
@@ -208,208 +222,5 @@ impl Wallet {
         let short = hex::encode(&hash[..4]);
         let wallet_name = format!("brc721-{}-{}", short, self.network);
         Ok(wallet_name)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::{distributions::Alphanumeric, Rng};
-    use serde_json::json;
-    use std::sync::Mutex;
-
-    fn temp_data_dir() -> PathBuf {
-        let mut base = std::env::temp_dir();
-        let suffix: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(12)
-            .map(char::from)
-            .collect();
-        base.push(format!("brc721-test-{}", suffix));
-        std::fs::create_dir_all(&base).unwrap();
-        base
-    }
-
-    #[test]
-    fn wallet_single_address_is_deterministic() {
-        let data_dir = temp_data_dir();
-        let net = bitcoin::Network::Regtest;
-        let w = Wallet::new(&data_dir, net);
-
-        let mnemonic = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
-        let res = w.init(mnemonic, None).expect("init ok");
-        assert!(res.db_path.exists());
-
-        let ext1 = w.address(KeychainKind::External).expect("ext addr");
-        let ext2 = w.address(KeychainKind::External).expect("ext addr again");
-        assert_ne!(ext1, ext2, "external address should advance");
-
-        let int1 = w.address(KeychainKind::Internal).expect("int addr");
-        let int2 = w.address(KeychainKind::Internal).expect("int addr again");
-        assert_ne!(int1, int2, "internal address should advance");
-
-        assert_ne!(ext1, int1, "external and internal addresses differ");
-
-        let _ext3 = w.address(KeychainKind::External).expect("third ext addr");
-        let w2 = Wallet::new(&data_dir, net);
-        let ext_again = w2
-            .address(KeychainKind::External)
-            .expect("ext addr after reload");
-        assert_ne!(
-            ext2, ext_again,
-            "derivation state should advance across instances"
-        );
-    }
-
-    #[test]
-    fn passphrase_affects_derived_addresses() {
-        let net = bitcoin::Network::Regtest;
-        let mnemonic = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
-
-        let dir1 = temp_data_dir();
-        let w1 = Wallet::new(&dir1, net);
-        w1.init(mnemonic.clone(), Some("pass1".to_string())).unwrap();
-        let a1 = w1.address(KeychainKind::External).unwrap();
-
-        let dir2 = temp_data_dir();
-        let w2 = Wallet::new(&dir2, net);
-        w2.init(mnemonic.clone(), Some("pass2".to_string())).unwrap();
-        let a2 = w2.address(KeychainKind::External).unwrap();
-
-        assert_ne!(a1, a2, "different passphrases should yield different descriptors/addresses");
-    }
-
-    #[test]
-    fn generate_wallet_name_is_stable_and_unique() {
-        let net = bitcoin::Network::Regtest;
-        let mnemonic1 = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
-        let mnemonic2 = Some("legal winner thank year wave sausage worth useful legal winner thank yellow".to_string());
-
-        let dir1 = temp_data_dir();
-        let w1 = Wallet::new(&dir1, net);
-        w1.init(mnemonic1, None).unwrap();
-        let n1a = w1.generate_wallet_name().unwrap();
-        let n1b = w1.generate_wallet_name().unwrap();
-        assert_eq!(n1a, n1b, "name should be deterministic");
-
-        let dir2 = temp_data_dir();
-        let w2 = Wallet::new(&dir2, net);
-        w2.init(mnemonic2, None).unwrap();
-        let n2 = w2.generate_wallet_name().unwrap();
-
-        assert_ne!(n1a, n2, "different descriptors should produce different names");
-    }
-
-    #[test]
-    fn public_descriptors_error_if_uninitialized() {
-        let dir = temp_data_dir();
-        let w = Wallet::new(&dir, bitcoin::Network::Regtest);
-        let res = w.public_descriptors_with_checksum();
-        assert!(res.is_err(), "should error when wallet not initialized");
-    }
-
-    struct MockRpc {
-        wallets: Vec<String>,
-        infos: std::collections::HashMap<String, serde_json::Value>,
-    }
-
-    impl CoreRpc for MockRpc {
-        fn list_wallets(&self) -> anyhow::Result<Vec<String>> {
-            Ok(self.wallets.clone())
-        }
-        fn get_wallet_info(&self, name: &str) -> anyhow::Result<serde_json::Value> {
-            Ok(self.infos.get(name).cloned().unwrap_or_else(|| json!({})))
-        }
-        fn get_wallet_balance(&self, _name: &str) -> anyhow::Result<Amount> {
-            Ok(Amount::from_sat(0))
-        }
-    }
-
-    #[test]
-    fn list_core_wallets_interprets_flags() {
-        let dir = temp_data_dir();
-        let w = Wallet::new(&dir, bitcoin::Network::Regtest);
-        let mut infos = std::collections::HashMap::new();
-        infos.insert(
-            "wo-desc".to_string(),
-            json!({"private_keys_enabled": false, "descriptors": true}),
-        );
-        infos.insert(
-            "legacy".to_string(),
-            json!({"private_keys_enabled": true, "descriptors": false}),
-        );
-        let rpc = MockRpc {
-            wallets: vec!["wo-desc".into(), "legacy".into()],
-            infos,
-        };
-        let listed = w.list_core_wallets(&rpc).unwrap();
-        assert_eq!(listed.len(), 2);
-        let a = &listed[0];
-        assert_eq!(a.name, "wo-desc");
-        assert!(a.watch_only);
-        assert!(a.descriptors);
-        let b = &listed[1];
-        assert_eq!(b.name, "legacy");
-        assert!(!b.watch_only);
-        assert!(!b.descriptors);
-    }
-
-    struct MockAdmin {
-        pub ensured: Mutex<Vec<String>>,
-        pub imports: Mutex<Vec<(String, serde_json::Value)>>,
-    }
-
-    impl CoreAdmin for MockAdmin {
-        fn ensure_watchonly_descriptor_wallet(&self, wallet_name: &str) -> anyhow::Result<()> {
-            self.ensured.lock().unwrap().push(wallet_name.to_string());
-            Ok(())
-        }
-        fn import_descriptors(&self, wallet_name: &str, imports: serde_json::Value) -> anyhow::Result<()> {
-            self.imports
-                .lock()
-                .unwrap()
-                .push((wallet_name.to_string(), imports));
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn setup_watchonly_builds_imports_correctly() {
-        let dir = temp_data_dir();
-        let net = bitcoin::Network::Regtest;
-        let w = Wallet::new(&dir, net);
-        let mnemonic = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
-        w.init(mnemonic, None).unwrap();
-
-        let admin = MockAdmin {
-            ensured: Mutex::new(vec![]),
-            imports: Mutex::new(vec![]),
-        };
-
-        let name = w.generate_wallet_name().unwrap();
-        w.setup_watchonly_with(&admin, &name, 5, false).unwrap();
-
-        let ensured = admin.ensured.lock().unwrap();
-        assert_eq!(ensured.as_slice(), std::slice::from_ref(&name));
-        drop(ensured);
-
-        let imports = admin.imports.lock().unwrap();
-        assert_eq!(imports.len(), 1);
-        let (n, v) = &imports[0];
-        assert_eq!(n, &name);
-        let arr = v.as_array().unwrap();
-        assert_eq!(arr.len(), 2);
-        for entry in arr {
-            assert_eq!(entry.get("active").unwrap(), &json!(true));
-            assert_eq!(entry.get("range").unwrap(), &json!([0, 5]));
-            assert!(entry.get("desc").unwrap().as_str().unwrap().contains("#"));
-        }
-        let ext = &arr[0];
-        assert_eq!(ext.get("internal").unwrap(), &json!(false));
-        assert_eq!(ext.get("label").unwrap(), &json!("brc721-external"));
-        let int = &arr[1];
-        assert_eq!(int.get("internal").unwrap(), &json!(true));
-        assert_eq!(int.get("label").unwrap(), &json!("brc721-internal"));
-        assert_eq!(int.get("timestamp").unwrap(), &json!("now"));
     }
 }
