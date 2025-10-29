@@ -14,8 +14,6 @@ mod storage;
 mod tracing;
 pub mod types;
 mod wallet;
-mod tests;
-
 
 fn main() -> Result<()> {
     let cli = cli::parse();
@@ -79,3 +77,6 @@ fn init_scanner(ctx: &context::Context, start_block: u64) -> scanner::Scanner<Cl
         .with_capacity(ctx.batch_size)
         .with_start_from(start_block)
 }
+
+#[cfg(test)]
+mod integration_tests;
