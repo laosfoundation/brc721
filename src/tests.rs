@@ -1,17 +1,136 @@
 #[cfg(test)]
 mod integration {
     use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
-    use bdk_wallet::template::DescriptorTemplate;
+    use bdk_wallet::template::{Bip86Public, DescriptorTemplate};
     use bdk_wallet::{
         bip39::{Language, Mnemonic},
         template::Bip86,
         KeychainKind, Wallet,
     };
-    use bitcoin::bip32::Xpriv;
+    use bitcoin::bip32::{Xpriv, Xpub};
+    use bitcoin::key::Secp256k1;
     use bitcoin::{Network, Transaction};
     use bitcoincore_rpc::{Auth, Client, RpcApi};
     use corepc_node::Node;
     use std::sync::Arc;
+
+    #[test]
+    fn test_watch_only_wallet_tracking_balance() {
+        // Parse a deterministic mnemonic (12-word BIP39 seed phrase).
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).unwrap();
+        let network = Network::Regtest;
+
+        // Derive the seed from the mnemonic.
+        let seed = mnemonic.to_seed(String::new()); // empty password
+        let xprv = Xpriv::new_master(network, &seed).expect("master_key");
+        let secp = Secp256k1::new();
+        let xpub = Xpub::from_priv(&secp, &xprv);
+        let fpr = xprv.fingerprint(&secp);
+
+        // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
+        let descriptor = Bip86(xprv, KeychainKind::External)
+            .build(network)
+            .expect("external descriptor")
+            .0;
+        let change_descriptor = Bip86(xprv, KeychainKind::Internal)
+            .build(network)
+            .expect("internal descriptor")
+            .0;
+
+        // Create the wallet without persisting state to disk.
+        let mut wallet = Wallet::create(descriptor.clone(), change_descriptor)
+            .network(network)
+            .create_wallet_no_persist()
+            .expect("wallet");
+
+        // --------------------
+
+        // Connect to a local regtest node.
+        let node = Node::from_downloaded().unwrap();
+        let auth = Auth::CookieFile(node.params.cookie_file.clone());
+        let root_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
+
+        // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
+        let public_descriptor = Bip86Public(xpub, fpr, KeychainKind::External)
+            .build(network)
+            .expect("external descriptor")
+            .0;
+        let public_change_descriptor = Bip86Public(xpub, fpr, KeychainKind::Internal)
+            .build(network)
+            .expect("internal descriptor")
+            .0;
+
+        println!("{}", public_descriptor);
+
+        let watch_name = "watch_wallet";
+        // Create a blank, descriptor-enabled, watch-only wallet
+        let ans: serde_json::Value = root_client
+            .call::<serde_json::Value>(
+                "createwallet",
+                &[
+                    serde_json::json!(watch_name), // name
+                    serde_json::json!(true),       // disable_private_keys
+                    serde_json::json!(true),       // blank
+                    serde_json::json!(""),         // passphrase
+                    serde_json::json!(false),      // avoid_reuse
+                    serde_json::json!(true),       // descriptors
+                ],
+            )
+            .expect("watch wallet created");
+        assert_eq!(ans["name"].as_str().unwrap(), "watch_wallet");
+        assert!(ans["warning"].is_null());
+        let watch_url = format!("{}/wallet/{}", node.rpc_url(), watch_name);
+        let watch_client = Client::new(&watch_url, auth).expect("watch client");
+
+        let imports = serde_json::json!([
+            {
+                "desc": public_descriptor,
+                "timestamp": 0,
+                "active": true,
+                "range": [0,999],
+                "internal": false
+            },
+            {
+                "desc": public_change_descriptor,
+                "timestamp": 0,
+                "active": true,
+                "range": [0,999],
+                "internal": true
+            }
+        ]);
+        let ans: serde_json::Value = watch_client
+            .call::<serde_json::Value>("importdescriptors", &[imports])
+            .expect("import descriptor");
+        let result = ans
+            .as_array()
+            .and_then(|arr| arr.get(0))
+            .unwrap_or_else(|| panic!("unexpected response: {}", ans));
+        assert_eq!(
+            result["success"].as_bool().unwrap(),
+            true,
+            "{}",
+            serde_json::to_string_pretty(&ans).unwrap()
+        );
+        let balances = watch_client.get_balances().expect("get balances");
+        assert_eq!(balances.mine.trusted.to_btc(), 0.0);
+        assert_eq!(balances.mine.immature.to_btc(), 0.0);
+        assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
+        assert!(balances.watchonly.is_none());
+
+        let address = wallet.reveal_next_address(KeychainKind::External);
+        root_client
+            .generate_to_address(100, &address)
+            .expect("mint");
+
+        let balances = watch_client.get_balances().expect("get balances");
+        assert_eq!(balances.mine.trusted.to_btc(), 50.0);
+        assert_eq!(balances.mine.immature.to_btc(), 0.0);
+        assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
+        assert!(balances.watchonly.is_none());
+    }
 
     #[test]
     fn test_balances_using_local_wallet() {
