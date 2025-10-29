@@ -7,11 +7,12 @@ mod integration {
         template::Bip86,
         KeychainKind, Wallet,
     };
-    use bitcoin::bip32::{Xpriv, Xpub};
+    use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
     use bitcoin::key::Secp256k1;
     use bitcoin::{Network, Transaction};
     use bitcoincore_rpc::{Auth, Client, RpcApi};
     use corepc_node::Node;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     #[test]
@@ -22,20 +23,27 @@ mod integration {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).unwrap();
         let network = Network::Regtest;
+        let secp = Secp256k1::new();
 
         // Derive the seed from the mnemonic.
         let seed = mnemonic.to_seed(String::new()); // empty password
-        let xprv = Xpriv::new_master(network, &seed).expect("master_key");
-        let secp = Secp256k1::new();
-        let xpub = Xpub::from_priv(&secp, &xprv);
-        let fpr = xprv.fingerprint(&secp);
+        let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
+        let _master_xpub = Xpub::from_priv(&secp, &master_xprv);
+        let fpr = master_xprv.fingerprint(&secp);
+        let acct_path = DerivationPath::from_str("m/86'/1'/0'").expect("derivation path");
+
+        let acct_xprv = master_xprv
+            .derive_priv(&secp, &acct_path)
+            .expect("derived private key");
+        let acct_xpub = Xpub::from_priv(&secp, &acct_xprv);
+        assert_eq!(acct_xpub.depth, 3);
 
         // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
-        let descriptor = Bip86(xprv, KeychainKind::External)
+        let descriptor = Bip86(acct_xprv, KeychainKind::External)
             .build(network)
             .expect("external descriptor")
             .0;
-        let change_descriptor = Bip86(xprv, KeychainKind::Internal)
+        let change_descriptor = Bip86(acct_xprv, KeychainKind::Internal)
             .build(network)
             .expect("internal descriptor")
             .0;
@@ -54,16 +62,16 @@ mod integration {
         let root_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
 
         // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
-        let public_descriptor = Bip86Public(xpub, fpr, KeychainKind::External)
-            .build(network)
-            .expect("external descriptor")
-            .0;
-        let public_change_descriptor = Bip86Public(xpub, fpr, KeychainKind::Internal)
-            .build(network)
-            .expect("internal descriptor")
-            .0;
+        // let public_descriptor = Bip86Public(acct_xpub, fpr, KeychainKind::External)
+        //     .build(network)
+        //     .expect("external descriptor")
+        //     .0;
+        // let public_change_descriptor = Bip86Public(acct_xpub, fpr, KeychainKind::Internal)
+        //     .build(network)
+        //     .expect("internal descriptor")
+        //     .0;
 
-        println!("{}", public_descriptor);
+        // println!("{}", public_descriptor);
 
         let watch_name = "watch_wallet";
         // Create a blank, descriptor-enabled, watch-only wallet
@@ -87,14 +95,14 @@ mod integration {
 
         let imports = serde_json::json!([
             {
-                "desc": public_descriptor,
+                "desc": wallet.public_descriptor(KeychainKind::External),
                 "timestamp": 0,
                 "active": true,
                 "range": [0,999],
                 "internal": false
             },
             {
-                "desc": public_change_descriptor,
+                "desc": wallet.public_descriptor(KeychainKind::Internal),
                 "timestamp": 0,
                 "active": true,
                 "range": [0,999],
@@ -104,30 +112,40 @@ mod integration {
         let ans: serde_json::Value = watch_client
             .call::<serde_json::Value>("importdescriptors", &[imports])
             .expect("import descriptor");
-        let result = ans
-            .as_array()
-            .and_then(|arr| arr.get(0))
-            .unwrap_or_else(|| panic!("unexpected response: {}", ans));
-        assert_eq!(
-            result["success"].as_bool().unwrap(),
-            true,
+
+        let arr = ans.as_array().expect("array");
+        assert!(
+            arr.iter().all(|e| e["success"].as_bool() == Some(true)),
             "{}",
             serde_json::to_string_pretty(&ans).unwrap()
         );
+
         let balances = watch_client.get_balances().expect("get balances");
+        // Fresh watch-only wallet has zero balances across all buckets
         assert_eq!(balances.mine.trusted.to_btc(), 0.0);
         assert_eq!(balances.mine.immature.to_btc(), 0.0);
         assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
         assert!(balances.watchonly.is_none());
 
         let address = wallet.reveal_next_address(KeychainKind::External);
+        assert_eq!(
+            address.to_string(),
+            "bcrt1p29czrekc5d6u89ujatfc9l03prap0vech3hkfntymcl0guhvufvs8c479j"
+        );
+        // Mine enough blocks so at least one coinbase matures and shows up as spendable
         root_client
-            .generate_to_address(100, &address)
+            .generate_to_address(101, &address)
             .expect("mint");
+
+        // After mining to our descriptor, balances may require a rescan to appear.
+        // Trigger a rescan from genesis so Core indexes our descriptors fully.
+        let _: serde_json::Value = watch_client
+            .call("rescanblockchain", &[serde_json::json!(0)])
+            .expect("rescan");
 
         let balances = watch_client.get_balances().expect("get balances");
         assert_eq!(balances.mine.trusted.to_btc(), 50.0);
-        assert_eq!(balances.mine.immature.to_btc(), 0.0);
+        assert_eq!(balances.mine.immature.to_btc(), 5000.0);
         assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
         assert!(balances.watchonly.is_none());
     }
