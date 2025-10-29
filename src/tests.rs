@@ -99,12 +99,6 @@ mod integration {
             .generate_to_address(101, &address)
             .expect("mint");
 
-        // After mining to our descriptor, balances may require a rescan to appear.
-        // Trigger a rescan from genesis so Core indexes our descriptors fully.
-        let _: serde_json::Value = watch_client
-            .call("rescanblockchain", &[serde_json::json!(0)])
-            .expect("rescan");
-
         let balances = watch_client.get_balances().expect("get balances");
         assert_eq!(balances.mine.trusted.to_btc(), 50.0);
         assert_eq!(balances.mine.immature.to_btc(), 5000.0);
