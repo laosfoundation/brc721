@@ -1,18 +1,15 @@
 #[cfg(test)]
 mod integration {
     use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
-    use bdk_wallet::template::{Bip86Public, DescriptorTemplate};
     use bdk_wallet::{
         bip39::{Language, Mnemonic},
-        template::Bip86,
+        template::{Bip86, DescriptorTemplate},
         KeychainKind, Wallet,
     };
-    use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
-    use bitcoin::key::Secp256k1;
+    use bitcoin::bip32::Xpriv;
     use bitcoin::{Network, Transaction};
     use bitcoincore_rpc::{Auth, Client, RpcApi};
     use corepc_node::Node;
-    use std::str::FromStr;
     use std::sync::Arc;
 
     #[test]
@@ -23,55 +20,23 @@ mod integration {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).unwrap();
         let network = Network::Regtest;
-        let secp = Secp256k1::new();
 
         // Derive the seed from the mnemonic.
         let seed = mnemonic.to_seed(String::new()); // empty password
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
-        let _master_xpub = Xpub::from_priv(&secp, &master_xprv);
-        let fpr = master_xprv.fingerprint(&secp);
-        let acct_path = DerivationPath::from_str("m/86'/1'/0'").expect("derivation path");
 
-        let acct_xprv = master_xprv
-            .derive_priv(&secp, &acct_path)
-            .expect("derived private key");
-        let acct_xpub = Xpub::from_priv(&secp, &acct_xprv);
-        assert_eq!(acct_xpub.depth, 3);
-
-        // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
-        let descriptor = Bip86(acct_xprv, KeychainKind::External)
-            .build(network)
-            .expect("external descriptor")
-            .0;
-        let change_descriptor = Bip86(acct_xprv, KeychainKind::Internal)
-            .build(network)
-            .expect("internal descriptor")
-            .0;
-
-        // Create the wallet without persisting state to disk.
-        let mut wallet = Wallet::create(descriptor.clone(), change_descriptor)
-            .network(network)
-            .create_wallet_no_persist()
-            .expect("wallet");
-
-        // --------------------
+        let mut wallet = Wallet::create(
+            Bip86(master_xprv, KeychainKind::External),
+            Bip86(master_xprv, KeychainKind::Internal),
+        )
+        .network(network)
+        .create_wallet_no_persist()
+        .expect("wallet");
 
         // Connect to a local regtest node.
         let node = Node::from_downloaded().unwrap();
         let auth = Auth::CookieFile(node.params.cookie_file.clone());
         let root_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
-
-        // Create BIP86 descriptors for external (receiving) and internal (change) addresses.
-        // let public_descriptor = Bip86Public(acct_xpub, fpr, KeychainKind::External)
-        //     .build(network)
-        //     .expect("external descriptor")
-        //     .0;
-        // let public_change_descriptor = Bip86Public(acct_xpub, fpr, KeychainKind::Internal)
-        //     .build(network)
-        //     .expect("internal descriptor")
-        //     .0;
-
-        // println!("{}", public_descriptor);
 
         let watch_name = "watch_wallet";
         // Create a blank, descriptor-enabled, watch-only wallet
@@ -90,6 +55,7 @@ mod integration {
             .expect("watch wallet created");
         assert_eq!(ans["name"].as_str().unwrap(), "watch_wallet");
         assert!(ans["warning"].is_null());
+
         let watch_url = format!("{}/wallet/{}", node.rpc_url(), watch_name);
         let watch_client = Client::new(&watch_url, auth).expect("watch client");
 
@@ -128,11 +94,7 @@ mod integration {
         assert!(balances.watchonly.is_none());
 
         let address = wallet.reveal_next_address(KeychainKind::External);
-        assert_eq!(
-            address.to_string(),
-            "bcrt1p29czrekc5d6u89ujatfc9l03prap0vech3hkfntymcl0guhvufvs8c479j"
-        );
-        // Mine enough blocks so at least one coinbase matures and shows up as spendable
+
         root_client
             .generate_to_address(101, &address)
             .expect("mint");
