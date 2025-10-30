@@ -1,4 +1,3 @@
-use bdk_wallet::bip39::{Language, Mnemonic};
 use bdk_wallet::KeychainKind;
 use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
