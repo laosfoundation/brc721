@@ -22,6 +22,7 @@ pub struct Wallet {
     data_dir: PathBuf,
     network: Network,
     rpc_url: Url,
+    wallet: Option<bdk_wallet::PersistedWallet<Connection>>,
 }
 
 impl Wallet {
@@ -30,6 +31,7 @@ impl Wallet {
             data_dir: data_dir.into(),
             network: Network::Bitcoin,
             rpc_url: rpc_url.into(),
+            wallet: None,
         }
     }
 
@@ -39,7 +41,7 @@ impl Wallet {
     }
 
     pub fn init(
-        &self,
+        &mut self,
         mnemonic: Option<String>,
         passphrase: Option<String>,
     ) -> Result<types::InitResult> {
@@ -76,9 +78,11 @@ impl Wallet {
         );
         let int = Bip86((mnemonic.clone(), passphrase), KeychainKind::Internal);
 
-        let _wallet = CreateParams::new(ext, int)
-            .network(self.network)
-            .create_wallet(&mut conn)?;
+        self.wallet = Some(
+            CreateParams::new(ext, int)
+                .network(self.network)
+                .create_wallet(&mut conn)?,
+        );
 
         Ok(types::InitResult {
             created: true,
@@ -87,12 +91,15 @@ impl Wallet {
         })
     }
 
-    pub fn address(&self, keychain: KeychainKind) -> Result<Address> {
-        let mut wallet = self.load_wallet_or_err()?;
-        let addr = wallet.reveal_next_address(keychain).address;
-        let mut conn = self.open_conn()?;
-        wallet.persist(&mut conn)?;
-        Ok(addr)
+    pub fn address(&mut self, keychain: KeychainKind) -> Result<Address> {
+        if self.wallet.is_none() {
+            return Err(anyhow!("No wallet initialized"));
+        }
+
+        match &self.wallet {
+            Some(wallet) => Ok(wallet.reveal_next_address(keychain).address),
+            None => Err(anyhow!("No wallet initialized")),
+        }
     }
 
     pub fn local_db_path(&self) -> PathBuf {
@@ -105,17 +112,12 @@ impl Wallet {
             .with_context(|| format!("opening wallet db at {}", db_path.display()))
     }
 
-    fn try_load_wallet(&self) -> Result<Option<PersistedWallet<Connection>>> {
+    fn try_load_wallet(&mut self) -> Result<()> {
         let mut conn = self.open_conn()?;
-        let wallet = LoadParams::new()
+        self.wallet = LoadParams::new()
             .check_network(self.network)
             .load_wallet(&mut conn)?;
-        Ok(wallet)
-    }
-
-    fn load_wallet_or_err(&self) -> Result<PersistedWallet<Connection>> {
-        self.try_load_wallet()?
-            .ok_or_else(|| anyhow!("wallet not initialized"))
+        Ok(())
     }
 
     pub fn list_core_wallets<R: CoreRpc>(&self, rpc: &R) -> Result<Vec<CoreWalletInfo>> {
@@ -197,27 +199,17 @@ impl Wallet {
         Ok(bal)
     }
 
-    pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
-        let wallet = self.load_wallet_or_err()?;
-
-        let ext_desc = wallet.public_descriptor(KeychainKind::External).to_string();
-        let int_desc = wallet.public_descriptor(KeychainKind::Internal).to_string();
-        let ext_cs = wallet.descriptor_checksum(KeychainKind::External);
-        let int_cs = wallet.descriptor_checksum(KeychainKind::Internal);
-
-        Ok((
-            format!("{}#{}", ext_desc, ext_cs),
-            format!("{}#{}", int_desc, int_cs),
-        ))
-    }
-
     pub fn generate_wallet_name(&self) -> Result<String> {
-        let (ext_with_cs, _int_with_cs) = self
-            .public_descriptors_with_checksum()
-            .context("loading public descriptors")?;
+        let descriptor = self
+            .clone()
+            .wallet
+            .unwrap()
+            .clone()
+            .public_descriptor(KeychainKind::External)
+            .clone();
         let mut hasher = sha2::Sha256::new();
         use sha2::Digest;
-        hasher.update(ext_with_cs.as_bytes());
+        hasher.update(descriptor.to_string().as_bytes());
         let hash = hasher.finalize();
         let short = hex::encode(&hash[..4]);
         let wallet_name = format!("brc721-{}-{}", short, self.network);
