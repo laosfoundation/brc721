@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic, WordCount},
     template::Bip86,
-    CreateParams, KeychainKind, LoadParams, PersistedWallet,
+    CreateParams, KeychainKind, LoadParams,
 };
 use bitcoin::{Address, Amount, Network};
 use bitcoincore_rpc::Auth;
@@ -58,11 +58,6 @@ impl WalletBuilder {
 impl Wallet {
     pub fn builder<P: Into<PathBuf>, Q: Into<Url>>(data_dir: P, rpc_url: Q) -> WalletBuilder {
         WalletBuilder::new(data_dir, rpc_url)
-    }
-
-    pub fn with_network(mut self, network: Network) -> Self {
-        self.network = network;
-        self
     }
 
     pub fn init(
@@ -135,14 +130,6 @@ impl Wallet {
         let db_path = self.local_db_path();
         Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))
-    }
-
-    fn try_load_wallet(&mut self) -> Result<()> {
-        let mut conn = self.open_conn()?;
-        self.wallet = LoadParams::new()
-            .check_network(self.network)
-            .load_wallet(&mut conn)?;
-        Ok(())
     }
 
     pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
@@ -268,10 +255,6 @@ impl Wallet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bdk_wallet::keys::bip39::{Language, Mnemonic, WordCount};
-    use bdk_wallet::template::Bip86;
-    use bdk_wallet::KeychainKind;
-    use std::fs;
     use tempfile::TempDir;
     use url::Url;
 
@@ -280,8 +263,9 @@ mod tests {
         // Setup a temp directory for the wallet data
         let data_dir = TempDir::new().expect("create temp dir");
         let rpc_url = Url::parse("http://localhost:18332").expect("valid url");
-        let mut wallet =
-            Wallet::builder(data_dir.path(), rpc_url).with_network(bitcoin::Network::Regtest).build();
+        let mut wallet = Wallet::builder(data_dir.path(), rpc_url)
+            .with_network(bitcoin::Network::Regtest)
+            .build();
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
         let init_res = wallet.init(Some(mnemonic.to_string()), None);
