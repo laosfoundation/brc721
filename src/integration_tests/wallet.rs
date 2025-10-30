@@ -12,13 +12,12 @@ fn test_wallet_creation() {
     let node = Node::from_downloaded().unwrap();
     let node_url: Url = node.rpc_url().parse().expect("valid url");
     let data_dir = TempDir::new().expect("temp dir");
-    let mut wallet = Wallet::builder(data_dir.path(), node_url).with_network(Network::Regtest).build();
-
     let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-    let ans = wallet
-        .init(Some(mnemonic.to_string()), None)
+    let mut wallet = Wallet::builder(data_dir.path(), node_url)
+        .with_network(Network::Regtest)
+        .with_mnemonic(mnemonic)
+        .build()
         .expect("wallet");
-    assert!(ans.created);
 
     let address = wallet
         .address(KeychainKind::External)

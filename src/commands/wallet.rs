@@ -7,7 +7,7 @@ use bdk_wallet::KeychainKind;
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
         let mut w =
-            Wallet::builder(&ctx.data_dir, ctx.rpc_url.clone()).with_network(bitcoin::Network::Bitcoin).build();
+            Wallet::builder(&ctx.data_dir, ctx.rpc_url.clone()).with_network(bitcoin::Network::Bitcoin).build()?;
 
         match self {
             cli::WalletCmd::Init {
@@ -15,18 +15,6 @@ impl CommandRunner for cli::WalletCmd {
                 passphrase,
                 rescan,
             } => {
-                let res = w
-                    .init(mnemonic.clone(), passphrase.clone())
-                    .context("Initializing wallet")?;
-                if res.created {
-                    log::info!("initialized wallet db={}", res.db_path.display());
-                    if let Some(m) = res.mnemonic {
-                        log::info!("{}", m);
-                    }
-                } else {
-                    log::info!("wallet already initialized db={}", res.db_path.display());
-                }
-
                 let wo_name = w.name()?;
 
                 w.setup_watchonly(&ctx.auth, &wo_name, *rescan)
