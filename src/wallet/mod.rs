@@ -96,7 +96,7 @@ impl Wallet {
             return Err(anyhow!("No wallet initialized"));
         }
 
-        match &self.wallet {
+        match &mut self.wallet {
             Some(wallet) => Ok(wallet.reveal_next_address(keychain).address),
             None => Err(anyhow!("No wallet initialized")),
         }
@@ -118,6 +118,17 @@ impl Wallet {
             .check_network(self.network)
             .load_wallet(&mut conn)?;
         Ok(())
+    }
+
+    pub fn public_descriptors_with_checksum(&self) -> Result<(String, String)> {
+        let mut conn = self.open_conn()?;
+        let wallet = LoadParams::new()
+            .check_network(self.network)
+            .load_wallet(&mut conn)?
+            .ok_or_else(|| anyhow!("wallet not initialized"))?;
+        let ext = wallet.public_descriptor(KeychainKind::External);
+        let int = wallet.public_descriptor(KeychainKind::Internal);
+        Ok((ext.to_string(), int.to_string()))
     }
 
     pub fn list_core_wallets<R: CoreRpc>(&self, rpc: &R) -> Result<Vec<CoreWalletInfo>> {
@@ -160,7 +171,7 @@ impl Wallet {
             .ensure_watchonly_descriptor_wallet(wallet_name)
             .context("ensuring Core watch-only wallet")?;
 
-        let (ext_with_cs, int_with_cs) = self
+        let (ext, int) = self
             .public_descriptors_with_checksum()
             .context("loading public descriptors")?;
 
@@ -168,7 +179,7 @@ impl Wallet {
 
         let imports = json!([
             {
-                "desc": ext_with_cs,
+                "desc": ext,
                 "active": true,
                 "range": [0, range_end],
                 "timestamp": ts_val,
@@ -176,7 +187,7 @@ impl Wallet {
                 "label": "brc721-external"
             },
             {
-                "desc": int_with_cs,
+                "desc": int,
                 "active": true,
                 "range": [0, range_end],
                 "timestamp": ts_val,
@@ -195,18 +206,24 @@ impl Wallet {
     pub fn core_balance(&self, auth: &Auth, wallet_name: &str) -> Result<Amount> {
         let base = self.rpc_url.to_string();
         let rpc = crate::wallet::types::RealCoreRpc::new(base, auth.clone());
+        // Core may need a moment after import; try a few times
+        for _ in 0..10 {
+            if let Ok(bal) = CoreRpc::get_wallet_balance(&rpc, wallet_name) {
+                return Ok(bal);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
         let bal = CoreRpc::get_wallet_balance(&rpc, wallet_name)?;
         Ok(bal)
     }
 
-    pub fn generate_wallet_name(&self) -> Result<String> {
-        let descriptor = self
-            .clone()
-            .wallet
-            .unwrap()
-            .clone()
-            .public_descriptor(KeychainKind::External)
-            .clone();
+    fn generate_wallet_name(&self) -> Result<String> {
+        let mut conn = self.open_conn()?;
+        let wallet = LoadParams::new()
+            .check_network(self.network)
+            .load_wallet(&mut conn)?
+            .ok_or_else(|| anyhow!("wallet not initialized"))?;
+        let descriptor = wallet.public_descriptor(KeychainKind::External);
         let mut hasher = sha2::Sha256::new();
         use sha2::Digest;
         hasher.update(descriptor.to_string().as_bytes());
@@ -214,5 +231,37 @@ impl Wallet {
         let short = hex::encode(&hash[..4]);
         let wallet_name = format!("brc721-{}-{}", short, self.network);
         Ok(wallet_name)
+    }
+
+    pub fn name(&self) -> Result<String> {
+        self.generate_wallet_name()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bdk_wallet::keys::bip39::{Language, Mnemonic, WordCount};
+    use bdk_wallet::template::Bip86;
+    use bdk_wallet::KeychainKind;
+    use std::fs;
+    use tempfile::TempDir;
+    use url::Url;
+
+    #[test]
+    fn test_name() {
+        // Setup a temp directory for the wallet data
+        let data_dir = TempDir::new().expect("create temp dir");
+        let rpc_url = Url::parse("http://localhost:18332").expect("valid url");
+        let mut wallet =
+            Wallet::new(data_dir.path(), rpc_url).with_network(bitcoin::Network::Regtest);
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+        let init_res = wallet.init(Some(mnemonic.to_string()), None);
+        assert!(init_res.is_ok());
+        let name = wallet.name().expect("wallet name");
+        assert_eq!(name, "brc721-0bf90487-regtest");
+        let name2 = wallet.name().expect("Second call to name");
+        assert_eq!(name, name2);
     }
 }

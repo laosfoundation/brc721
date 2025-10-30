@@ -33,7 +33,15 @@ fn test_wallet_creation() {
     let client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
     client.generate_to_address(101, &address).expect("mint");
 
-    let wallet_name = wallet.generate_wallet_name().expect("wallet name");
+    // Ensure Core has loaded the relevant blocks before importing descriptors
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let wallet_name = wallet.name().expect("wallet name");
+    wallet
+        .setup_watchonly(&auth, &wallet_name, true)
+        .expect("watch-only");
+    // wait a bit for rescan to register
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let balance = wallet.core_balance(&auth, &wallet_name).expect("balance");
     assert!(balance.to_btc() > 0.0);
 }

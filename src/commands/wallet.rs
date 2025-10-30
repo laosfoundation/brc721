@@ -6,7 +6,7 @@ use bdk_wallet::KeychainKind;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
-        let w =
+        let mut w =
             Wallet::new(&ctx.data_dir, ctx.rpc_url.clone()).with_network(bitcoin::Network::Bitcoin);
 
         match self {
@@ -27,7 +27,7 @@ impl CommandRunner for cli::WalletCmd {
                     log::info!("wallet already initialized db={}", res.db_path.display());
                 }
 
-                let wo_name = w.generate_wallet_name()?;
+                let wo_name = w.name()?;
 
                 w.setup_watchonly(&ctx.auth, &wo_name, *rescan)
                     .context("setting up Core watch-only wallet")?;
