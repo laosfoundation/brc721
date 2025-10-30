@@ -6,8 +6,8 @@ use bdk_wallet::KeychainKind;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
-        let net = ctx.network;
-        let w = Wallet::new(&ctx.data_dir, ctx.rpc_url.clone());
+        let w =
+            Wallet::new(&ctx.data_dir, ctx.rpc_url.clone()).with_network(bitcoin::Network::Bitcoin);
 
         match self {
             cli::WalletCmd::Init {

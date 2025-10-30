@@ -25,11 +25,11 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn new<P: Into<PathBuf>>(data_dir: P, rpc_url: Url) -> Self {
+    pub fn new<P: Into<PathBuf>, Q: Into<Url>>(data_dir: P, rpc_url: Q) -> Self {
         Self {
             data_dir: data_dir.into(),
             network: Network::Bitcoin,
-            rpc_url,
+            rpc_url: rpc_url.into(),
         }
     }
 
