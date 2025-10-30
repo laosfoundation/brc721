@@ -4,9 +4,9 @@ pub mod types;
 use crate::wallet::types::{CoreAdmin, CoreRpc, CoreWalletInfo, RealCoreAdmin};
 use anyhow::{anyhow, Context, Result};
 use bdk_wallet::{
-    keys::bip39::{Language, Mnemonic, WordCount},
+    keys::bip39::{Language, Mnemonic},
     template::Bip86,
-    CreateParams, KeychainKind, LoadParams,
+    KeychainKind, LoadParams,
 };
 use bitcoin::bip32::Xpriv;
 use bitcoin::{Address, Amount, Network};
@@ -209,13 +209,8 @@ impl Wallet {
         Ok(bal)
     }
 
-    fn generate_wallet_name(&self) -> Result<String> {
-        let mut conn = self.open_conn()?;
-        let wallet = LoadParams::new()
-            .check_network(self.network)
-            .load_wallet(&mut conn)?
-            .ok_or_else(|| anyhow!("wallet not initialized"))?;
-        let descriptor = wallet.public_descriptor(KeychainKind::External);
+    pub fn name(&self) -> Result<String> {
+        let descriptor = self.wallet.public_descriptor(KeychainKind::External);
         let mut hasher = sha2::Sha256::new();
         use sha2::Digest;
         hasher.update(descriptor.to_string().as_bytes());
@@ -223,10 +218,6 @@ impl Wallet {
         let short = hex::encode(&hash[..4]);
         let wallet_name = format!("brc721-{}-{}", short, self.network);
         Ok(wallet_name)
-    }
-
-    pub fn name(&self) -> Result<String> {
-        self.generate_wallet_name()
     }
 }
 

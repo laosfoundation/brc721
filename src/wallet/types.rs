@@ -1,13 +1,5 @@
-use bdk_wallet::keys::bip39::Mnemonic;
 use bitcoin::Amount;
 use bitcoincore_rpc::{Auth, RpcApi};
-use std::path::PathBuf;
-
-pub struct InitResult {
-    pub created: bool,
-    pub mnemonic: Option<Mnemonic>,
-    pub db_path: PathBuf,
-}
 
 pub struct CoreWalletInfo {
     pub name: String,
@@ -65,7 +57,11 @@ impl CoreRpc for RealCoreRpc {
 
 pub trait CoreAdmin {
     fn ensure_watchonly_descriptor_wallet(&self, wallet_name: &str) -> anyhow::Result<()>;
-    fn import_descriptors(&self, wallet_name: &str, imports: serde_json::Value) -> anyhow::Result<()>;
+    fn import_descriptors(
+        &self,
+        wallet_name: &str,
+        imports: serde_json::Value,
+    ) -> anyhow::Result<()>;
 }
 
 pub struct RealCoreAdmin {
@@ -124,7 +120,11 @@ impl CoreAdmin for RealCoreAdmin {
         }
     }
 
-    fn import_descriptors(&self, wallet_name: &str, imports: serde_json::Value) -> anyhow::Result<()> {
+    fn import_descriptors(
+        &self,
+        wallet_name: &str,
+        imports: serde_json::Value,
+    ) -> anyhow::Result<()> {
         let cli = self.wallet_client(wallet_name)?;
         let _res: serde_json::Value = cli.call("importdescriptors", &[imports])?;
         Ok(())
