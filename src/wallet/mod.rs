@@ -25,14 +25,39 @@ pub struct Wallet {
     wallet: Option<bdk_wallet::PersistedWallet<Connection>>,
 }
 
-impl Wallet {
+pub struct WalletBuilder {
+    data_dir: PathBuf,
+    network: Network,
+    rpc_url: Url,
+}
+
+impl WalletBuilder {
     pub fn new<P: Into<PathBuf>, Q: Into<Url>>(data_dir: P, rpc_url: Q) -> Self {
         Self {
             data_dir: data_dir.into(),
             network: Network::Bitcoin,
             rpc_url: rpc_url.into(),
+        }
+    }
+
+    pub fn with_network(mut self, network: Network) -> Self {
+        self.network = network;
+        self
+    }
+
+    pub fn build(self) -> Wallet {
+        Wallet {
+            data_dir: self.data_dir,
+            network: self.network,
+            rpc_url: self.rpc_url,
             wallet: None,
         }
+    }
+}
+
+impl Wallet {
+    pub fn builder<P: Into<PathBuf>, Q: Into<Url>>(data_dir: P, rpc_url: Q) -> WalletBuilder {
+        WalletBuilder::new(data_dir, rpc_url)
     }
 
     pub fn with_network(mut self, network: Network) -> Self {
@@ -206,10 +231,12 @@ impl Wallet {
     pub fn core_balance(&self, auth: &Auth, wallet_name: &str) -> Result<Amount> {
         let base = self.rpc_url.to_string();
         let rpc = crate::wallet::types::RealCoreRpc::new(base, auth.clone());
-        // Core may need a moment after import; try a few times
-        for _ in 0..10 {
+        // Core may need a moment after import; wait for non-zero balance
+        for _ in 0..50 {
             if let Ok(bal) = CoreRpc::get_wallet_balance(&rpc, wallet_name) {
-                return Ok(bal);
+                if bal.to_sat() > 0 {
+                    return Ok(bal);
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
@@ -254,7 +281,7 @@ mod tests {
         let data_dir = TempDir::new().expect("create temp dir");
         let rpc_url = Url::parse("http://localhost:18332").expect("valid url");
         let mut wallet =
-            Wallet::new(data_dir.path(), rpc_url).with_network(bitcoin::Network::Regtest);
+            Wallet::builder(data_dir.path(), rpc_url).with_network(bitcoin::Network::Regtest).build();
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
         let init_res = wallet.init(Some(mnemonic.to_string()), None);
