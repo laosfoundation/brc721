@@ -1,3 +1,4 @@
+use bdk_wallet::bip39::{Language, Mnemonic};
 use bdk_wallet::KeychainKind;
 use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -14,12 +15,20 @@ fn test_wallet_creation() {
     let data_dir = TempDir::new().expect("temp dir");
     let wallet = Wallet::new(data_dir.path(), node_url).with_network(Network::Regtest);
 
-    let ans = wallet.init(None, None).expect("wallet");
+    let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    let ans = wallet
+        .init(Some(mnemonic.to_string()), None)
+        .expect("wallet");
     assert!(ans.created);
 
     let address = wallet
         .address(KeychainKind::External)
         .expect("valid address");
+
+    assert_eq!(
+        address.to_string(),
+        "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg"
+    );
 
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
     let client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
