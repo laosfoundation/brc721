@@ -1,7 +1,7 @@
 pub mod paths;
 pub mod types;
 
-use crate::wallet::types::{CoreAdmin, CoreRpc, CoreWalletInfo, RealCoreAdmin};
+use crate::wallet::types::{CoreRpc, CoreWalletInfo};
 use anyhow::{anyhow, Context, Result};
 use bdk_wallet::{
     keys::bip39::{Language, Mnemonic},
@@ -10,7 +10,7 @@ use bdk_wallet::{
 };
 use bitcoin::bip32::Xpriv;
 use bitcoin::{Address, Amount, Network};
-use bitcoincore_rpc::Auth;
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::PathBuf;
@@ -145,50 +145,37 @@ impl Wallet {
     }
 
     pub fn setup_watchonly(&self, auth: &Auth, wallet_name: &str, rescan: bool) -> Result<()> {
-        let base_url = self.rpc_url.to_string();
-        let admin = RealCoreAdmin::new(base_url, auth.clone());
-        self.setup_watchonly_with(&admin, wallet_name, 1000, rescan)
-    }
-
-    pub fn setup_watchonly_with<A: CoreAdmin>(
-        &self,
-        admin: &A,
-        wallet_name: &str,
-        range_end: u32,
-        rescan: bool,
-    ) -> Result<()> {
-        admin
-            .ensure_watchonly_descriptor_wallet(wallet_name)
-            .context("ensuring Core watch-only wallet")?;
-
-        let (ext, int) = self
-            .public_descriptors_with_checksum()
-            .context("loading public descriptors")?;
-
-        let ts_val = if rescan { json!(0) } else { json!("now") };
+        let watch_url = format!("{}/wallet/{}", self.rpc_url, self.name().unwrap());
+        let watch_client = Client::new(&watch_url, auth.clone())?;
+        let ts_val = 0;
 
         let imports = json!([
             {
-                "desc": ext,
+                "desc": self.wallet.public_descriptor(KeychainKind::External),
                 "active": true,
-                "range": [0, range_end],
+                "range": [0, 200],
                 "timestamp": ts_val,
-                "internal": false,
                 "label": "brc721-external"
             },
             {
-                "desc": int,
+                "desc": self.wallet.public_descriptor(KeychainKind::Internal),
                 "active": true,
-                "range": [0, range_end],
+                "range": [0, 200],
                 "timestamp": ts_val,
                 "internal": true,
-                "label": "brc721-internal"
             }
         ]);
 
-        admin
-            .import_descriptors(wallet_name, imports)
-            .context("importing public descriptors to Core")?;
+        let ans: serde_json::Value =
+            watch_client.call::<serde_json::Value>("importdescriptors", &[imports])?;
+
+        // Ensure all imports in the response succeeded.
+        let arr = ans.as_array().expect("array");
+        assert!(
+            arr.iter().all(|e| e["success"].as_bool() == Some(true)),
+            "{}",
+            serde_json::to_string_pretty(&ans).unwrap()
+        );
 
         Ok(())
     }
