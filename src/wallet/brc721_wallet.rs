@@ -4,13 +4,15 @@ use anyhow::{Context, Result};
 use bdk_wallet::{
     bip39::{Language, Mnemonic},
     template::Bip86,
-    CreateParams, KeychainKind,
+    CreateParams, KeychainKind, PersistedWallet, Wallet,
 };
-use bitcoin::{bip32::Xpriv, Network};
+use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
 use rusqlite::Connection;
 
 use crate::wallet::paths;
-struct Brc721Wallet;
+struct Brc721Wallet {
+    wallet: PersistedWallet<Connection>,
+}
 
 impl Brc721Wallet {
     fn create<D: AsRef<Path>>(
@@ -18,12 +20,6 @@ impl Brc721Wallet {
         network: Network,
         mnemonic: Mnemonic,
     ) -> Result<Brc721Wallet> {
-        // // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
-        // let mnemonic = Mnemonic::parse_in(
-        //     Language::English,
-        //     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-        // ).unwrap();
-
         // Derive BIP32 master private key from seed.
         let seed = mnemonic.to_seed(String::new()); // empty password
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
@@ -34,11 +30,19 @@ impl Brc721Wallet {
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
 
-        CreateParams::new(external, internal)
+        let wallet = Wallet::create(external, internal)
             .network(network)
             .create_wallet(&mut conn)?;
 
-        Ok(Self {})
+        Ok(Self { wallet })
+    }
+
+    fn id(&self) -> String {
+        let external = self.wallet.public_descriptor(KeychainKind::External);
+        let internal = self.wallet.public_descriptor(KeychainKind::Internal);
+        let combined = format!("{external}{internal}");
+        let digest = sha256::Hash::const_hash(combined.as_bytes());
+        digest.to_string()
     }
 }
 
@@ -46,6 +50,48 @@ impl Brc721Wallet {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_wallet_id_uniqueness_across_networks() {
+        let data_dir = TempDir::new().expect("temp dir");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
+        let wallet_regtest =
+            Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic.clone()).expect("regtest");
+        let wallet_bitcoin =
+            Brc721Wallet::create(&data_dir, Network::Bitcoin, mnemonic).expect("bitcoin");
+        let id_regtest = wallet_regtest.id();
+        let id_bitcoin = wallet_bitcoin.id();
+        assert_ne!(
+            id_regtest, id_bitcoin,
+            "Wallet ids on different networks must be different"
+        );
+    }
+
+    #[test]
+    fn test_wallet_id_stable_with_same_inputs() {
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
+        let data_dir0 = TempDir::new().expect("temp dir");
+        let wallet0 =
+            Brc721Wallet::create(&data_dir0, Network::Regtest, mnemonic.clone()).expect("wallet0");
+
+        let data_dir1 = TempDir::new().expect("temp dir");
+        let wallet1 =
+            Brc721Wallet::create(&data_dir1, Network::Regtest, mnemonic.clone()).expect("wallet1");
+
+        assert_eq!(
+            wallet0.id(),
+            wallet1.id(),
+            "Wallet id should be stable for same mnemonic and network"
+        );
+    }
 
     #[test]
     fn test_regtest_wallet_persist_on_storage() {
