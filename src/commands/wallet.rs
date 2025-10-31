@@ -8,7 +8,6 @@ use rand::RngCore;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
-
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
@@ -30,7 +29,6 @@ impl CommandRunner for cli::WalletCmd {
                         m
                     }
                 };
-                println!("{}", mnemonic);
 
                 log::info!("👛 Loading or creating wallet...");
                 let wallet = Brc721Wallet::load_or_create(&ctx.data_dir, ctx.network, mnemonic)

@@ -52,6 +52,7 @@ impl Brc721Wallet {
             .create_wallet(&mut conn)?;
 
         log::info!("🎉 New wallet created");
+        println!("{}", mnemonic);
         Ok(Self { wallet, conn })
     }
 
