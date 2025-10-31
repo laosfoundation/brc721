@@ -38,3 +38,27 @@ fn test_wallet_creation() {
     assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
     assert!(balances.watchonly.is_none());
 }
+
+#[test]
+fn test_setup_watch_only_idempotent() {
+    let mnemonic = Mnemonic::parse_in(
+        Language::English,
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    ).expect("mnemonic");
+
+    let data_dir = TempDir::new().expect("temp dir");
+    let wallet = Brc721Wallet::create(data_dir.path(), Network::Regtest, mnemonic).expect("wallet");
+
+    let node = Node::from_downloaded().unwrap();
+    let auth = Auth::CookieFile(node.params.cookie_file.clone());
+    let node_url = Url::parse(&node.rpc_url()).unwrap();
+
+    // First call to setup_watch_only
+    wallet
+        .setup_watch_only(&node_url, auth.clone())
+        .expect("first setup watch only");
+    // Second call should also succeed and not change state or error
+    wallet
+        .setup_watch_only(&node_url, auth.clone())
+        .expect("idempotent setup watch only");
+}
