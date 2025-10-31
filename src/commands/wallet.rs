@@ -19,9 +19,8 @@ impl CommandRunner for cli::WalletCmd {
                         OsRng.fill_bytes(&mut entropy);
 
                         // generate mnemonic from entropy
-                        let m = Mnemonic::from_entropy_in(Language::English, &entropy)
-                            .expect("failed to generate mnemonic");
-                        m
+                        Mnemonic::from_entropy_in(Language::English, &entropy)
+                            .expect("failed to generate mnemonic")
                     }
                 };
 
