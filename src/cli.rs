@@ -133,6 +133,13 @@ pub enum WalletCmd {
             required = false
         )]
         mnemonic: Option<String>,
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Passphrase for the mnemonic",
+            required = false
+        )]
+        passphrase: Option<String>,
     },
     #[command(
         about = "Get a new receive address",
