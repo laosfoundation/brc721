@@ -1,3 +1,4 @@
+pub mod brc721_wallet;
 pub mod paths;
 pub mod types;
 
@@ -20,6 +21,7 @@ use paths::wallet_db_path;
 pub struct Wallet {
     data_dir: PathBuf,
     network: Network,
+    permanent_wallet: Option<PersistedWallet<Connection>>,
 }
 
 impl Wallet {
@@ -27,7 +29,62 @@ impl Wallet {
         Self {
             data_dir: data_dir.into(),
             network,
+            permanent_wallet: None,
         }
+    }
+
+    pub fn load_or_create<P: Into<PathBuf> + Clone>(
+        &self,
+        data_dir: P,
+        network: Network,
+        mnemonic: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<Wallet> {
+        let db_path = wallet_db_path(&data_dir.clone().into(), network);
+        let mut conn = Connection::open(&db_path)
+            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
+
+        if let Some(wallet) = LoadParams::new()
+            .check_network(network)
+            .load_wallet(&mut conn)?
+        {
+            return Ok(Self {
+                data_dir: data_dir.into(),
+                network,
+                permanent_wallet: Some(wallet),
+            });
+        }
+
+        let mnemonic =
+            match mnemonic {
+                Some(s) => Mnemonic::parse(s)?,
+                None => <Mnemonic as bdk_wallet::keys::GeneratableKey<
+                    bdk_wallet::miniscript::Tap,
+                >>::generate((WordCount::Words12, Language::English))
+                .map_err(|e| {
+                    e.map(Into::into)
+                        .unwrap_or_else(|| anyhow!("failed to generate mnemonic"))
+                })?
+                .into_key(),
+            };
+
+        let ext = Bip86(
+            (mnemonic.clone(), passphrase.clone()),
+            KeychainKind::External,
+        );
+        let int = Bip86((mnemonic.clone(), passphrase), KeychainKind::Internal);
+
+        let wallet = Some(
+            CreateParams::new(ext, int)
+                .network(network)
+                .create_wallet(&mut conn)?,
+        );
+
+        Ok(Self {
+            data_dir: data_dir.into(),
+            network,
+            permanent_wallet: wallet,
+        })
     }
 
     pub fn init(
@@ -49,17 +106,23 @@ impl Wallet {
             });
         }
 
-        let mnemonic = match mnemonic {
-            Some(s) => Mnemonic::parse(s)?,
-            None => <Mnemonic as bdk_wallet::keys::GeneratableKey<bdk_wallet::miniscript::Tap>>::generate((
-                WordCount::Words12,
-                Language::English,
-            ))
-            .map_err(|e| e.map(Into::into).unwrap_or_else(|| anyhow!("failed to generate mnemonic")))?
-            .into_key(),
-        };
+        let mnemonic =
+            match mnemonic {
+                Some(s) => Mnemonic::parse(s)?,
+                None => <Mnemonic as bdk_wallet::keys::GeneratableKey<
+                    bdk_wallet::miniscript::Tap,
+                >>::generate((WordCount::Words12, Language::English))
+                .map_err(|e| {
+                    e.map(Into::into)
+                        .unwrap_or_else(|| anyhow!("failed to generate mnemonic"))
+                })?
+                .into_key(),
+            };
 
-        let ext = Bip86((mnemonic.clone(), passphrase.clone()), KeychainKind::External);
+        let ext = Bip86(
+            (mnemonic.clone(), passphrase.clone()),
+            KeychainKind::External,
+        );
         let int = Bip86((mnemonic.clone(), passphrase), KeychainKind::Internal);
 
         let _wallet = CreateParams::new(ext, int)
@@ -127,7 +190,13 @@ impl Wallet {
         Ok(out)
     }
 
-    pub fn setup_watchonly(&self, rpc_url: &str, auth: &Auth, wallet_name: &str, rescan: bool) -> Result<()> {
+    pub fn setup_watchonly(
+        &self,
+        rpc_url: &str,
+        auth: &Auth,
+        wallet_name: &str,
+        rescan: bool,
+    ) -> Result<()> {
         let base_url = rpc_url.trim_end_matches('/').to_string();
         let admin = RealCoreAdmin::new(base_url, auth.clone());
         self.setup_watchonly_with(&admin, wallet_name, 1000, rescan)
@@ -268,22 +337,30 @@ mod tests {
 
         let dir1 = temp_data_dir();
         let w1 = Wallet::new(&dir1, net);
-        w1.init(mnemonic.clone(), Some("pass1".to_string())).unwrap();
+        w1.init(mnemonic.clone(), Some("pass1".to_string()))
+            .unwrap();
         let a1 = w1.address(KeychainKind::External).unwrap();
 
         let dir2 = temp_data_dir();
         let w2 = Wallet::new(&dir2, net);
-        w2.init(mnemonic.clone(), Some("pass2".to_string())).unwrap();
+        w2.init(mnemonic.clone(), Some("pass2".to_string()))
+            .unwrap();
         let a2 = w2.address(KeychainKind::External).unwrap();
 
-        assert_ne!(a1, a2, "different passphrases should yield different descriptors/addresses");
+        assert_ne!(
+            a1, a2,
+            "different passphrases should yield different descriptors/addresses"
+        );
     }
 
     #[test]
     fn generate_wallet_name_is_stable_and_unique() {
         let net = bitcoin::Network::Regtest;
         let mnemonic1 = Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string());
-        let mnemonic2 = Some("legal winner thank year wave sausage worth useful legal winner thank yellow".to_string());
+        let mnemonic2 = Some(
+            "legal winner thank year wave sausage worth useful legal winner thank yellow"
+                .to_string(),
+        );
 
         let dir1 = temp_data_dir();
         let w1 = Wallet::new(&dir1, net);
@@ -297,7 +374,10 @@ mod tests {
         w2.init(mnemonic2, None).unwrap();
         let n2 = w2.generate_wallet_name().unwrap();
 
-        assert_ne!(n1a, n2, "different descriptors should produce different names");
+        assert_ne!(
+            n1a, n2,
+            "different descriptors should produce different names"
+        );
     }
 
     #[test]
@@ -364,7 +444,11 @@ mod tests {
             self.ensured.lock().unwrap().push(wallet_name.to_string());
             Ok(())
         }
-        fn import_descriptors(&self, wallet_name: &str, imports: serde_json::Value) -> anyhow::Result<()> {
+        fn import_descriptors(
+            &self,
+            wallet_name: &str,
+            imports: serde_json::Value,
+        ) -> anyhow::Result<()> {
             self.imports
                 .lock()
                 .unwrap()
