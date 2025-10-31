@@ -3,8 +3,8 @@ use url::Url;
 
 use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
-    bip39::Mnemonic, template::Bip86, AddressInfo, Balance, KeychainKind, LoadParams,
-    PersistedWallet, Wallet,
+    bip39::Mnemonic, template::Bip86, AddressInfo, KeychainKind, LoadParams, PersistedWallet,
+    Wallet,
 };
 use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
@@ -128,14 +128,14 @@ impl Brc721Wallet {
         let imports = serde_json::json!([
             {
                 "desc": self.wallet.public_descriptor(KeychainKind::External),
-                "timestamp": 0,
+                "timestamp": "now",
                 "active": true,
                 "range": [0,999],
                 "internal": false
             },
             {
                 "desc": self.wallet.public_descriptor(KeychainKind::Internal),
-                "timestamp": 0,
+                "timestamp": "now",
                 "active": true,
                 "range": [0,999],
                 "internal": true

@@ -1,7 +1,6 @@
 use bitcoin::Network;
 use bitcoincore_rpc::Auth;
 use std::path::PathBuf;
-use std::str::FromStr;
 use url::Url;
 
 use crate::network::parse_network;
