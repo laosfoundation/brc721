@@ -37,16 +37,16 @@ impl Brc721Wallet {
         Ok(Self { wallet })
     }
 
-    fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
+    fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Option<Brc721Wallet>> {
         let db_path = paths::wallet_db_path(data_dir, network);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
         let wallet = LoadParams::new()
             .check_network(network)
             .load_wallet(&mut conn)
-            .context("loading wallet")?
-            .unwrap();
-        Ok(Self { wallet })
+            .context("loading wallet")?;
+
+        Ok(wallet.map(|wallet| Self { wallet }))
     }
 
     fn id(&self) -> String {
@@ -64,14 +64,14 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_load_fails_for_unexistent_wallet() {
+    fn test_load_returns_none_for_unexistent_wallet() {
         let data_dir = TempDir::new().expect("temp dir");
         // No wallet created
-        // Temporarily change the working directory or inject a proper path, if needed
-        let result = Brc721Wallet::load(data_dir, Network::Regtest);
+        let result = Brc721Wallet::load(&data_dir, Network::Regtest)
+            .expect("loading wallet should not fail");
         assert!(
-            result.is_err(),
-            "Expected error when loading a wallet that doesn't exist"
+            result.is_none(),
+            "Expected None when loading a wallet that doesn't exist"
         );
     }
 
@@ -127,7 +127,8 @@ mod tests {
 
         let network = Network::Regtest;
         Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
-        Brc721Wallet::load(&data_dir, network).expect("wallet");
+        let wallet = Brc721Wallet::load(&data_dir, network).expect("wallet");
+        assert!(wallet.is_some());
     }
 
     #[test]
