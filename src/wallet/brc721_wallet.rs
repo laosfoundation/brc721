@@ -6,10 +6,11 @@ use bdk_wallet::{
     bip39::Mnemonic, template::Bip86, AddressInfo, KeychainKind, LoadParams, PersistedWallet,
     Wallet,
 };
-use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
+use bitcoin::{bip32::Xpriv, Network};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
 use rand::RngCore;
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 
 use crate::wallet::paths;
 
@@ -77,8 +78,8 @@ impl Brc721Wallet {
         let external = self.wallet.public_descriptor(KeychainKind::External);
         let internal = self.wallet.public_descriptor(KeychainKind::Internal);
         let combined = format!("{external}{internal}");
-        let digest = sha256::Hash::const_hash(combined.as_bytes());
-        digest.to_string()
+        let hash = Sha256::digest(combined.as_bytes());
+        hex::encode(hash)
     }
 
     pub fn reveal_next_payment_address(&mut self) -> Result<AddressInfo> {
@@ -190,8 +191,8 @@ mod tests {
         let network = Network::Regtest;
 
         // Create wallet and reveal a couple of payment addresses
-        let mut wallet =
-            Brc721Wallet::create(&data_dir, network, Some(mnemonic.clone())).expect("create wallet");
+        let mut wallet = Brc721Wallet::create(&data_dir, network, Some(mnemonic.clone()))
+            .expect("create wallet");
         let addr1 = wallet
             .reveal_next_payment_address()
             .expect("address")
@@ -266,7 +267,8 @@ mod tests {
         ).expect("mnemonic");
 
         let wallet_regtest =
-            Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone())).expect("regtest");
+            Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone()))
+                .expect("regtest");
         let wallet_bitcoin =
             Brc721Wallet::create(&data_dir, Network::Bitcoin, Some(mnemonic)).expect("bitcoin");
         let id_regtest = wallet_regtest.id();
@@ -285,12 +287,12 @@ mod tests {
         ).expect("mnemonic");
 
         let data_dir0 = TempDir::new().expect("temp dir");
-        let wallet0 =
-            Brc721Wallet::create(&data_dir0, Network::Regtest, Some(mnemonic.clone())).expect("wallet0");
+        let wallet0 = Brc721Wallet::create(&data_dir0, Network::Regtest, Some(mnemonic.clone()))
+            .expect("wallet0");
 
         let data_dir1 = TempDir::new().expect("temp dir");
-        let wallet1 =
-            Brc721Wallet::create(&data_dir1, Network::Regtest, Some(mnemonic.clone())).expect("wallet1");
+        let wallet1 = Brc721Wallet::create(&data_dir1, Network::Regtest, Some(mnemonic.clone()))
+            .expect("wallet1");
 
         assert_eq!(
             wallet0.id(),
@@ -348,7 +350,8 @@ mod tests {
         ).expect("mnemonic");
 
         // First creation should succeed
-        Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone())).expect("first wallet");
+        Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone()))
+            .expect("first wallet");
         // Second creation should error because the db is already there
         let result = Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic));
         assert!(
