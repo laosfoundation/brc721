@@ -3,7 +3,9 @@ use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::wallet::Wallet;
 use crate::{cli, context};
 use anyhow::{Context, Result};
+use bdk_wallet::bip39::{Language, Mnemonic};
 use bdk_wallet::KeychainKind;
+use url::Url;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
@@ -16,24 +18,10 @@ impl CommandRunner for cli::WalletCmd {
                 passphrase,
                 rescan,
             } => {
-                let res = w
-                    .init(mnemonic.clone(), passphrase.clone())
-                    .context("Initializing wallet")?;
-                if res.created {
-                    log::info!("initialized wallet db={}", res.db_path.display());
-                    if let Some(m) = res.mnemonic {
-                        log::info!("{}", m);
-                    }
-                } else {
-                    log::info!("wallet already initialized db={}", res.db_path.display());
-                }
-
-                let wo_name = w.generate_wallet_name()?;
-
-                w.setup_watchonly(&ctx.rpc_url, &ctx.auth, &wo_name, *rescan)
-                    .context("setting up Core watch-only wallet")?;
-
-                log::info!("watch-only wallet '{}' ready in Core", wo_name);
+                // let m = Mnemonic::parse_in(Language::English, mnemonic.unwrap()).expect("mnemonic");
+                // let wallet = Brc721Wallet::create(ctx.data_dir, ctx.network, m);
+                //
+                // log::info!("watch-only wallet '{}' ready in Core", wo_name);
                 Ok(())
             }
             cli::WalletCmd::Address => {
@@ -71,11 +59,13 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::Balance => {
-                let wallet_name = "brc721-watchonly";
-                let bal = w
-                    .core_balance(&ctx.rpc_url, &ctx.auth, wallet_name)
-                    .context("reading core balance")?;
-                log::info!("{bal}");
+                let wallet = Brc721Wallet::load(&ctx.rpc_url, ctx.network)
+                    .context("loading wallet")?
+                    .ok_or_else(|| anyhow::anyhow!("wallet not found"))?;
+
+                let url = Url::parse(&ctx.rpc_url)?;
+                let balances = wallet.balance(&url, ctx.auth.clone())?;
+                log::info!("{:?}", balances);
                 Ok(())
             }
             cli::WalletCmd::Xpub => {
