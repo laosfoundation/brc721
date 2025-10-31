@@ -24,10 +24,7 @@ impl Brc721Wallet {
         mnemonic: Mnemonic,
     ) -> Result<Brc721Wallet> {
         match Self::load(&data_dir, network)? {
-            Some(wallet) => {
-                log::info!("💾 Wallet loaded");
-                Ok(wallet)
-            }
+            Some(wallet) => Ok(wallet),
             None => Self::create(data_dir, network, mnemonic),
         }
     }
@@ -65,6 +62,7 @@ impl Brc721Wallet {
             .load_wallet(&mut conn)
             .context("loading wallet")?;
 
+        log::info!("💾 Wallet loaded");
         Ok(wallet.map(|wallet| Self { wallet, conn }))
     }
 
