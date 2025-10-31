@@ -13,6 +13,7 @@ use crate::wallet::paths;
 
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
+    conn: Connection,
 }
 
 impl Brc721Wallet {
@@ -35,7 +36,7 @@ impl Brc721Wallet {
             .network(network)
             .create_wallet(&mut conn)?;
 
-        Ok(Self { wallet })
+        Ok(Self { wallet, conn })
     }
 
     fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Option<Brc721Wallet>> {
@@ -47,7 +48,7 @@ impl Brc721Wallet {
             .load_wallet(&mut conn)
             .context("loading wallet")?;
 
-        Ok(wallet.map(|wallet| Self { wallet }))
+        Ok(wallet.map(|wallet| Self { wallet, conn }))
     }
 
     fn id(&self) -> String {
@@ -58,8 +59,12 @@ impl Brc721Wallet {
         digest.to_string()
     }
 
-    pub fn reveal_next_payment_address(&mut self) -> AddressInfo {
-        self.wallet.reveal_next_address(KeychainKind::External)
+    pub fn reveal_next_payment_address(&mut self) -> Result<AddressInfo> {
+        let address = self.wallet.reveal_next_address(KeychainKind::External);
+        self.wallet
+            .persist(&mut self.conn)
+            .context("persisting the wallet")?;
+        Ok(address)
     }
 
     pub fn balance(&self) -> Balance {
@@ -73,6 +78,36 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn test_payment_address_index_persists_across_reloads() {
+        let data_dir = TempDir::new().expect("temp dir");
+        let mnemonic = Mnemonic::parse_in(
+                Language::English,
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+            ).expect("mnemonic");
+        let network = Network::Regtest;
+
+        // Create wallet and reveal a couple of payment addresses
+        let mut wallet =
+            Brc721Wallet::create(&data_dir, network, mnemonic.clone()).expect("create wallet");
+        let addr1 = wallet
+            .reveal_next_payment_address()
+            .expect("address")
+            .address;
+
+        // Reload the wallet from storage
+        let mut loaded_wallet = Brc721Wallet::load(&data_dir, network)
+            .expect("load should not fail")
+            .expect("wallet exists");
+
+        let addr2 = loaded_wallet
+            .reveal_next_payment_address()
+            .expect("address")
+            .address;
+        // addr3 should differ from addr2: index increment is persisted
+        assert_ne!(addr1, addr2, "Reloaded wallet should continue index");
+    }
+
+    #[test]
     fn test_reveal_next_payment_address_returns_valid_address() {
         let data_dir = TempDir::new().expect("temp dir");
         let mnemonic = Mnemonic::parse_in(
@@ -81,7 +116,7 @@ mod tests {
         ).expect("mnemonic");
         let network = Network::Regtest;
         let mut wallet = Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
-        let address_info = wallet.reveal_next_payment_address();
+        let address_info = wallet.reveal_next_payment_address().expect("address");
         // Ensure the address is not empty
         assert!(
             !address_info.address.to_string().is_empty(),
