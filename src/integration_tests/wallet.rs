@@ -20,9 +20,10 @@ fn test_wallet_creation() {
 
     let node = Node::from_downloaded().unwrap();
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
+    let node_url = Url::parse(&node.rpc_url()).unwrap();
 
     wallet
-        .setup_watch_only(&Url::parse(&node.rpc_url()).unwrap(), auth.clone())
+        .setup_watch_only(&node_url, auth.clone())
         .expect("setup watch only");
 
     let root_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
@@ -31,6 +32,9 @@ fn test_wallet_creation() {
 
     root_client.generate_to_address(101, address).expect("mint");
 
-    let balance = wallet.balance();
-    assert_eq!(balance.total().to_btc(), 5050.0);
+    let balances = wallet.balance(&node_url, auth.clone()).expect("balance");
+    assert_eq!(balances.mine.trusted.to_btc(), 50.0); // One mature block reward
+    assert_eq!(balances.mine.immature.to_btc(), 5000.0); // 100 immature block rewards
+    assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
+    assert!(balances.watchonly.is_none());
 }

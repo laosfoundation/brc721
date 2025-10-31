@@ -7,7 +7,7 @@ use bdk_wallet::{
     PersistedWallet, Wallet,
 };
 use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::{json, Auth, Client, RpcApi};
 use rusqlite::Connection;
 
 use crate::wallet::paths;
@@ -68,8 +68,15 @@ impl Brc721Wallet {
         Ok(address)
     }
 
-    pub fn balance(&self) -> Balance {
-        self.wallet.balance()
+    pub fn balance(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
+        let watch_name = self.id();
+        let watch_url = format!(
+            "{}/wallet/{}",
+            rpc_url.to_string().trim_end_matches('/'),
+            watch_name
+        );
+        let watch_client = Client::new(&watch_url, auth).expect("watch client");
+        watch_client.get_balances().context("get balance")
     }
 
     pub fn setup_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
