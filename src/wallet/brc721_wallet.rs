@@ -182,6 +182,25 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn test_wallet_id_output_is_as_expected() {
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+        let data_dir = TempDir::new().expect("temp dir");
+        let wallet =
+            Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic)).expect("wallet");
+        let wallet_id = wallet.id();
+        // The expected id value was calculated against known descriptors for this mnemonic+network
+        // If descriptors change, update this value accordingly.
+        let expected_id = "0ca60de20e7da91dc9acf9894f27f264008bbb4b0d35f0de068253977e66e1ff";
+        assert_eq!(
+            wallet_id, expected_id,
+            "Wallet id output does not match expected"
+        );
+    }
+
+    #[test]
     fn test_payment_address_index_persists_across_reloads() {
         let data_dir = TempDir::new().expect("temp dir");
         let mnemonic = Mnemonic::parse_in(
