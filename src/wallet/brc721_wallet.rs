@@ -18,6 +18,17 @@ pub struct Brc721Wallet {
 }
 
 impl Brc721Wallet {
+    pub fn load_or_create<P: AsRef<Path>>(
+        data_dir: P,
+        network: Network,
+        mnemonic: Mnemonic,
+    ) -> Result<Brc721Wallet> {
+        match Self::load(&data_dir, network)? {
+            Some(wallet) => Ok(wallet),
+            None => Self::create(data_dir, network, mnemonic),
+        }
+    }
+
     pub fn create<P: AsRef<Path>>(
         data_dir: P,
         network: Network,
