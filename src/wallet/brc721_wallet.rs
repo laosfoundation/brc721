@@ -8,7 +8,7 @@ use bdk_wallet::{
 };
 use bitcoin::{bip32::Xpriv, Network};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
@@ -40,7 +40,7 @@ impl Brc721Wallet {
     ) -> Result<Brc721Wallet> {
         let mnemonic = mnemonic.unwrap_or_else(|| {
             let mut entropy = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut entropy);
+            OsRng.fill_bytes(&mut entropy);
             Mnemonic::from_entropy(&entropy).expect("mnemonic")
         });
 
