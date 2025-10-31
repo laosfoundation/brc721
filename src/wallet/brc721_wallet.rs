@@ -41,7 +41,9 @@ impl Brc721Wallet {
         let mnemonic = mnemonic.unwrap_or_else(|| {
             let mut entropy = [0u8; 32];
             OsRng.fill_bytes(&mut entropy);
-            Mnemonic::from_entropy(&entropy).expect("mnemonic")
+            let m = Mnemonic::from_entropy(&entropy).expect("mnemonic");
+            eprintln!("{m}");
+            m
         });
 
         // Derive BIP32 master private key from seed.
@@ -59,7 +61,6 @@ impl Brc721Wallet {
             .create_wallet(&mut conn)?;
 
         log::info!("🎉 New wallet created");
-        println!("{}", mnemonic);
         Ok(Self { wallet, conn })
     }
 
