@@ -104,8 +104,12 @@ impl<C: BitcoinRpc> Scanner<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{block::Header, block::Version, absolute::LockTime, transaction::Version as TxVersion, TxMerkleNode, CompactTarget, Transaction, TxIn, TxOut, Amount, Sequence, OutPoint, ScriptBuf};
     use bitcoin::hashes::Hash;
+    use bitcoin::{
+        absolute::LockTime, block::Header, block::Version, transaction::Version as TxVersion,
+        Amount, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxMerkleNode,
+        TxOut,
+    };
     use bitcoincore_rpc::Error as RpcError;
 
     struct MockRpc {
@@ -115,7 +119,10 @@ mod tests {
 
     impl MockRpc {
         fn new(tip: u64) -> Self {
-            Self { tip, blocks: std::collections::HashMap::new() }
+            Self {
+                tip,
+                blocks: std::collections::HashMap::new(),
+            }
         }
         fn with_block(mut self, height: u64, hash: BlockHash, block: Block) -> Self {
             self.blocks.insert(height, (hash, block));
@@ -124,21 +131,50 @@ mod tests {
     }
 
     impl BitcoinRpc for MockRpc {
-        fn get_block_count(&self) -> Result<u64, RpcError> { Ok(self.tip) }
-        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> { Ok(self.blocks.get(&height).unwrap().0) }
+        fn get_block_count(&self) -> Result<u64, RpcError> {
+            Ok(self.tip)
+        }
+        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
+            Ok(self.blocks.get(&height).unwrap().0)
+        }
         fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
             let (_h, b) = self.blocks.values().find(|(hh, _)| hh == hash).unwrap();
             Ok(b.clone())
         }
-        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> { Ok(()) }
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            Ok(())
+        }
     }
 
     fn dummy_block(prev: BlockHash) -> Block {
-        let header = Header { version: Version::TWO, prev_blockhash: prev, merkle_root: TxMerkleNode::all_zeros(), time: 0, bits: CompactTarget::from_consensus(0), nonce: 0 };
-        let txin = TxIn { previous_output: OutPoint::null(), script_sig: ScriptBuf::new(), sequence: Sequence::MAX, witness: bitcoin::Witness::default() };
-        let txout = TxOut { value: Amount::from_sat(0), script_pubkey: ScriptBuf::new() };
-        let tx = Transaction { version: TxVersion::TWO, lock_time: LockTime::ZERO, input: vec![txin], output: vec![txout] };
-        Block { header, txdata: vec![tx] }
+        let header = Header {
+            version: Version::TWO,
+            prev_blockhash: prev,
+            merkle_root: TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: CompactTarget::from_consensus(0),
+            nonce: 0,
+        };
+        let txin = TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        };
+        let txout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: ScriptBuf::new(),
+        };
+        let tx = Transaction {
+            version: TxVersion::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![txin],
+            output: vec![txout],
+        };
+        Block {
+            header,
+            txdata: vec![tx],
+        }
     }
 
     #[test]

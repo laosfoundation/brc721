@@ -5,16 +5,15 @@ use std::sync::Arc;
 
 mod cli;
 mod commands;
+mod context;
 mod core;
+mod network;
 mod parser;
 mod scanner;
 mod storage;
 mod tracing;
 pub mod types;
 mod wallet;
-mod network;
-mod context;
-
 
 fn main() -> Result<()> {
     let cli = cli::parse();
@@ -33,10 +32,10 @@ fn main() -> Result<()> {
     log::info!("🔗 RPC URL: {}", ctx.rpc_url);
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", ctx.confirmations);
-    log::info!("📂 Data dir: {}", ctx.data_dir);
+    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
     log::info!("🧮 Batch size: {}", ctx.batch_size);
     if let Some(path) = ctx.log_file.as_deref() {
-        log::info!("📝 Log file: {}", path);
+        log::info!("📝 Log file: {}", path.to_string_lossy());
     }
 
     let storage = init_storage(&ctx);
@@ -72,9 +71,13 @@ fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Syn
 }
 
 fn init_scanner(ctx: &context::Context, start_block: u64) -> scanner::Scanner<Client> {
-    let client = Client::new(&ctx.rpc_url, ctx.auth.clone()).expect("failed to create RPC client");
+    let client =
+        Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone()).expect("failed to create RPC client");
     scanner::Scanner::new(client)
         .with_confirmations(ctx.confirmations)
         .with_capacity(ctx.batch_size)
         .with_start_from(start_block)
 }
+
+#[cfg(test)]
+mod integration_tests;
