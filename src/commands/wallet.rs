@@ -21,7 +21,7 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::Address => {
-                let mut wallet = Brc721Wallet::load(&ctx.rpc_url, ctx.network)
+                let mut wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
                     .context("loading wallet")?
                     .ok_or_else(|| anyhow::anyhow!("wallet not found"))?;
 
@@ -33,12 +33,11 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::Balance => {
-                let wallet = Brc721Wallet::load(&ctx.rpc_url, ctx.network)
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
                     .context("loading wallet")?
                     .ok_or_else(|| anyhow::anyhow!("wallet not found"))?;
 
-                let url = Url::parse(&ctx.rpc_url)?;
-                let balances = wallet.balance(&url, ctx.auth.clone())?;
+                let balances = wallet.balance(&ctx.rpc_url, ctx.auth.clone())?;
                 log::info!("{:?}", balances);
                 Ok(())
             }
