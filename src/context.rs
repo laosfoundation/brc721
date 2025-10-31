@@ -1,12 +1,14 @@
 use bitcoin::Network;
 use bitcoincore_rpc::Auth;
+use std::path::PathBuf;
+use std::str::FromStr;
 use url::Url;
 
 use crate::network::parse_network;
 
 pub struct Context {
     pub network: Network,
-    pub data_dir: String,
+    pub data_dir: PathBuf,
     pub rpc_url: Url,
     pub auth: Auth,
     pub confirmations: u64,
@@ -26,7 +28,7 @@ impl Context {
         let rpc_url = Url::parse(&cli.rpc_url).expect("rpc url");
         Self {
             network,
-            data_dir: cli.data_dir.clone(),
+            data_dir: PathBuf::from_str(&cli.data_dir).expect("data dir"),
             rpc_url,
             auth,
             confirmations: cli.confirmations,

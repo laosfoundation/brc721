@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     log::info!("🔗 RPC URL: {}", ctx.rpc_url);
     log::info!("🔐 Auth: user/pass");
     log::info!("🧮 Confirmations: {}", ctx.confirmations);
-    log::info!("📂 Data dir: {}", ctx.data_dir);
+    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
     log::info!("🧮 Batch size: {}", ctx.batch_size);
     if let Some(path) = ctx.log_file.as_deref() {
         log::info!("📝 Log file: {}", path);
