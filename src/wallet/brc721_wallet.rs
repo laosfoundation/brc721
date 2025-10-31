@@ -4,9 +4,9 @@ use anyhow::{Context, Result};
 use bdk_wallet::{
     bip39::{Language, Mnemonic},
     template::Bip86,
-    CreateParams, KeychainKind, PersistedWallet, Wallet,
+    CreateParams, KeychainKind, LoadParams, PersistedWallet, Wallet,
 };
-use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
+use bitcoin::{bip32::Xpriv, hashes::sha256, network, Network};
 use rusqlite::Connection;
 
 use crate::wallet::paths;
@@ -15,8 +15,8 @@ struct Brc721Wallet {
 }
 
 impl Brc721Wallet {
-    fn create<D: AsRef<Path>>(
-        data_dir: D,
+    fn create<P: AsRef<Path>>(
+        data_dir: P,
         network: Network,
         mnemonic: Mnemonic,
     ) -> Result<Brc721Wallet> {
@@ -37,6 +37,18 @@ impl Brc721Wallet {
         Ok(Self { wallet })
     }
 
+    fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
+        let db_path = paths::wallet_db_path(data_dir, network);
+        let mut conn = Connection::open(&db_path)
+            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
+        let wallet = LoadParams::new()
+            .check_network(network)
+            .load_wallet(&mut conn)
+            .context("loading wallet")?
+            .unwrap();
+        Ok(Self { wallet })
+    }
+
     fn id(&self) -> String {
         let external = self.wallet.public_descriptor(KeychainKind::External);
         let internal = self.wallet.public_descriptor(KeychainKind::Internal);
@@ -50,6 +62,18 @@ impl Brc721Wallet {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_load_fails_for_unexistent_wallet() {
+        let data_dir = TempDir::new().expect("temp dir");
+        // No wallet created
+        // Temporarily change the working directory or inject a proper path, if needed
+        let result = Brc721Wallet::load(data_dir, Network::Regtest);
+        assert!(
+            result.is_err(),
+            "Expected error when loading a wallet that doesn't exist"
+        );
+    }
 
     #[test]
     fn test_wallet_id_uniqueness_across_networks() {
@@ -91,6 +115,19 @@ mod tests {
             wallet1.id(),
             "Wallet id should be stable for same mnemonic and network"
         );
+    }
+
+    #[test]
+    fn test_load_wallet() {
+        let data_dir = TempDir::new().expect("temp dir");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
+        let network = Network::Regtest;
+        Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
+        Brc721Wallet::load(data_dir, network).expect("wallet");
     }
 
     #[test]
