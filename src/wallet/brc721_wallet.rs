@@ -13,12 +13,16 @@ use crate::wallet::paths;
 struct Brc721Wallet;
 
 impl Brc721Wallet {
-    fn create<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
-        // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
-        let mnemonic = Mnemonic::parse_in(
-            Language::English,
-            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-        ).unwrap();
+    fn create<D: AsRef<Path>>(
+        data_dir: D,
+        network: Network,
+        mnemonic: Mnemonic,
+    ) -> Result<Brc721Wallet> {
+        // // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
+        // let mnemonic = Mnemonic::parse_in(
+        //     Language::English,
+        //     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        // ).unwrap();
 
         // Derive BIP32 master private key from seed.
         let seed = mnemonic.to_seed(String::new()); // empty password
@@ -46,7 +50,12 @@ mod tests {
     #[test]
     fn test_regtest_wallet_persist_on_storage() {
         let data_dir = TempDir::new().expect("temp dir");
-        Brc721Wallet::create(&data_dir, Network::Regtest).expect("wallet");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
+        Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic).expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet-regtest.sqlite");
         assert!(expected_wallet_path.exists());
     }
@@ -54,7 +63,12 @@ mod tests {
     #[test]
     fn test_bitcoin_wallet_persist_on_storage() {
         let data_dir = TempDir::new().expect("temp dir");
-        Brc721Wallet::create(&data_dir, Network::Bitcoin).expect("wallet");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
+        Brc721Wallet::create(&data_dir, Network::Bitcoin, mnemonic).expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet-mainnet.sqlite");
         assert!(expected_wallet_path.exists());
     }
@@ -62,10 +76,15 @@ mod tests {
     #[test]
     fn test_wallet_creation_fails_if_db_exists() {
         let data_dir = TempDir::new().expect("temp dir");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
         // First creation should succeed
-        Brc721Wallet::create(&data_dir, Network::Regtest).expect("first wallet");
+        Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic.clone()).expect("first wallet");
         // Second creation should error because the db is already there
-        let result = Brc721Wallet::create(&data_dir, Network::Regtest);
+        let result = Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic);
         assert!(
             result.is_err(),
             "Expected an error when re-creating the wallet"
