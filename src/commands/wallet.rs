@@ -26,11 +26,13 @@ impl CommandRunner for cli::WalletCmd {
                         // generate mnemonic from entropy
                         let m = Mnemonic::from_entropy_in(Language::English, &entropy)
                             .expect("failed to generate mnemonic");
+                        log::info!("🔑 New mnemonic generated");
                         m
                     }
                 };
                 println!("{}", mnemonic);
 
+                log::info!("👛 Loading or creating wallet...");
                 let wallet = Brc721Wallet::load_or_create(&ctx.data_dir, ctx.network, mnemonic)
                     .expect("wallet");
 
@@ -38,7 +40,7 @@ impl CommandRunner for cli::WalletCmd {
                     .setup_watch_only(&ctx.rpc_url, ctx.auth.clone())
                     .expect("setup watch only");
 
-                log::info!("watch-only wallet '{}' ready in Core", wallet.id());
+                log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
                 Ok(())
             }
             cli::WalletCmd::Address => {
@@ -50,7 +52,7 @@ impl CommandRunner for cli::WalletCmd {
                     .reveal_next_payment_address()
                     .context("getting address")?;
 
-                log::info!("{}", addr);
+                log::info!("🏠 {}", addr);
                 Ok(())
             }
             cli::WalletCmd::Balance => {
@@ -59,7 +61,7 @@ impl CommandRunner for cli::WalletCmd {
                     .ok_or_else(|| anyhow::anyhow!("wallet not found"))?;
 
                 let balances = wallet.balance(&ctx.rpc_url, ctx.auth.clone())?;
-                log::info!("{:?}", balances);
+                log::info!("💰 {:?}", balances);
                 Ok(())
             }
         }
