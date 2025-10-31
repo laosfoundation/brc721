@@ -8,6 +8,7 @@ use bdk_wallet::{
 };
 use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
+use rand::RngCore;
 use rusqlite::Connection;
 
 use crate::wallet::paths;
@@ -21,7 +22,7 @@ impl Brc721Wallet {
     pub fn load_or_create<P: AsRef<Path>>(
         data_dir: P,
         network: Network,
-        mnemonic: Mnemonic,
+        mnemonic: Option<Mnemonic>,
     ) -> Result<Brc721Wallet> {
         match Self::load(&data_dir, network)? {
             Some(wallet) => Ok(wallet),
@@ -32,8 +33,14 @@ impl Brc721Wallet {
     pub fn create<P: AsRef<Path>>(
         data_dir: P,
         network: Network,
-        mnemonic: Mnemonic,
+        mnemonic: Option<Mnemonic>,
     ) -> Result<Brc721Wallet> {
+        let mnemonic = mnemonic.unwrap_or_else(|| {
+            let mut entropy = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut entropy);
+            Mnemonic::from_entropy(&entropy).expect("mnemonic")
+        });
+
         // Derive BIP32 master private key from seed.
         let seed = mnemonic.to_seed(String::new()); // empty password
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
@@ -184,7 +191,7 @@ mod tests {
 
         // Create wallet and reveal a couple of payment addresses
         let mut wallet =
-            Brc721Wallet::create(&data_dir, network, mnemonic.clone()).expect("create wallet");
+            Brc721Wallet::create(&data_dir, network, Some(mnemonic.clone())).expect("create wallet");
         let addr1 = wallet
             .reveal_next_payment_address()
             .expect("address")
@@ -211,7 +218,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let network = Network::Regtest;
-        let mut wallet = Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
+        let mut wallet = Brc721Wallet::create(&data_dir, network, Some(mnemonic)).expect("wallet");
         let address_info = wallet.reveal_next_payment_address().expect("address");
         // Ensure the address is not empty
         assert!(
@@ -228,7 +235,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let network = Network::Regtest;
-        let mut wallet = Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
+        let mut wallet = Brc721Wallet::create(&data_dir, network, Some(mnemonic)).expect("wallet");
         let address_info_1 = wallet.reveal_next_payment_address().unwrap();
         let address_info_2 = wallet.reveal_next_payment_address().unwrap();
         // Next address should be different (index incremented)
@@ -259,9 +266,9 @@ mod tests {
         ).expect("mnemonic");
 
         let wallet_regtest =
-            Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic.clone()).expect("regtest");
+            Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone())).expect("regtest");
         let wallet_bitcoin =
-            Brc721Wallet::create(&data_dir, Network::Bitcoin, mnemonic).expect("bitcoin");
+            Brc721Wallet::create(&data_dir, Network::Bitcoin, Some(mnemonic)).expect("bitcoin");
         let id_regtest = wallet_regtest.id();
         let id_bitcoin = wallet_bitcoin.id();
         assert_ne!(
@@ -279,11 +286,11 @@ mod tests {
 
         let data_dir0 = TempDir::new().expect("temp dir");
         let wallet0 =
-            Brc721Wallet::create(&data_dir0, Network::Regtest, mnemonic.clone()).expect("wallet0");
+            Brc721Wallet::create(&data_dir0, Network::Regtest, Some(mnemonic.clone())).expect("wallet0");
 
         let data_dir1 = TempDir::new().expect("temp dir");
         let wallet1 =
-            Brc721Wallet::create(&data_dir1, Network::Regtest, mnemonic.clone()).expect("wallet1");
+            Brc721Wallet::create(&data_dir1, Network::Regtest, Some(mnemonic.clone())).expect("wallet1");
 
         assert_eq!(
             wallet0.id(),
@@ -301,7 +308,7 @@ mod tests {
         ).expect("mnemonic");
 
         let network = Network::Regtest;
-        Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
+        Brc721Wallet::create(&data_dir, network, Some(mnemonic)).expect("wallet");
         let wallet = Brc721Wallet::load(&data_dir, network).expect("wallet");
         assert!(wallet.is_some());
     }
@@ -314,7 +321,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
 
-        Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic).expect("wallet");
+        Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic)).expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet-regtest.sqlite");
         assert!(expected_wallet_path.exists());
     }
@@ -327,7 +334,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
 
-        Brc721Wallet::create(&data_dir, Network::Bitcoin, mnemonic).expect("wallet");
+        Brc721Wallet::create(&data_dir, Network::Bitcoin, Some(mnemonic)).expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet-mainnet.sqlite");
         assert!(expected_wallet_path.exists());
     }
@@ -341,9 +348,9 @@ mod tests {
         ).expect("mnemonic");
 
         // First creation should succeed
-        Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic.clone()).expect("first wallet");
+        Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone())).expect("first wallet");
         // Second creation should error because the db is already there
-        let result = Brc721Wallet::create(&data_dir, Network::Regtest, mnemonic);
+        let result = Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic));
         assert!(
             result.is_err(),
             "Expected an error when re-creating the wallet"
