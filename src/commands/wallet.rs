@@ -2,6 +2,7 @@ use super::CommandRunner;
 use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::{cli, context};
 use anyhow::{Context, Result};
+use bdk_wallet::bip39::{Language, Mnemonic};
 use url::Url;
 
 impl CommandRunner for cli::WalletCmd {
@@ -14,10 +15,17 @@ impl CommandRunner for cli::WalletCmd {
                 passphrase,
                 rescan,
             } => {
-                // let m = Mnemonic::parse_in(Language::English, mnemonic.unwrap()).expect("mnemonic");
-                // let wallet = Brc721Wallet::create(ctx.data_dir, ctx.network, m);
-                //
-                // log::info!("watch-only wallet '{}' ready in Core", wo_name);
+                let m = Mnemonic::parse_in(Language::English, mnemonic.as_ref().unwrap())
+                    .expect("mnemonic");
+
+                let wallet =
+                    Brc721Wallet::load_or_create(&ctx.data_dir, ctx.network, m).expect("wallet");
+
+                wallet
+                    .setup_watch_only(&ctx.rpc_url, ctx.auth.clone())
+                    .expect("setup watch only");
+
+                log::info!("watch-only wallet '{}' ready in Core", wallet.id());
                 Ok(())
             }
             cli::WalletCmd::Address => {

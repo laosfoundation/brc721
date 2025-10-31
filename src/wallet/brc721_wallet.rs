@@ -63,7 +63,7 @@ impl Brc721Wallet {
         Ok(wallet.map(|wallet| Self { wallet, conn }))
     }
 
-    fn id(&self) -> String {
+    pub fn id(&self) -> String {
         let external = self.wallet.public_descriptor(KeychainKind::External);
         let internal = self.wallet.public_descriptor(KeychainKind::Internal);
         let combined = format!("{external}{internal}");
