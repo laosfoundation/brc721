@@ -16,14 +16,18 @@ impl CommandRunner for cli::WalletCmd {
                     .as_ref()
                     .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
 
-                log::info!("👛 Loading or creating wallet...");
-                let wallet = Brc721Wallet::load_or_create(
-                    &ctx.data_dir,
-                    ctx.network,
-                    mnemonic,
-                    passphrase.clone(),
-                )
-                .context("creating wallet")?;
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
+                    .or_else(|_| {
+                        let w = Brc721Wallet::create(
+                            &ctx.data_dir,
+                            ctx.network,
+                            mnemonic,
+                            passphrase.clone(),
+                        );
+                        log::info!("🎉 New wallet created");
+                        w
+                    })
+                    .context("wallet initialization")?;
 
                 wallet
                     .setup_watch_only(&ctx.rpc_url, ctx.auth.clone())
@@ -33,9 +37,8 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::Address => {
-                let mut wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
-                    .context("loading wallet")?
-                    .ok_or_else(|| anyhow::anyhow!("wallet not found"))?;
+                let mut wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
 
                 let addr = wallet
                     .reveal_next_payment_address()
@@ -45,9 +48,8 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::Balance => {
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
-                    .context("loading wallet")?
-                    .ok_or_else(|| anyhow::anyhow!("wallet not found"))?;
+                let wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
 
                 let balances = wallet.balances(&ctx.rpc_url, ctx.auth.clone())?;
                 log::info!("💰 {:?}", balances);
