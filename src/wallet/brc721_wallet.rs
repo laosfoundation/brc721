@@ -127,7 +127,7 @@ mod tests {
 
         let network = Network::Regtest;
         Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
-        Brc721Wallet::load(data_dir, network).expect("wallet");
+        Brc721Wallet::load(&data_dir, network).expect("wallet");
     }
 
     #[test]
