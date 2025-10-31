@@ -372,7 +372,7 @@ mod tests {
         let network = Network::Regtest;
         Brc721Wallet::create(&data_dir, network, Some(mnemonic), None).expect("wallet");
         let wallet = Brc721Wallet::load(&data_dir, network).expect("wallet");
-        assert!(wallet.id().len() > 0);
+        assert!(!wallet.id().is_empty());
     }
 
     #[test]
