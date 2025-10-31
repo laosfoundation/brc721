@@ -94,6 +94,12 @@ impl Brc721Wallet {
         let watch_name = self.id();
         let root_client = Client::new(rpc_url.as_ref(), auth.clone()).unwrap();
 
+        // Check if the watch-only wallet already exists
+        let existing_wallets: Vec<String> = root_client.list_wallets().context("list wallets")?;
+        if existing_wallets.contains(&watch_name) {
+            return Ok(());
+        }
+
         let ans: serde_json::Value = root_client
             .call::<serde_json::Value>(
                 "createwallet",
