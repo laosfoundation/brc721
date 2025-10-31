@@ -157,16 +157,6 @@ pub enum WalletCmd {
         long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."
     )]
     Balance,
-    #[command(
-        about = "List known wallets",
-        long_about = "List discovered or configured wallets loaded in Bitcoin Core and the local database."
-    )]
-    List,
-    #[command(
-        about = "Show extended public keys",
-        long_about = "Display the external and internal BIP86 extended public keys (xpub-like) for the wallet."
-    )]
-    Xpub,
 }
 
 #[derive(Subcommand, Debug, Clone)]
