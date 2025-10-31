@@ -14,7 +14,7 @@ pub struct Context {
     pub confirmations: u64,
     pub batch_size: usize,
     pub start: u64,
-    pub log_file: Option<String>,
+    pub log_file: Option<PathBuf>,
     pub reset: bool,
 }
 
@@ -28,13 +28,13 @@ impl Context {
         let rpc_url = Url::parse(&cli.rpc_url).expect("rpc url");
         Self {
             network,
-            data_dir: PathBuf::from_str(&cli.data_dir).expect("data dir"),
+            data_dir: PathBuf::from(&cli.data_dir),
             rpc_url,
             auth,
             confirmations: cli.confirmations,
             batch_size: cli.batch_size,
             start: cli.start,
-            log_file: cli.log_file.clone(),
+            log_file: cli.log_file.as_deref().map(PathBuf::from),
             reset: cli.reset,
         }
     }
