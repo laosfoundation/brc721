@@ -92,7 +92,7 @@ impl Brc721Wallet {
         Ok(address)
     }
 
-    pub fn balance(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
+    pub fn balances(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
         let watch_name = self.id();
         let watch_url = format!(
             "{}/wallet/{}",
@@ -190,8 +190,8 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let data_dir = TempDir::new().expect("temp dir");
-        let wallet =
-            Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic), None).expect("wallet");
+        let wallet = Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic), None)
+            .expect("wallet");
         let wallet_id = wallet.id();
         // The expected id value was calculated against known descriptors for this mnemonic+network
         // If descriptors change, update this value accordingly.
@@ -240,7 +240,8 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let network = Network::Regtest;
-        let mut wallet = Brc721Wallet::create(&data_dir, network, Some(mnemonic), None).expect("wallet");
+        let mut wallet =
+            Brc721Wallet::create(&data_dir, network, Some(mnemonic), None).expect("wallet");
         let address_info = wallet.reveal_next_payment_address().expect("address");
         // Ensure the address is not empty
         assert!(
@@ -257,7 +258,8 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let network = Network::Regtest;
-        let mut wallet = Brc721Wallet::create(&data_dir, network, Some(mnemonic), None).expect("wallet");
+        let mut wallet =
+            Brc721Wallet::create(&data_dir, network, Some(mnemonic), None).expect("wallet");
         let address_info_1 = wallet.reveal_next_payment_address().unwrap();
         let address_info_2 = wallet.reveal_next_payment_address().unwrap();
         // Next address should be different (index incremented)
@@ -291,7 +293,8 @@ mod tests {
             Brc721Wallet::create(&data_dir, Network::Regtest, Some(mnemonic.clone()), None)
                 .expect("regtest");
         let wallet_bitcoin =
-            Brc721Wallet::create(&data_dir, Network::Bitcoin, Some(mnemonic), None).expect("bitcoin");
+            Brc721Wallet::create(&data_dir, Network::Bitcoin, Some(mnemonic), None)
+                .expect("bitcoin");
         let id_regtest = wallet_regtest.id();
         let id_bitcoin = wallet_bitcoin.id();
         assert_ne!(
@@ -308,12 +311,14 @@ mod tests {
         ).expect("mnemonic");
 
         let data_dir0 = TempDir::new().expect("temp dir");
-        let wallet0 = Brc721Wallet::create(&data_dir0, Network::Regtest, Some(mnemonic.clone()), None)
-            .expect("wallet0");
+        let wallet0 =
+            Brc721Wallet::create(&data_dir0, Network::Regtest, Some(mnemonic.clone()), None)
+                .expect("wallet0");
 
         let data_dir1 = TempDir::new().expect("temp dir");
-        let wallet1 = Brc721Wallet::create(&data_dir1, Network::Regtest, Some(mnemonic.clone()), None)
-            .expect("wallet1");
+        let wallet1 =
+            Brc721Wallet::create(&data_dir1, Network::Regtest, Some(mnemonic.clone()), None)
+                .expect("wallet1");
 
         assert_eq!(
             wallet0.id(),
