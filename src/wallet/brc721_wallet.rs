@@ -1,12 +1,13 @@
 use std::path::Path;
+use url::Url;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
-    bip39::{Language, Mnemonic},
-    template::Bip86,
-    AddressInfo, Balance, CreateParams, KeychainKind, LoadParams, PersistedWallet, Wallet,
+    bip39::Mnemonic, template::Bip86, AddressInfo, Balance, KeychainKind, LoadParams,
+    PersistedWallet, Wallet,
 };
-use bitcoin::{bip32::Xpriv, hashes::sha256, network, Network};
+use bitcoin::{bip32::Xpriv, hashes::sha256, Network};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use rusqlite::Connection;
 
 use crate::wallet::paths;
@@ -70,11 +71,79 @@ impl Brc721Wallet {
     pub fn balance(&self) -> Balance {
         self.wallet.balance()
     }
+
+    pub fn setup_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
+        let watch_name = self.id();
+        let root_client = Client::new(rpc_url.as_ref(), auth.clone()).unwrap();
+
+        let ans: serde_json::Value = root_client
+            .call::<serde_json::Value>(
+                "createwallet",
+                &[
+                    serde_json::json!(watch_name), // Wallet name
+                    serde_json::json!(true),       // Disable private keys
+                    serde_json::json!(true),       // Blank wallet
+                    serde_json::json!(""),         // Passphrase
+                    serde_json::json!(false),      // avoid_reuse
+                    serde_json::json!(true),       // Descriptors enabled
+                ],
+            )
+            .context("watch wallet created")?;
+        if ans["name"].as_str().unwrap() != watch_name {
+            return Err(anyhow::anyhow!("Unexpected wallet name: {:?}", ans["name"]));
+        }
+        if !ans["warning"].is_null() {
+            return Err(anyhow::anyhow!(
+                "watch_only wallet created with warning: {}",
+                ans["warning"]
+            ));
+        }
+
+        let watch_url = format!(
+            "{}/wallet/{}",
+            rpc_url.to_string().trim_end_matches('/'),
+            watch_name
+        );
+        let watch_client = Client::new(&watch_url, auth).expect("watch client");
+
+        // Import the wallet's external and internal public descriptors into the watch-only wallet.
+        let imports = serde_json::json!([
+            {
+                "desc": self.wallet.public_descriptor(KeychainKind::External),
+                "timestamp": 0,
+                "active": true,
+                "range": [0,999],
+                "internal": false
+            },
+            {
+                "desc": self.wallet.public_descriptor(KeychainKind::Internal),
+                "timestamp": 0,
+                "active": true,
+                "range": [0,999],
+                "internal": true
+            }
+        ]);
+        let ans: serde_json::Value = watch_client
+            .call::<serde_json::Value>("importdescriptors", &[imports])
+            .context("import descriptor")?;
+
+        let arr = ans.as_array().expect("array");
+
+        // Require all imports to be successful. If not, return error with details.
+        if !arr.iter().all(|e| e["success"].as_bool() == Some(true)) {
+            return Err(anyhow::anyhow!(
+                "Failed to import descriptors: {}",
+                serde_json::to_string_pretty(&ans).unwrap()
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bdk_wallet::bip39::Language;
     use tempfile::TempDir;
 
     #[test]

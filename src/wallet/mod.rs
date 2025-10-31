@@ -40,7 +40,7 @@ impl Wallet {
         mnemonic: Option<String>,
         passphrase: Option<String>,
     ) -> Result<Wallet> {
-        let db_path = wallet_db_path(&data_dir.clone().into(), network);
+        let db_path = wallet_db_path(data_dir.clone().into(), network);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
 

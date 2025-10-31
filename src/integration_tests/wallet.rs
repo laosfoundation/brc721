@@ -3,6 +3,7 @@ use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use corepc_node::Node;
 use tempfile::TempDir;
+use url::Url;
 
 use crate::wallet::brc721_wallet::Brc721Wallet;
 
@@ -19,12 +20,17 @@ fn test_wallet_creation() {
 
     let node = Node::from_downloaded().unwrap();
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
+
+    wallet
+        .setup_watch_only(&Url::parse(&node.rpc_url()).unwrap(), auth.clone())
+        .expect("setup watch only");
+
     let root_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
 
     let address = &wallet.reveal_next_payment_address().unwrap().address;
-    root_client
-        .generate_to_address(101, address)
-        .expect("mint");
+
+    root_client.generate_to_address(101, address).expect("mint");
 
     let balance = wallet.balance();
+    assert_eq!(balance.total().to_btc(), 5050.0);
 }

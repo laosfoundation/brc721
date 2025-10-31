@@ -55,7 +55,9 @@ impl CommandRunner for cli::WalletCmd {
                 for info in listed {
                     log::info!(
                         "  name={} watch_only={} descriptors={}",
-                        info.name, info.watch_only, info.descriptors
+                        info.name,
+                        info.watch_only,
+                        info.descriptors
                     );
                 }
 
