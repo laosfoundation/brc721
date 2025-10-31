@@ -4,18 +4,19 @@ use anyhow::{Context, Result};
 use bdk_wallet::{
     bip39::{Language, Mnemonic},
     template::Bip86,
-    CreateParams, KeychainKind, LoadParams, PersistedWallet, Wallet,
+    AddressInfo, Balance, CreateParams, KeychainKind, LoadParams, PersistedWallet, Wallet,
 };
 use bitcoin::{bip32::Xpriv, hashes::sha256, network, Network};
 use rusqlite::Connection;
 
 use crate::wallet::paths;
-struct Brc721Wallet {
+
+pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
 }
 
 impl Brc721Wallet {
-    fn create<P: AsRef<Path>>(
+    pub fn create<P: AsRef<Path>>(
         data_dir: P,
         network: Network,
         mnemonic: Mnemonic,
@@ -56,12 +57,55 @@ impl Brc721Wallet {
         let digest = sha256::Hash::const_hash(combined.as_bytes());
         digest.to_string()
     }
+
+    pub fn reveal_next_payment_address(&mut self) -> AddressInfo {
+        self.wallet.reveal_next_address(KeychainKind::External)
+    }
+
+    pub fn balance(&self) -> Balance {
+        todo!()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_reveal_next_payment_address_returns_valid_address() {
+        let data_dir = TempDir::new().expect("temp dir");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+        let network = Network::Regtest;
+        let mut wallet = Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
+        let address_info = wallet.reveal_next_payment_address();
+        // Ensure the address is not empty
+        assert!(
+            !address_info.address.to_string().is_empty(),
+            "Address should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_reveal_next_payment_address_increments_index() {
+        let data_dir = TempDir::new().expect("temp dir");
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+        let network = Network::Regtest;
+        let mut wallet = Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
+        let address_info_1 = wallet.reveal_next_payment_address();
+        let address_info_2 = wallet.reveal_next_payment_address();
+        // Next address should be different (index incremented)
+        assert_ne!(
+            address_info_1.address, address_info_2.address,
+            "Two consecutive revealed addresses should differ"
+        );
+    }
 
     #[test]
     fn test_load_returns_none_for_unexistent_wallet() {
