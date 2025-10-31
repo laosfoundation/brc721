@@ -21,9 +21,9 @@ fn test_wallet_creation() {
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
     let root_client = Client::new(&node.rpc_url(), auth.clone()).unwrap();
 
-    let address = wallet.reveal_next_payment_address();
+    let address = &wallet.reveal_next_payment_address().unwrap().address;
     root_client
-        .generate_to_address(101, &address)
+        .generate_to_address(101, address)
         .expect("mint");
 
     let balance = wallet.balance();

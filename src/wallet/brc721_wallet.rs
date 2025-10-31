@@ -68,7 +68,7 @@ impl Brc721Wallet {
     }
 
     pub fn balance(&self) -> Balance {
-        todo!()
+        self.wallet.balance()
     }
 }
 
@@ -133,8 +133,8 @@ mod tests {
         ).expect("mnemonic");
         let network = Network::Regtest;
         let mut wallet = Brc721Wallet::create(&data_dir, network, mnemonic).expect("wallet");
-        let address_info_1 = wallet.reveal_next_payment_address();
-        let address_info_2 = wallet.reveal_next_payment_address();
+        let address_info_1 = wallet.reveal_next_payment_address().unwrap();
+        let address_info_2 = wallet.reveal_next_payment_address().unwrap();
         // Next address should be different (index incremented)
         assert_ne!(
             address_info_1.address, address_info_2.address,
