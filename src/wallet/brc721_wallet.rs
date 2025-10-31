@@ -40,7 +40,7 @@ impl Brc721Wallet {
         Ok(Self { wallet, conn })
     }
 
-    fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Option<Brc721Wallet>> {
+    pub fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Option<Brc721Wallet>> {
         let db_path = paths::wallet_db_path(data_dir, network);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
