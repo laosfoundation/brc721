@@ -28,5 +28,4 @@ url = "2.5.7"
 [dev-dependencies]
 bdk_bitcoind_rpc = "0.22.0"
 corepc-node = { version = "0.8.0", features = ["26_2", "download"] }
-hex = "0.4"
 tempfile = "3.10"
