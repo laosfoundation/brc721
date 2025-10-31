@@ -13,7 +13,7 @@ use crate::wallet::paths;
 struct Brc721Wallet;
 
 impl Brc721Wallet {
-    fn get_or_create<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
+    fn create<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
         // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
         let mnemonic = Mnemonic::parse_in(
             Language::English,
@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn test_regtest_wallet_persist_on_storage() {
         let data_dir = TempDir::new().expect("temp dir");
-        Brc721Wallet::get_or_create(&data_dir, Network::Regtest).expect("wallet");
+        Brc721Wallet::create(&data_dir, Network::Regtest).expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet-regtest.sqlite");
         assert!(expected_wallet_path.exists());
     }
@@ -54,8 +54,21 @@ mod tests {
     #[test]
     fn test_bitcoin_wallet_persist_on_storage() {
         let data_dir = TempDir::new().expect("temp dir");
-        Brc721Wallet::get_or_create(&data_dir, Network::Bitcoin).expect("wallet");
+        Brc721Wallet::create(&data_dir, Network::Bitcoin).expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet-mainnet.sqlite");
         assert!(expected_wallet_path.exists());
+    }
+
+    #[test]
+    fn test_wallet_creation_fails_if_db_exists() {
+        let data_dir = TempDir::new().expect("temp dir");
+        // First creation should succeed
+        Brc721Wallet::create(&data_dir, Network::Regtest).expect("first wallet");
+        // Second creation should error because the db is already there
+        let result = Brc721Wallet::create(&data_dir, Network::Regtest);
+        assert!(
+            result.is_err(),
+            "Expected an error when re-creating the wallet"
+        );
     }
 }
