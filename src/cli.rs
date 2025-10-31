@@ -133,19 +133,6 @@ pub enum WalletCmd {
             required = false
         )]
         mnemonic: Option<String>,
-        #[arg(
-            long,
-            value_name = "PASSPHRASE",
-            help = "Optional BIP39 passphrase",
-            required = false
-        )]
-        passphrase: Option<String>,
-        #[arg(
-            long = "rescan",
-            default_value_t = false,
-            help = "Full rescan from genesis for imported descriptors"
-        )]
-        rescan: bool,
     },
     #[command(
         about = "Get a new receive address",

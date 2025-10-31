@@ -9,11 +9,7 @@ use rand::RngCore;
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
         match self {
-            cli::WalletCmd::Init {
-                mnemonic,
-                passphrase: _,
-                rescan: _,
-            } => {
+            cli::WalletCmd::Init { mnemonic } => {
                 // get or generate mnemonic
                 let mnemonic = match mnemonic.as_ref() {
                     Some(m) => Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"),
