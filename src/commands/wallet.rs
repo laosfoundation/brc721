@@ -1,44 +1,58 @@
 use super::CommandRunner;
+use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::{cli, context};
-use crate::wallet::{derive_next_address, init_wallet, peek_address};
 use anyhow::{Context, Result};
-use bdk_wallet::KeychainKind;
+use bdk_wallet::bip39::{Language, Mnemonic};
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
-        let net = ctx.network;
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
                 passphrase,
             } => {
-                let res = init_wallet(&ctx.data_dir, net, mnemonic.clone(), passphrase.clone())
-                    .context("Initializing wallet")?;
-                if res.created {
-                    log::info!("initialized wallet db={}", res.db_path.display());
-                    if let Some(m) = res.mnemonic {
-                        println!("{}", m);
-                    }
-                } else {
-                    log::info!("wallet already initialized db={}", res.db_path.display());
-                }
+                // get or generate mnemonic
+                let mnemonic = mnemonic
+                    .as_ref()
+                    .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
 
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
+                    .or_else(|_| {
+                        let w = Brc721Wallet::create(
+                            &ctx.data_dir,
+                            ctx.network,
+                            mnemonic,
+                            passphrase.clone(),
+                        );
+                        log::info!("🎉 New wallet created");
+                        w
+                    })
+                    .context("wallet initialization")?;
+
+                wallet
+                    .setup_watch_only(&ctx.rpc_url, ctx.auth.clone())
+                    .expect("setup watch only");
+
+                log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
                 Ok(())
             }
-            cli::WalletCmd::Address { peek, change } => {
-                let keychain = if *change {
-                    KeychainKind::Internal
-                } else {
-                    KeychainKind::External
-                };
-                let addr = if let Some(index) = peek {
-                    peek_address(&ctx.data_dir, net, keychain, *index)
-                        .context("peeking address")?
-                } else {
-                    derive_next_address(&ctx.data_dir, net, keychain)
-                        .context("deriving next address")?
-                };
-                log::info!("{addr}");
+            cli::WalletCmd::Address => {
+                let mut wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
+
+                let addr = wallet
+                    .reveal_next_payment_address()
+                    .context("getting address")?;
+
+                log::info!("🏠 {}", addr);
+                Ok(())
+            }
+            cli::WalletCmd::Balance => {
+                let wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
+
+                let balances = wallet.balances(&ctx.rpc_url, ctx.auth.clone())?;
+                log::info!("💰 {:?}", balances);
                 Ok(())
             }
         }

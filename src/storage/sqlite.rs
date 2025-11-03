@@ -139,8 +139,6 @@ mod tests {
             .optional()
             .unwrap();
         assert_eq!(chain_state.as_deref(), Some("chain_state"));
-
-
     }
 
     #[test]
@@ -163,11 +161,7 @@ mod tests {
 
         let conn = Connection::open(&path).unwrap();
         let row_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM chain_state",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM chain_state", [], |row| row.get(0))
             .unwrap();
         assert_eq!(row_count, 1);
     }

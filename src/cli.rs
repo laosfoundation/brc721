@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use std::env;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -101,10 +102,18 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    #[command(
+        about = "Wallet management commands",
+        long_about = "Create or import a mnemonic and manage a corresponding Bitcoin Core watch-only wallet, derive addresses, and inspect balances."
+    )]
     Wallet {
         #[command(subcommand)]
         cmd: WalletCmd,
     },
+    #[command(
+        about = "Transaction-related commands",
+        long_about = "Build and submit protocol transactions, such as registering BRC-721 collections."
+    )]
     Tx {
         #[command(subcommand)]
         cmd: TxCmd,
@@ -113,6 +122,10 @@ pub enum Command {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum WalletCmd {
+    #[command(
+        about = "Initialize wallet and Core watch-only wallet",
+        long_about = "Create or import a BIP39 mnemonic and set up a corresponding Bitcoin Core watch-only wallet with descriptors. Optionally import an existing mnemonic and passphrase, set a custom Core wallet name, and trigger a full rescan."
+    )]
     Init {
         #[arg(
             long,
@@ -124,30 +137,29 @@ pub enum WalletCmd {
         #[arg(
             long,
             value_name = "PASSPHRASE",
-            help = "Optional BIP39 passphrase",
+            help = "Passphrase for the mnemonic",
             required = false
         )]
         passphrase: Option<String>,
     },
-    Address {
-        #[arg(
-            long,
-            value_name = "INDEX",
-            help = "Peek address at INDEX without advancing",
-            required = false
-        )]
-        peek: Option<u32>,
-        #[arg(
-            long,
-            default_value_t = false,
-            help = "Use change (internal) keychain"
-        )]
-        change: bool,
-    },
+    #[command(
+        about = "Get a new receive address",
+        long_about = "Advance derivation and display the next unused receive address (state is persisted)."
+    )]
+    Address,
+    #[command(
+        about = "Show wallet balance",
+        long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."
+    )]
+    Balance,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum TxCmd {
+    #[command(
+        about = "Register a BRC-721 collection",
+        long_about = "Create and broadcast a transaction that registers a BRC-721 collection, linking a 20-byte EVM (H160) address. Optionally mark the collection as rebaseable and set a custom fee rate (sat/vB)."
+    )]
     RegisterCollection {
         #[arg(
             long = "laos-hex",
@@ -173,6 +185,9 @@ pub enum TxCmd {
 }
 
 pub fn parse() -> Cli {
-    let _ = dotenvy::dotenv();
+    let dotenv_path = env::var("DOTENV_PATH").unwrap_or(".env".into());
+    dotenvy::from_filename(&dotenv_path).ok();
+
+    println!("Loaded env from {}", dotenv_path);
     Cli::parse()
 }
