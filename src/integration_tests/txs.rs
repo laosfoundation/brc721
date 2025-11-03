@@ -24,6 +24,11 @@ fn test_send_amount_between_wallets_via_psbt() {
         .generate_to_address(101, address0)
         .expect("mint");
 
+    let balances0 = wallet0.balances(&node_url, auth.clone()).expect("balances");
+    assert_eq!(balances0.mine.trusted.to_btc(), 50.0);
+    assert_eq!(balances0.mine.untrusted_pending.to_btc(), 0.0);
+    assert_eq!(balances0.mine.immature.to_btc(), 5000.0);
+
     let data_dir1 = TempDir::new().expect("temp dir");
     let mut wallet1 =
         Brc721Wallet::create(data_dir1.path(), Network::Regtest, None, None).expect("wallet");
@@ -39,8 +44,8 @@ fn test_send_amount_between_wallets_via_psbt() {
         .send_amount(address1, amount, Some(fee))
         .expect("amount sent");
 
-    let balances = wallet1.balances(&node_url, auth).expect("balances");
-    assert_eq!(balances.mine.trusted.to_btc(), 1.0);
-    assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
-    assert_eq!(balances.mine.immature.to_btc(), 0.0);
+    let balances1 = wallet1.balances(&node_url, auth).expect("balances");
+    assert_eq!(balances1.mine.trusted.to_btc(), 1.0);
+    assert_eq!(balances1.mine.untrusted_pending.to_btc(), 0.0);
+    assert_eq!(balances1.mine.immature.to_btc(), 0.0);
 }
