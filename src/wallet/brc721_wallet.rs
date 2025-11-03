@@ -1,18 +1,14 @@
+use bitcoincore_rpc::Auth;
 use std::path::Path;
 use url::Url;
-use bitcoincore_rpc::Auth;
 
 use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
     bip39::Mnemonic, template::Bip86, AddressInfo, KeychainKind, LoadParams, PersistedWallet,
     Wallet,
 };
-use bitcoin::{
-    absolute::LockTime, bip32::Xpriv, transaction::Version, Address, Amount, Network, Psbt,
-    ScriptBuf, Transaction, TxOut,
-};
+use bitcoin::{bip32::Xpriv, Address, Amount, Network};
 use bitcoincore_rpc::{json, Client, RpcApi};
-use corepc_node::Node;
 use rand::{rngs::OsRng, RngCore};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -172,45 +168,60 @@ impl Brc721Wallet {
 
     pub fn send_amount(
         &self,
+        rpc_url: &Url,
+        auth: Auth,
         target_address: &Address,
         amount: Amount,
         _fee_rate: Option<f64>,
     ) -> Result<()> {
-        // Use the root RPC and "walletcreatefundedpsbt" to fund and sign via walletprocesspsbt;
-        // then finalize and broadcast. This ensures a spend from our wallet to the target.
-        let node = Node::from_downloaded().unwrap();
-        let auth = Auth::CookieFile(node.params.cookie_file.clone());
-        let rpc_url = Url::parse(&node.rpc_url()).unwrap();
-        let root = Client::new(rpc_url.as_ref(), auth)
-            .expect("root client");
+        let watch_name = self.id();
+        let watch_url = format!(
+            "{}/wallet/{}",
+            rpc_url.to_string().trim_end_matches('/'),
+            watch_name
+        );
+        let client = Client::new(&watch_url, auth).expect("watch client");
 
         // Build a template: one output to the target with the requested amount.
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
 
         // Create funded PSBT from our loaded wallet (the default wallet on regtest node).
         let options = serde_json::json!({ "subtractFeeFromOutputs": [0] });
-        let funded: serde_json::Value = root
+        let funded: serde_json::Value = client
             .call(
                 "walletcreatefundedpsbt",
-                &[serde_json::json!([]), outputs.clone(), serde_json::json!(0), options.clone(), serde_json::json!(true)],
+                &[
+                    serde_json::json!([]),
+                    outputs.clone(),
+                    serde_json::json!(0),
+                    options.clone(),
+                    serde_json::json!(true),
+                ],
             )
             .context("walletcreatefundedpsbt")?;
         let psbt_hex = funded["psbt"].as_str().context("psbt hex")?;
 
         // Sign the PSBT with the wallet's keys.
-        let processed: serde_json::Value = root
-            .call("walletprocesspsbt", &[serde_json::json!(psbt_hex), serde_json::json!(false), serde_json::json!("ALL")])
+        let processed: serde_json::Value = client
+            .call(
+                "walletprocesspsbt",
+                &[
+                    serde_json::json!(psbt_hex),
+                    serde_json::json!(false),
+                    serde_json::json!("ALL"),
+                ],
+            )
             .context("walletprocesspsbt")?;
         let signed_psbt = processed["psbt"].as_str().context("signed psbt")?;
 
         // Finalize and extract raw tx.
-        let finalized: serde_json::Value = root
+        let finalized: serde_json::Value = client
             .call("finalizepsbt", &[serde_json::json!(signed_psbt)])
             .context("finalizepsbt")?;
         let hexraw = finalized["hex"].as_str().context("final hex")?;
 
         // Broadcast the transaction.
-        let _txid: bitcoin::Txid = root
+        let _txid: bitcoin::Txid = client
             .call("sendrawtransaction", &[serde_json::json!(hexraw)])
             .context("broadcast")?;
 

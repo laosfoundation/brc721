@@ -41,7 +41,7 @@ fn test_send_amount_between_wallets_via_psbt() {
     let amount = Amount::from_btc(1.0).expect("valid amount");
     let fee = 2.5;
     wallet0
-        .send_amount(address1, amount, Some(fee))
+        .send_amount(&node_url, auth.clone(), address1, amount, Some(fee))
         .expect("amount sent");
 
     let balances1 = wallet1.balances(&node_url, auth).expect("balances");
