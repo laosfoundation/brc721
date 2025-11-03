@@ -1,4 +1,4 @@
-brc721
+# brc721
 
 A simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
 
@@ -166,3 +166,69 @@ Troubleshooting
 
 - If you see connection refused, ensure bitcoind is running on regtest and RPC creds/port match .env
 - If auth fails, try using cookie auth instead of user/pass. Typically: BITCOIN_RPC_COOKIE=./.bitcoin-regtest/regtest/.cookie
+
+
+## Testing on a local node
+
+Start a local bitcoin node:
+```
+$ docker compose up -d
+```
+
+Initialize wallet:
+```
+$ DOTENV_PATH=.env.testing cargo run -- --network regtest wallet init
+```
+
+Example output:
+```
+2025-11-03T15:13:40.078999Z  INFO brc721::commands::wallet: 📡 Watch-only wallet '3afbbca07a285e6520386c328847960ba5c684294e788b602d0f69b5206c4829' ready in Core
+```
+
+Save the Core wallet name (this is just an ID for the wallet, not a receiving address) in a variable for convenience:
+```
+$WALLET_NAME=3afbbca07a285e6520386c328847960ba5c684294e788b602d0f69b5206c4829
+```
+
+Sanity check on the bitcoin node:
+```
+docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -getinfo
+```
+
+Get one of the addresses in your derivation path (on every run, you will get a different address):
+```
+$ ADDR=$(DOTENV_PATH=.env.testing cargo run -- --network regtest wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
+$ echo $ADDR
+```
+
+Mine 101 blocks to that receiving address, so that it has some funds:
+```
+$docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev generatetoaddress 101 "$ADDR"
+```
+
+Query the node about balance of ADDR:
+```
+$ docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcwallet="$WALLET_NAME" getbalances
+```
+...expect the following:
+```
+expect mine.trusted ≈ 50.00000000,
+mine.immature ≈ 5000.00000000,
+mine.untrusted_pending = 0.00000000
+```
+
+Query using the app, expect same result:
+```
+$ DOTENV_PATH=.env.testing cargo run -- --network regtest wallet balance
+```
+
+Other sanity checks:
+
+• Verify the watch-only wallet is loaded:
+```
+docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev listwallets
+```
+* Verify the mined-to address belongs to the wallet:
+```
+docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcwallet="$WALLET_NAME" scantxoutset start "[\"addr($ADDR)\"]"
+```
