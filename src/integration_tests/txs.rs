@@ -33,7 +33,7 @@ fn test_send_amount_between_wallets_via_psbt() {
 
     let address1 = &wallet1.reveal_next_payment_address().unwrap().address;
 
-    let amount = Amount::from_btc(1.0).unwrap();
+    let amount = Amount::from_btc(1.0).expect("valid amount");
     let fee = 2.5;
     wallet0
         .send_amount(address1, amount, Some(fee))
