@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use std::env;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -184,6 +185,9 @@ pub enum TxCmd {
 }
 
 pub fn parse() -> Cli {
-    let _ = dotenvy::dotenv();
+    let dotenv_path = env::var("DOTENV_PATH").unwrap_or(".env".into());
+    dotenvy::from_filename(&dotenv_path).ok();
+
+    println!("Loaded env from {}", dotenv_path);
     Cli::parse()
 }
