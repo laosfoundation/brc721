@@ -38,4 +38,9 @@ fn test_send_amount_between_wallets_via_psbt() {
     wallet0
         .send_amount(address1, amount, Some(fee))
         .expect("amount sent");
+
+    let balances = wallet1.balances(&node_url, auth).expect("balances");
+    assert_eq!(balances.mine.trusted.to_btc(), 1.0);
+    assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
+    assert_eq!(balances.mine.immature.to_btc(), 0.0);
 }
