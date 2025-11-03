@@ -182,6 +182,31 @@ pub enum TxCmd {
         )]
         fee_rate: Option<f64>,
     },
+    #[command(
+        about = "Send a specific amount to an address",
+        long_about = "Build and broadcast a transaction that sends the specified amount to the provided target address. Optionally set a custom fee rate (sat/vB)."
+    )]
+    SendAmount {
+        #[arg(
+            value_name = "ADDRESS",
+            help = "Target address to receive the funds"
+        )]
+        to: String,
+        #[arg(
+            long = "amount-sat",
+            value_name = "SATOSHI",
+            required = true,
+            help = "Amount to send in satoshi"
+        )]
+        amount_sat: u64,
+        #[arg(
+            long = "fee-rate",
+            value_name = "SAT/VB",
+            required = false,
+            help = "Fee rate in sat/vB (optional)"
+        )]
+        fee_rate: Option<f64>,
+    },
 }
 
 pub fn parse() -> Cli {

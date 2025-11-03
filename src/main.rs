@@ -12,6 +12,7 @@ mod parser;
 mod scanner;
 mod storage;
 mod tracing;
+mod txs;
 pub mod types;
 mod wallet;
 
