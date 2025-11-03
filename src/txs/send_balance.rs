@@ -54,19 +54,16 @@ mod tests {
         );
     }
 
-    #[ignore]
     #[test]
     fn usage_example_send_amount() {
         // Intentional failing test: command not implemented yet
         let target_unchecked =
-            Address::from_str("bc1p92yqdhqsahuwt8j8mjcwumdn37n5h7vqvnkgd5p4ut6guv3z5mgq239uvh")
-                .expect("address");
+            Address::from_str("mvbnrCX3bg1cDRUu8pkecrvP6vQkSLDSou").expect("address");
         let target = target_unchecked
             .require_network(Network::Regtest)
             .expect("network");
         let amount = Amount::from_sat(10_000);
         let res = send_amount(target, amount, Some(2.5));
-        // We expect success here to document intended usage; currently unimplemented so this will fail
-        assert!(res.is_ok(), "send_amount should succeed once implemented");
+        assert!(res.is_ok());
     }
 }
