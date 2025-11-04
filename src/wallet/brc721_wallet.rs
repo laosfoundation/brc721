@@ -168,14 +168,14 @@ impl Brc721Wallet {
         let imports = serde_json::json!([
             {
                 "desc": self.wallet.public_descriptor(KeychainKind::External),
-                "timestamp": "now",
+                "timestamp": 0,
                 "active": true,
                 "range": [0,999],
                 "internal": false
             },
             {
                 "desc": self.wallet.public_descriptor(KeychainKind::Internal),
-                "timestamp": "now",
+                "timestamp": 0,
                 "active": true,
                 "range": [0,999],
                 "internal": true
