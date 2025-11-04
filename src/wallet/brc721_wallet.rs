@@ -92,6 +92,26 @@ impl Brc721Wallet {
         watch_client.get_balances().context("get balance")
     }
 
+    pub fn rescan_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
+        let watch_name = self.id();
+        let watch_url = format!(
+            "{}/wallet/{}",
+            rpc_url.to_string().trim_end_matches('/'),
+            watch_name
+        );
+        let watch_client = Client::new(&watch_url, auth).expect("watch client");
+
+        let mut params = Vec::new();
+        let start_block = 0;
+        params.push(serde_json::json!(start_block));
+
+        let _ans: serde_json::Value = watch_client
+            .call::<serde_json::Value>("rescanblockchain", &params)
+            .context("rescanblockchain")?;
+
+        Ok(())
+    }
+
     pub fn setup_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
         let watch_name = self.id();
         let root_client = Client::new(rpc_url.as_ref(), auth.clone()).unwrap();
