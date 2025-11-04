@@ -55,6 +55,18 @@ impl CommandRunner for cli::WalletCmd {
                 log::info!("💰 {:?}", balances);
                 Ok(())
             }
+            cli::WalletCmd::Rescan => {
+                let wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
+                wallet
+                    .setup_watch_only(&ctx.rpc_url, ctx.auth.clone())
+                    .expect("setup watch only");
+                wallet
+                    .rescan_watch_only(&ctx.rpc_url, ctx.auth.clone(), None, None)
+                    .context("rescan watch-only wallet")?;
+                log::info!("🔄 Rescan started for watch-only wallet '{}'", wallet.id());
+                Ok(())
+            }
         }
     }
 }
