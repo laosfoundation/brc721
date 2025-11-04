@@ -1,4 +1,3 @@
-
 use bitcoincore_rpc::Auth;
 use std::path::Path;
 use url::Url;
@@ -6,9 +5,9 @@ use url::Url;
 use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
     bip39::Mnemonic, template::Bip86, AddressInfo, KeychainKind, LoadParams, PersistedWallet,
-    Wallet,
+    SignOptions, Wallet,
 };
-use bitcoin::{bip32::Xpriv, Address, Amount, Network};
+use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::{json, Client, RpcApi};
 use rand::{rngs::OsRng, RngCore};
 use rusqlite::Connection;
@@ -200,32 +199,35 @@ impl Brc721Wallet {
                 ],
             )
             .context("walletcreatefundedpsbt")?;
-        let psbt_hex = funded["psbt"].as_str().context("psbt hex")?;
+        let psbt = funded["psbt"].as_str().context("psbt hex")?;
+        Psbt::from(psbt);
 
-        // Sign the PSBT with the wallet's keys.
-        let processed: serde_json::Value = client
-            .call(
-                "walletprocesspsbt",
-                &[
-                    serde_json::json!(psbt_hex),
-                    serde_json::json!(false),
-                    serde_json::json!("ALL"),
-                ],
-            )
-            .context("walletprocesspsbt")?;
-        let signed_psbt = processed["psbt"].as_str().context("signed psbt")?;
+        self.wallet.sign(psbt, SignOptions::default())?;
 
-        // Finalize and extract raw tx.
-        let finalized: serde_json::Value = client
-            .call("finalizepsbt", &[serde_json::json!(signed_psbt)])
-            .context("finalizepsbt")?;
-        let hexraw = finalized["hex"].as_str().context("final hex")?;
-
-        // Broadcast the transaction.
-        let _txid: bitcoin::Txid = client
-            .call("sendrawtransaction", &[serde_json::json!(hexraw)])
-            .context("broadcast")?;
-
+        // // Sign the PSBT with the wallet's keys.
+        // let processed: serde_json::Value = client
+        //     .call(
+        //         "walletprocesspsbt",
+        //         &[
+        //             serde_json::json!(psbt_hex),
+        //             serde_json::json!(false),
+        //             serde_json::json!("ALL"),
+        //         ],
+        //     )
+        //     .context("walletprocesspsbt")?;
+        // let signed_psbt = processed["psbt"].as_str().context("signed psbt")?;
+        //
+        // // Finalize and extract raw tx.
+        // let finalized: serde_json::Value = client
+        //     .call("finalizepsbt", &[serde_json::json!(signed_psbt)])
+        //     .context("finalizepsbt")?;
+        // let hexraw = finalized["hex"].as_str().context("final hex")?;
+        //
+        // // Broadcast the transaction.
+        // let _txid: bitcoin::Txid = client
+        //     .call("sendrawtransaction", &[serde_json::json!(hexraw)])
+        //     .context("broadcast")?;
+        //
         Ok(())
     }
 }
