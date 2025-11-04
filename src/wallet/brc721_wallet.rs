@@ -92,13 +92,7 @@ impl Brc721Wallet {
         watch_client.get_balances().context("get balance")
     }
 
-    pub fn rescan_watch_only(
-        &self,
-        rpc_url: &Url,
-        auth: Auth,
-        start_height: Option<u64>,
-        stop_height: Option<u64>,
-    ) -> Result<()> {
+    pub fn rescan_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
         let watch_name = self.id();
         let watch_url = format!(
             "{}/wallet/{}",
@@ -108,19 +102,13 @@ impl Brc721Wallet {
         let watch_client = Client::new(&watch_url, auth).expect("watch client");
 
         let mut params = Vec::new();
-        if let Some(start) = start_height {
-            params.push(serde_json::json!(start));
-        }
-        if let Some(stop) = stop_height {
-            if params.is_empty() {
-                params.push(serde_json::json!(0));
-            }
-            params.push(serde_json::json!(stop));
-        }
+        let start_block = 0;
+        params.push(serde_json::json!(start_block));
 
         let _ans: serde_json::Value = watch_client
             .call::<serde_json::Value>("rescanblockchain", &params)
             .context("rescanblockchain")?;
+
         Ok(())
     }
 
@@ -168,14 +156,14 @@ impl Brc721Wallet {
         let imports = serde_json::json!([
             {
                 "desc": self.wallet.public_descriptor(KeychainKind::External),
-                "timestamp": 0,
+                "timestamp": "now",
                 "active": true,
                 "range": [0,999],
                 "internal": false
             },
             {
                 "desc": self.wallet.public_descriptor(KeychainKind::Internal),
-                "timestamp": 0,
+                "timestamp": "now",
                 "active": true,
                 "range": [0,999],
                 "internal": true
