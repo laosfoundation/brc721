@@ -200,7 +200,7 @@ impl Brc721Wallet {
             rpc_url.to_string().trim_end_matches('/'),
             watch_name
         );
-        let client = Client::new(&watch_url, auth).expect("watch client");
+        let client = Client::new(&watch_url, auth).context("creat Core wallet client")?;
 
         // Build a template: one output to the target with the requested amount.
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
