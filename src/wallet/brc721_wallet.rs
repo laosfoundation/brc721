@@ -172,7 +172,7 @@ impl Brc721Wallet {
         auth: Auth,
         target_address: &Address,
         amount: Amount,
-        _fee_rate: Option<f64>,
+        fee_rate: Option<f64>,
     ) -> Result<()> {
         let watch_name = self.id();
         let watch_url = format!(
@@ -187,7 +187,7 @@ impl Brc721Wallet {
 
         // Create funded PSBT from the watch-only wallet; Core will select inputs.
         let mut options = serde_json::json!({ "subtractFeeFromOutputs": [0] });
-        if let Some(fr) = _fee_rate {
+        if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);
         }
         let funded: serde_json::Value = client
