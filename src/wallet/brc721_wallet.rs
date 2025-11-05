@@ -5,7 +5,7 @@ use url::Url;
 use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
     bip39::Mnemonic, template::Bip86, AddressInfo, KeychainKind, LoadParams, PersistedWallet,
-    SignOptions, Wallet,
+    Wallet,
 };
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::{json, Client, RpcApi};
@@ -209,7 +209,7 @@ impl Brc721Wallet {
 
         // Let BDK sign our inputs using descriptor-derived keys.
         self.wallet
-            .sign(&mut psbt, SignOptions::default())
+            .sign(&mut psbt, bdk_wallet::SignOptions::default())
             .context("bdk sign")?;
 
         // Finalize and extract the fully signed transaction using rust-bitcoin.
