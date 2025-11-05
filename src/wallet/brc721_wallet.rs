@@ -227,18 +227,17 @@ impl Brc721Wallet {
         let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
-        // Let BDK sign our inputs using descriptor-derived keys.
-        #[allow(deprecated)]
-        self.wallet
-            .sign(&mut psbt, bdk_wallet::SignOptions::default())
+        // Let BDK sign our inputs using descriptor-derived keys and finalize.
+        let _finalized = self
+            .wallet
+            .sign(&mut psbt, Default::default())
             .context("bdk sign")?;
 
-        // Finalize and extract the fully signed transaction using rust-bitcoin.
+        // Extract and broadcast.
         let tx = psbt
             .extract_tx()
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        // Broadcast the transaction via Core.
         let _txid = client.send_raw_transaction(&tx).context("broadcast tx")?;
 
         Ok(())
