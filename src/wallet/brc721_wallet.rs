@@ -228,6 +228,7 @@ impl Brc721Wallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         // Let BDK sign our inputs using descriptor-derived keys.
+        #[allow(deprecated)]
         self.wallet
             .sign(&mut psbt, bdk_wallet::SignOptions::default())
             .context("bdk sign")?;
