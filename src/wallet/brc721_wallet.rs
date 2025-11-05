@@ -186,16 +186,17 @@ impl Brc721Wallet {
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
 
         // Create funded PSBT from our loaded wallet (the default wallet on regtest node).
+        // have a look here : https://developer.bitcoin.org/reference/rpc/walletcreatefundedpsbt.html
         let options = serde_json::json!({ "subtractFeeFromOutputs": [0] });
         let funded: serde_json::Value = client
             .call(
                 "walletcreatefundedpsbt",
                 &[
-                    serde_json::json!([]),
-                    outputs.clone(),
-                    serde_json::json!(0),
-                    options.clone(),
-                    serde_json::json!(true),
+                    serde_json::json!([]),   // Inputs: empty array means wallet will select inputs
+                    outputs.clone(),         // Outputs: the transaction outputs
+                    serde_json::json!(0),    // Locktime: 0 means default, no locktime
+                    options.clone(),         // Options: additional coin selection options
+                    serde_json::json!(true), // bip32derivs: include BIP32 derivation paths
                 ],
             )
             .context("walletcreatefundedpsbt")?;
@@ -204,30 +205,6 @@ impl Brc721Wallet {
 
         self.wallet.sign(psbt, SignOptions::default())?;
 
-        // // Sign the PSBT with the wallet's keys.
-        // let processed: serde_json::Value = client
-        //     .call(
-        //         "walletprocesspsbt",
-        //         &[
-        //             serde_json::json!(psbt_hex),
-        //             serde_json::json!(false),
-        //             serde_json::json!("ALL"),
-        //         ],
-        //     )
-        //     .context("walletprocesspsbt")?;
-        // let signed_psbt = processed["psbt"].as_str().context("signed psbt")?;
-        //
-        // // Finalize and extract raw tx.
-        // let finalized: serde_json::Value = client
-        //     .call("finalizepsbt", &[serde_json::json!(signed_psbt)])
-        //     .context("finalizepsbt")?;
-        // let hexraw = finalized["hex"].as_str().context("final hex")?;
-        //
-        // // Broadcast the transaction.
-        // let _txid: bitcoin::Txid = client
-        //     .call("sendrawtransaction", &[serde_json::json!(hexraw)])
-        //     .context("broadcast")?;
-        //
         Ok(())
     }
 }
