@@ -185,9 +185,11 @@ impl Brc721Wallet {
         // Build a template: one output to the target with the requested amount.
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
 
-        // Create funded PSBT from our loaded wallet (the default wallet on regtest node).
-        // have a look here : https://developer.bitcoin.org/reference/rpc/walletcreatefundedpsbt.html
-        let options = serde_json::json!({ "subtractFeeFromOutputs": [0] });
+        // Create funded PSBT from the watch-only wallet; Core will select inputs.
+        let mut options = serde_json::json!({ "subtractFeeFromOutputs": [0] });
+        if let Some(fr) = _fee_rate {
+            options["fee_rate"] = serde_json::json!(fr);
+        }
         let funded: serde_json::Value = client
             .call(
                 "walletcreatefundedpsbt",
@@ -195,15 +197,28 @@ impl Brc721Wallet {
                     serde_json::json!([]),   // Inputs: empty array means wallet will select inputs
                     outputs.clone(),         // Outputs: the transaction outputs
                     serde_json::json!(0),    // Locktime: 0 means default, no locktime
-                    options.clone(),         // Options: additional coin selection options
+                    options,                 // Options: additional coin selection options
                     serde_json::json!(true), // bip32derivs: include BIP32 derivation paths
                 ],
             )
             .context("walletcreatefundedpsbt")?;
-        let psbt = funded["psbt"].as_str().context("psbt hex")?;
-        Psbt::from(psbt);
 
-        self.wallet.sign(psbt, SignOptions::default())?;
+        // Decode PSBT (base64) using rust-bitcoin and sign with our local wallet keys.
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
+
+        // Let BDK sign our inputs using descriptor-derived keys.
+        self.wallet
+            .sign(&mut psbt, SignOptions::default())
+            .context("bdk sign")?;
+
+        // Finalize and extract the fully signed transaction using rust-bitcoin.
+        let tx = psbt
+            .extract_tx()
+            .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
+
+        // Broadcast the transaction via Core.
+        let _txid = client.send_raw_transaction(&tx).context("broadcast tx")?;
 
         Ok(())
     }
