@@ -152,6 +152,11 @@ pub enum WalletCmd {
         long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."
     )]
     Balance,
+    #[command(
+        about = "Trigger a Core wallet rescan",
+        long_about = "Ask Bitcoin Core to rescan the blockchain for the watch-only wallet's descriptors."
+    )]
+    Rescan,
 }
 
 #[derive(Subcommand, Debug, Clone)]
