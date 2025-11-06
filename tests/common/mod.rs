@@ -20,6 +20,7 @@ pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
             "-rpcallowip=0.0.0.0/0".to_string(),
             "-rpcuser=dev".to_string(),
             "-rpcpassword=dev".to_string(),
+            "-fallbackfee=0.0002".to_string(),
         ])
 }
 
