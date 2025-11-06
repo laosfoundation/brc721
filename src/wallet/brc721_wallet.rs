@@ -238,13 +238,15 @@ impl Brc721Wallet {
             .sign(&mut psbt, Default::default())
             .context("bdk sign")?;
 
-        assert!(finalized);
-
-        psbt.finalize();
+        let secp = bitcoin::secp256k1::Secp256k1::verification_only();
+        if !finalized {
+            psbt.finalize_mut(&secp)
+                .map_err(|errs| anyhow::anyhow!("finalize_mut: {:?}", errs))?;
+        }
 
         // Extract and broadcast.
         let tx = psbt
-            .extract_tx()
+            .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
         let _txid = client.send_raw_transaction(&tx).context("broadcast tx")?;
