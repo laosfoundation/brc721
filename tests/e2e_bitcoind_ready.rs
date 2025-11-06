@@ -38,7 +38,7 @@ fn base_cmd(rpc_url: &String) -> ProcCommand {
 }
 
 #[test]
-fn bitcoind_wallet_mine_and_balance() {
+fn e2e_balance() {
     let image = GenericImage::new("bitcoin/bitcoin", "latest")
         .with_wait_for(WaitFor::message_on_stdout("Binding RPC on address"))
         .with_wait_for(WaitFor::message_on_stdout("init message: Done loading"))
