@@ -1,4 +1,6 @@
 use bitcoincore_rpc::Auth;
+use std::process::Command as ProcCommand;
+use tempfile::TempDir;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::{Container, ContainerRequest, GenericImage, ImageExt};
 
@@ -29,4 +31,25 @@ pub fn rpc_url(container: &Container<GenericImage>) -> String {
         .expect("mapped port for 18443");
 
     format!("http://127.0.0.1:{}", host_port)
+}
+
+pub fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
+    let mut command = ProcCommand::new("cargo");
+
+    command
+        .arg("run")
+        .arg("--quiet")
+        .arg("--")
+        .arg("--network")
+        .arg("regtest")
+        .arg("--data-dir")
+        .arg(data_dir.path())
+        .arg("--rpc-url")
+        .arg(rpc_url)
+        .arg("--rpc-user")
+        .arg("dev")
+        .arg("--rpc-pass")
+        .arg("dev");
+
+    command
 }

@@ -1,4 +1,3 @@
-use std::process::Command as ProcCommand;
 use std::str::FromStr;
 
 use bitcoin::Address;
@@ -12,27 +11,6 @@ const MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const PAYING_ADDRESS: &str = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
 
-fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
-    let mut command = ProcCommand::new("cargo");
-
-    command
-        .arg("run")
-        .arg("--quiet")
-        .arg("--")
-        .arg("--network")
-        .arg("regtest")
-        .arg("--data-dir")
-        .arg(data_dir.path())
-        .arg("--rpc-url")
-        .arg(rpc_url)
-        .arg("--rpc-user")
-        .arg("dev")
-        .arg("--rpc-pass")
-        .arg("dev");
-
-    command
-}
-
 #[test]
 fn e2e_balance() {
     let image = common::bitcoind_image();
@@ -43,7 +21,7 @@ fn e2e_balance() {
     let root_client = Client::new(&rpc_url, auth.clone()).expect("rpc client initial");
 
     let data_dir = TempDir::new().expect("temp dir");
-    let stdout = base_cmd(&rpc_url, &data_dir)
+    let stdout = common::base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("init")
         .arg("--mnemonic")
@@ -58,7 +36,7 @@ fn e2e_balance() {
     root_client.generate_to_address(101, &addr).expect("mine");
 
     // 2) Query the app balance command; it should reflect the same totals as Core.
-    let output = base_cmd(&rpc_url, &data_dir)
+    let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("balance")
         .output()
