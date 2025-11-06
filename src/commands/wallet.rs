@@ -44,7 +44,7 @@ impl CommandRunner for cli::WalletCmd {
                     .reveal_next_payment_address()
                     .context("getting address")?;
 
-                log::info!("🏠 {}", addr);
+                log::info!("🏠 {}", addr.address);
                 Ok(())
             }
             cli::WalletCmd::Balance => {

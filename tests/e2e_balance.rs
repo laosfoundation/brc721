@@ -1,15 +1,8 @@
-use std::str::FromStr;
-
-use bitcoin::Address;
 use bitcoincore_rpc::{Client, RpcApi};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
 
 mod common;
-
-const MNEMONIC: &str =
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const PAYING_ADDRESS: &str = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
 
 #[test]
 fn e2e_balance() {
@@ -24,15 +17,11 @@ fn e2e_balance() {
     let stdout = common::base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("init")
-        .arg("--mnemonic")
-        .arg(MNEMONIC)
         .output()
         .expect("run wallet init");
     assert!(stdout.status.success());
 
-    let addr = Address::from_str(PAYING_ADDRESS)
-        .expect("address")
-        .assume_checked();
+    let addr = common::wallet_address(&rpc_url, &data_dir);
     root_client.generate_to_address(101, &addr).expect("mine");
 
     // 2) Query the app balance command; it should reflect the same totals as Core.
