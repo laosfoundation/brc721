@@ -24,7 +24,7 @@ fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
         .arg("--data-dir")
         .arg(data_dir.path())
         .arg("--rpc-url")
-        .arg(&rpc_url)
+        .arg(rpc_url)
         .arg("--rpc-user")
         .arg("dev")
         .arg("--rpc-pass")
