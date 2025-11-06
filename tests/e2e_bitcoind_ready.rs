@@ -5,6 +5,7 @@ mod e2e {
     use testcontainers::core::{ContainerPort, WaitFor};
     use testcontainers::runners::SyncRunner;
     use testcontainers::{GenericImage, ImageExt};
+
     #[test]
     fn bitcoind_wallet_mine_and_balance() {
         let image = GenericImage::new("bitcoin/bitcoin", "latest")
