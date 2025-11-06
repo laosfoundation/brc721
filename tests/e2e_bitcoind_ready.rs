@@ -10,6 +10,27 @@ use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::SyncRunner;
 use testcontainers::{GenericImage, ImageExt};
 
+fn base_cmd(rpc_url: &String) -> ProcCommand {
+    let mut command = ProcCommand::new("cargo");
+
+    command
+        .arg("run")
+        .arg("--quiet")
+        .arg("--")
+        .arg("--network")
+        .arg("regtest")
+        .arg("--data-dir")
+        .arg(".brc721-e2e/")
+        .arg("--rpc-url")
+        .arg(&rpc_url)
+        .arg("--rpc-user")
+        .arg("dev")
+        .arg("--rpc-pass")
+        .arg("dev");
+
+    command
+}
+
 #[test]
 fn bitcoind_wallet_mine_and_balance() {
     let image = GenericImage::new("bitcoin/bitcoin", "latest")
@@ -64,9 +85,7 @@ fn bitcoind_wallet_mine_and_balance() {
         .expect("new address")
         .assume_checked();
 
-    root_client
-        .generate_to_address(101, &addr)
-        .expect("mine");
+    root_client.generate_to_address(101, &addr).expect("mine");
 
     let balances = wallet_client.get_balances().expect("get balances");
 
@@ -75,54 +94,17 @@ fn bitcoind_wallet_mine_and_balance() {
     assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
     assert!(balances.watchonly.is_none());
 
-    // Now exercise the app CLI wallet commands against this node.
-    // 1) Initialize the app wallet (watch-only in Core) pointing to our container RPC.
-    let mut cmd_env = vec![
-        ("DOTENV_PATH", ".env.testing"),
-        ("BITCOIN_RPC_URL", &rpc_url),
-        ("BITCOIN_RPC_USER", "dev"),
-        ("BITCOIN_RPC_PASS", "dev"),
-    ];
-
-    let status = ProcCommand::new("cargo")
-        .arg("run")
-        .arg("--quiet")
-        .arg("--")
-        .arg("--network")
-        .arg("regtest")
-        .arg("--data-dir")
-        .arg(".brc721-e2e/")
-        .arg("--rpc-url")
-        .arg(&rpc_url)
-        .arg("--rpc-user")
-        .arg("dev")
-        .arg("--rpc-pass")
-        .arg("dev")
+    let status = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("init")
-        .envs(cmd_env.iter().map(|(k, v)| (k, *v)))
         .status()
         .expect("run wallet init");
     assert!(status.success());
 
     // 2) Get a new address from the app (prints address to stdout).
-    let output = ProcCommand::new("cargo")
-        .arg("run")
-        .arg("--quiet")
-        .arg("--")
-        .arg("--network")
-        .arg("regtest")
-        .arg("--data-dir")
-        .arg(".brc721-e2e/")
-        .arg("--rpc-url")
-        .arg(&rpc_url)
-        .arg("--rpc-user")
-        .arg("dev")
-        .arg("--rpc-pass")
-        .arg("dev")
+    let output = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("address")
-        .envs(cmd_env.iter().map(|(k, v)| (k, *v)))
         .output()
         .expect("run wallet address");
     assert!(output.status.success());
@@ -135,27 +117,14 @@ fn bitcoind_wallet_mine_and_balance() {
     assert!(!addr_line.is_empty());
 
     // 3) Query the app balance command; it should reflect the same totals as Core.
-    let out_bal = ProcCommand::new("cargo")
-        .arg("run")
-        .arg("--quiet")
-        .arg("--")
-        .arg("--network")
-        .arg("regtest")
-        .arg("--data-dir")
-        .arg(".brc721-e2e/")
-        .arg("--rpc-url")
-        .arg(&rpc_url)
-        .arg("--rpc-user")
-        .arg("dev")
-        .arg("--rpc-pass")
-        .arg("dev")
+    let out_bal = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("balance")
-        .envs(cmd_env.iter().map(|(k, v)| (k, *v)))
         .output()
         .expect("run wallet balance");
     assert!(out_bal.status.success());
+
     let stdout = String::from_utf8_lossy(&out_bal.stdout);
     // Expect the balances debug to include trusted and immature fields
-    assert!(stdout.contains("trusted") && stdout.contains("immature"));
+    assert_eq!(stdout, "Loaded env from .env\nGetBalancesResult { mine: GetBalancesResultEntry { trusted: 0 SAT, untrusted_pending: 0 SAT, immature: 0 SAT }, watchonly: None }\n");
 }
