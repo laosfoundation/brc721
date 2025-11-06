@@ -3,12 +3,18 @@
 //! commands to derive an address and query balance against the same node.
 
 use std::process::Command as ProcCommand;
+use std::str::FromStr;
 use std::time::Duration;
 
+use bitcoin::Address;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::SyncRunner;
 use testcontainers::{GenericImage, ImageExt};
+
+const MNEMONIC: &str =
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const PAYING_ADDRESS: &str = "bcrt1pats3y47x55qsnlr8k25mdgnu2xm79n4sf6mexk3mzm47r6n8ry6qaal9nq";
 
 fn base_cmd(rpc_url: &String) -> ProcCommand {
     let mut command = ProcCommand::new("cargo");
@@ -71,52 +77,24 @@ fn bitcoind_wallet_mine_and_balance() {
         }
     }
 
-    // Create a core wallet and mine to it as before.
-    let wallet_name = "test_wallet";
-    root_client
-        .create_wallet(wallet_name, None, None, None, None)
-        .expect("wallet created and loaded");
-
-    let wallet_url = format!("{}/wallet/{}", rpc_url, wallet_name);
-    let wallet_client = Client::new(&wallet_url, auth.clone()).expect("rpc client for wallet");
-
-    let addr = wallet_client
-        .get_new_address(None, None)
-        .expect("new address")
+    let addr = Address::from_str(PAYING_ADDRESS)
+        .expect("address")
         .assume_checked();
 
     root_client.generate_to_address(101, &addr).expect("mine");
 
-    let balances = wallet_client.get_balances().expect("get balances");
-
-    assert_eq!(balances.mine.trusted.to_btc(), 50.0);
-    assert_eq!(balances.mine.immature.to_btc(), 5000.0);
-    assert_eq!(balances.mine.untrusted_pending.to_btc(), 0.0);
-    assert!(balances.watchonly.is_none());
-
     let status = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("init")
+        .arg("--mnemonic")
+        .arg(MNEMONIC)
         .status()
         .expect("run wallet init");
     assert!(status.success());
 
-    // 2) Get a new address from the app (prints address to stdout).
-    let output = base_cmd(&rpc_url)
-        .arg("wallet")
-        .arg("address")
-        .output()
-        .expect("run wallet address");
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Address may be printed in logs; search for a bech32 regtest prefix
-    let addr_line = stdout
-        .lines()
-        .find(|l| l.contains("bcrt1") || l.contains("address"))
-        .unwrap_or("");
-    assert!(!addr_line.is_empty());
+    root_client.generate_to_address(101, &addr).expect("mine");
 
-    // 3) Query the app balance command; it should reflect the same totals as Core.
+    // 2) Query the app balance command; it should reflect the same totals as Core.
     let out_bal = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("balance")

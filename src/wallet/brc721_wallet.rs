@@ -252,9 +252,9 @@ mod tests {
             Brc721Wallet::create(&data_dir, network, Some(mnemonic), None).expect("wallet");
         let address_info = wallet.reveal_next_payment_address().expect("address");
         // Ensure the address is not empty
-        assert!(
-            !address_info.address.to_string().is_empty(),
-            "Address should not be empty"
+        assert_eq!(
+            address_info.address.to_string(),
+            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg"
         );
     }
 
