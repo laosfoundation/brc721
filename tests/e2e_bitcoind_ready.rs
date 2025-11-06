@@ -14,7 +14,7 @@ use testcontainers::{GenericImage, ImageExt};
 
 const MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const PAYING_ADDRESS: &str = "bcrt1pats3y47x55qsnlr8k25mdgnu2xm79n4sf6mexk3mzm47r6n8ry6qaal9nq";
+const PAYING_ADDRESS: &str = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
 
 fn base_cmd(rpc_url: &String) -> ProcCommand {
     let mut command = ProcCommand::new("cargo");
@@ -77,12 +77,6 @@ fn e2e_balance() {
         }
     }
 
-    let addr = Address::from_str(PAYING_ADDRESS)
-        .expect("address")
-        .assume_checked();
-
-    root_client.generate_to_address(101, &addr).expect("mine");
-
     let stdout = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("init")
@@ -92,6 +86,16 @@ fn e2e_balance() {
         .expect("run wallet init");
     assert!(stdout.status.success());
 
+    let stdout = base_cmd(&rpc_url)
+        .arg("wallet")
+        .arg("address")
+        .output()
+        .expect("run wallet init");
+    println!("{:?}", stdout);
+
+    let addr = Address::from_str(PAYING_ADDRESS)
+        .expect("address")
+        .assume_checked();
     root_client.generate_to_address(101, &addr).expect("mine");
 
     // 2) Query the app balance command; it should reflect the same totals as Core.
@@ -104,5 +108,5 @@ fn e2e_balance() {
 
     let stdout = String::from_utf8_lossy(&stdout.stdout);
     // Expect the balances debug to include trusted and immature fields
-    assert_eq!(stdout, "Loaded env from .env\nGetBalancesResult { mine: GetBalancesResultEntry { trusted: 510000000000 SAT, untrusted_pending: 0 SAT, immature: 367500000000 SAT }, watchonly: None }\n");
+    assert_eq!(stdout, "Loaded env from .env\nGetBalancesResult { mine: GetBalancesResultEntry { trusted: 5000000000 SAT, untrusted_pending: 0 SAT, immature: 500000000000 SAT }, watchonly: None }\n");
 }
