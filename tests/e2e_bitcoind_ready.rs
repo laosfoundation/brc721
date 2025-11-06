@@ -10,6 +10,7 @@ use bitcoin::Address;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
+use testcontainers::Container;
 
 mod common;
 
@@ -42,12 +43,8 @@ fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
 fn e2e_balance() {
     let image = common::bitcoind_image();
     let container = image.start().expect("start bitcoind container");
-    let host_port = container
-        .get_host_port_ipv4(18443)
-        .expect("mapped port for 18443");
-
-    let rpc_url = format!("http://127.0.0.1:{}", host_port);
-    let auth = Auth::UserPass("dev".into(), "dev".into());
+    let rpc_url = common::rpc_url(&container);
+    let auth = common::auth();
 
     let root_client = Client::new(&rpc_url, auth.clone()).expect("rpc client initial");
 

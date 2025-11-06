@@ -1,5 +1,6 @@
+use bitcoincore_rpc::Auth;
 use testcontainers::core::{ContainerPort, WaitFor};
-use testcontainers::{ContainerRequest, GenericImage, ImageExt};
+use testcontainers::{Container, ContainerRequest, GenericImage, ImageExt};
 
 pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
     let image = GenericImage::new("bitcoin/bitcoin", "latest")
@@ -18,4 +19,16 @@ pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
         ]);
 
     image
+}
+
+pub fn auth() -> Auth {
+    Auth::UserPass("dev".into(), "dev".into())
+}
+
+pub fn rpc_url(container: &Container<GenericImage>) -> String {
+    let host_port = container
+        .get_host_port_ipv4(18443)
+        .expect("mapped port for 18443");
+
+    format!("http://127.0.0.1:{}", host_port)
 }
