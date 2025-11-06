@@ -4,8 +4,8 @@ use url::Url;
 
 use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
-    bip39::Mnemonic, template::Bip86, AddressInfo, KeychainKind, LoadParams, PersistedWallet,
-    Wallet,
+    bip39::Mnemonic, miniscript::psbt::PsbtExt, template::Bip86, AddressInfo, KeychainKind,
+    LoadParams, PersistedWallet, Wallet,
 };
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::{json, Client, RpcApi};
@@ -206,7 +206,12 @@ impl Brc721Wallet {
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
 
         // Create funded PSBT from the watch-only wallet; Core will select inputs.
-        let mut options = serde_json::json!({ "subtractFeeFromOutputs": [0] });
+        let mut options = serde_json::json!({
+            "includeWatching": true,
+            "add_inputs": true,
+            "change_type": "bech32m",
+            "subtractFeeFromOutputs": [0],
+        });
         if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);
         }
@@ -228,10 +233,14 @@ impl Brc721Wallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         // Let BDK sign our inputs using descriptor-derived keys and finalize.
-        let _finalized = self
+        let finalized = self
             .wallet
             .sign(&mut psbt, Default::default())
             .context("bdk sign")?;
+
+        assert!(finalized);
+
+        psbt.finalize();
 
         // Extract and broadcast.
         let tx = psbt
