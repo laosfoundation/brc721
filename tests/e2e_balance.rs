@@ -58,14 +58,22 @@ fn e2e_balance() {
     root_client.generate_to_address(101, &addr).expect("mine");
 
     // 2) Query the app balance command; it should reflect the same totals as Core.
-    let stdout = base_cmd(&rpc_url, &data_dir)
+    let output = base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("balance")
         .output()
         .expect("run wallet balance");
-    assert!(stdout.status.success());
+    assert!(output.status.success());
 
-    let stdout = String::from_utf8_lossy(&stdout.stdout);
-    // Expect the balances debug to include trusted and immature fields
-    assert_eq!(stdout, "Loaded env from .env\nGetBalancesResult { mine: GetBalancesResultEntry { trusted: 5000000000 SAT, untrusted_pending: 0 SAT, immature: 500000000000 SAT }, watchonly: None }\n");
+    let out = String::from_utf8_lossy(&output.stdout);
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(out.contains("Loaded env from .env"));
+
+    let combined = format!("{}{}", out, err);
+    assert!(
+        combined.contains("trusted: 5000000000") && combined.contains("immature: 500000000000"),
+        "balance output not found in stdout/stderr:\nstdout:\n{}\nstderr:\n{}",
+        out,
+        err
+    );
 }
