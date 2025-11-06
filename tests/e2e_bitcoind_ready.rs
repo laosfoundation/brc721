@@ -83,26 +83,26 @@ fn bitcoind_wallet_mine_and_balance() {
 
     root_client.generate_to_address(101, &addr).expect("mine");
 
-    let status = base_cmd(&rpc_url)
+    let stdout = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("init")
         .arg("--mnemonic")
         .arg(MNEMONIC)
-        .status()
+        .output()
         .expect("run wallet init");
-    assert!(status.success());
+    assert!(stdout.status.success());
 
     root_client.generate_to_address(101, &addr).expect("mine");
 
     // 2) Query the app balance command; it should reflect the same totals as Core.
-    let out_bal = base_cmd(&rpc_url)
+    let stdout = base_cmd(&rpc_url)
         .arg("wallet")
         .arg("balance")
         .output()
         .expect("run wallet balance");
-    assert!(out_bal.status.success());
+    assert!(stdout.status.success());
 
-    let stdout = String::from_utf8_lossy(&out_bal.stdout);
+    let stdout = String::from_utf8_lossy(&stdout.stdout);
     // Expect the balances debug to include trusted and immature fields
-    assert_eq!(stdout, "Loaded env from .env\nGetBalancesResult { mine: GetBalancesResultEntry { trusted: 0 SAT, untrusted_pending: 0 SAT, immature: 0 SAT }, watchonly: None }\n");
+    assert_eq!(stdout, "Loaded env from .env\nGetBalancesResult { mine: GetBalancesResultEntry { trusted: 510000000000 SAT, untrusted_pending: 0 SAT, immature: 367500000000 SAT }, watchonly: None }\n");
 }
