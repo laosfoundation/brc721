@@ -21,14 +21,14 @@ fn e2e_send_amount() {
     let root_client = Client::new(&rpc_url, auth.clone()).expect("rpc client initial");
 
     let data_dir = TempDir::new().expect("temp dir");
-    let stdout = common::base_cmd(&rpc_url, &data_dir)
+    let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("init")
         .arg("--mnemonic")
         .arg(MNEMONIC)
         .output()
         .expect("run wallet init");
-    assert!(stdout.status.success());
+    assert!(output.status.success());
 
     let mined_addr = common::wallet_address(&rpc_url, &data_dir);
 
@@ -42,7 +42,7 @@ fn e2e_send_amount() {
         .expect("address")
         .assume_checked();
 
-    let send_out = common::base_cmd(&rpc_url, &data_dir)
+    let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("tx")
         .arg("send-amount")
         .arg(target.to_string())
@@ -50,5 +50,5 @@ fn e2e_send_amount() {
         .arg("10000")
         .output()
         .expect("run tx send-amount");
-    assert!(send_out.status.success());
+    assert!(output.status.success(), "{:?}", output);
 }
