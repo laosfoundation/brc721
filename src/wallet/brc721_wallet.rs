@@ -186,6 +186,19 @@ impl Brc721Wallet {
         Ok(())
     }
 
+    /// Send `amount` to `target_address` using funds from this wallet.
+    ///
+    /// This creates a PSBT via the Core watch-only wallet, signs it with BDK private keys,
+    /// finalizes, and broadcasts it.
+    ///
+    /// Arguments:
+    /// - `rpc_url`: The node RPC url (usually http[s]://host:port).
+    /// - `auth`: Auth credentials for the node.
+    /// - `target_address`: Address to receive funds.
+    /// - `amount`: Amount to send.
+    /// - `fee_rate`: Optional sats/vB feerate.
+    ///
+    /// Returns Ok(()) if broadcast succeeded, otherwise error.
     pub fn send_amount(
         &self,
         rpc_url: &Url,
@@ -194,27 +207,32 @@ impl Brc721Wallet {
         amount: Amount,
         fee_rate: Option<f64>,
     ) -> Result<()> {
+        // Compute our wallet's unique Core wallet name (from descriptor hash).
         let watch_name = self.id();
+        // Compose the endpoint URL for the watch-only wallet.
         let watch_url = format!(
             "{}/wallet/{}",
             rpc_url.to_string().trim_end_matches('/'),
             watch_name
         );
+        // Connect to Core's RPC for the specific wallet.
         let client = Client::new(&watch_url, auth).context("creat Core wallet client")?;
 
-        // Build a template: one output to the target with the requested amount.
+        // Build the transaction outputs: one payment to the recipient.
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
 
-        // Create funded PSBT from the watch-only wallet; Core will select inputs.
+        // Prepare options for Core's walletcreatefundedpsbt RPC.
         let mut options = serde_json::json!({
-            "includeWatching": true,
-            "add_inputs": true,
-            "change_type": "bech32m",
-            "subtractFeeFromOutputs": [0],
+            "includeWatching": true,     // allow spending watch-only UTXOs
+            "add_inputs": true,          // let Core select inputs
+            "change_type": "bech32m",  // use bech32m change
+            "subtractFeeFromOutputs": [0], // subtract fees from recipient output
         });
+        // If fee_rate is specified, apply (units: sat/vB)
         if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);
         }
+        // Request Core to create a PSBT with auto-selected inputs and specified outputs/options.
         let funded: serde_json::Value = client
             .call(
                 "walletcreatefundedpsbt",
@@ -228,27 +246,30 @@ impl Brc721Wallet {
             )
             .context("walletcreatefundedpsbt")?;
 
-        // Decode PSBT (base64) using rust-bitcoin and sign with our local wallet keys.
+        // Get the base64-encoded PSBT string.
         let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        // Parse base64 PSBT to a rust-bitcoin PSBT struct for signing.
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
-        // Let BDK sign our inputs using descriptor-derived keys and finalize.
+        // Sign any wallet-controlled inputs using BDK's wallet (private keys).
         let finalized = self
             .wallet
             .sign(&mut psbt, Default::default())
             .context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
+        // If BDK couldn't finalize, try to finalize using rust-bitcoin's finalize.
         if !finalized {
             psbt.finalize_mut(&secp)
                 .map_err(|errs| anyhow::anyhow!("finalize_mut: {:?}", errs))?;
         }
 
-        // Extract and broadcast.
+        // Once finalized, extract the transaction.
         let tx = psbt
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
+        // Broadcast the finalized transaction to the Bitcoin network via Core.
         let _txid = client.send_raw_transaction(&tx).context("broadcast tx")?;
 
         Ok(())
