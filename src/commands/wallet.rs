@@ -44,7 +44,7 @@ impl CommandRunner for cli::WalletCmd {
                     .reveal_next_payment_address()
                     .context("getting address")?;
 
-                println!("{}", addr.address);
+                log::info!("🏠 {}", addr);
                 Ok(())
             }
             cli::WalletCmd::Balance => {
@@ -52,7 +52,7 @@ impl CommandRunner for cli::WalletCmd {
                     Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
 
                 let balances = wallet.balances(&ctx.rpc_url, ctx.auth.clone())?;
-                println!("{:?}", balances);
+                log::info!("💰 {:?}", balances);
                 Ok(())
             }
             cli::WalletCmd::Rescan => {
