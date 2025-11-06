@@ -223,9 +223,6 @@ impl Brc721Wallet {
 
         // Prepare options for Core's walletcreatefundedpsbt RPC.
         let mut options = serde_json::json!({
-            "includeWatching": true,     // allow spending watch-only UTXOs
-            "add_inputs": true,          // let Core select inputs
-            "change_type": "bech32m",  // use bech32m change
             "subtractFeeFromOutputs": [0], // subtract fees from recipient output
         });
         // If fee_rate is specified, apply (units: sat/vB)
