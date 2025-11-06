@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use bitcoin::Address;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
+use tempfile::TempDir;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::SyncRunner;
 use testcontainers::{GenericImage, ImageExt};
@@ -16,7 +17,7 @@ const MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const PAYING_ADDRESS: &str = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
 
-fn base_cmd(rpc_url: &String) -> ProcCommand {
+fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
     let mut command = ProcCommand::new("cargo");
 
     command
@@ -26,7 +27,7 @@ fn base_cmd(rpc_url: &String) -> ProcCommand {
         .arg("--network")
         .arg("regtest")
         .arg("--data-dir")
-        .arg(".brc721-e2e/")
+        .arg(data_dir.path())
         .arg("--rpc-url")
         .arg(&rpc_url)
         .arg("--rpc-user")
@@ -77,7 +78,8 @@ fn e2e_balance() {
         }
     }
 
-    let stdout = base_cmd(&rpc_url)
+    let data_dir = TempDir::new().expect("temp dir");
+    let stdout = base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("init")
         .arg("--mnemonic")
@@ -86,20 +88,13 @@ fn e2e_balance() {
         .expect("run wallet init");
     assert!(stdout.status.success());
 
-    let stdout = base_cmd(&rpc_url)
-        .arg("wallet")
-        .arg("address")
-        .output()
-        .expect("run wallet init");
-    println!("{:?}", stdout);
-
     let addr = Address::from_str(PAYING_ADDRESS)
         .expect("address")
         .assume_checked();
     root_client.generate_to_address(101, &addr).expect("mine");
 
     // 2) Query the app balance command; it should reflect the same totals as Core.
-    let stdout = base_cmd(&rpc_url)
+    let stdout = base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("balance")
         .output()
