@@ -1,16 +1,10 @@
-//! End-to-end test that starts a bitcoind regtest container, creates a Core wallet,
-//! mines to an address, and asserts balances. Also exercises the app CLI wallet
-//! commands to derive an address and query balance against the same node.
-
 use std::process::Command as ProcCommand;
 use std::str::FromStr;
-use std::time::Duration;
 
 use bitcoin::Address;
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::{Client, RpcApi};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
-use testcontainers::Container;
 
 mod common;
 
