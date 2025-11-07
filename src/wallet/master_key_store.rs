@@ -1,11 +1,16 @@
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Write;
+#[cfg(test)]
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use age::secrecy::SecretString;
-use age::{scrypt, Decryptor, Encryptor};
+use age::Encryptor;
+#[cfg(test)]
+use age::{scrypt, Decryptor};
 use anyhow::{bail, Context, Result};
 use bitcoin::{bip32::Xpriv, Network};
+#[cfg(test)]
 use std::str::FromStr;
 
 /// Stores and retrieves a master private key (Xpriv) encrypted with the age crate.
@@ -41,6 +46,7 @@ impl MasterKeyStore {
     }
 
     /// Load the stored Xpriv by decrypting it with the provided passphrase.
+    #[cfg(test)]
     pub fn load(&self, passphrase: &SecretString) -> Result<Xpriv> {
         let plaintext = self.decrypt_bytes(passphrase)?;
         let s = String::from_utf8(plaintext).context("xpriv plaintext not valid utf-8")?;
@@ -49,6 +55,7 @@ impl MasterKeyStore {
     }
 
     /// Decrypt and return the existing master key bytes.
+    #[cfg(test)]
     fn decrypt_bytes(&self, passphrase: &SecretString) -> Result<Vec<u8>> {
         let ciphertext = fs::read(&self.path).with_context(|| {
             format!("reading encrypted master key from {}", self.path.display())
