@@ -1,7 +1,7 @@
 use std::fs::{self, File};
-use std::io::Write;
 #[cfg(test)]
 use std::io::Read;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use age::secrecy::SecretString;
