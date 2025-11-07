@@ -48,6 +48,8 @@ fn e2e_balance() {
         .arg("init")
         .arg("--mnemonic")
         .arg(MNEMONIC)
+        .arg("--passphrase")
+        .arg("passphrase")
         .output()
         .expect("run wallet init");
     assert!(stdout.status.success());

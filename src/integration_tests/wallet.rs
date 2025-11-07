@@ -15,8 +15,13 @@ fn test_wallet_creation() {
         ).expect("mnemonic");
 
     let data_dir = TempDir::new().expect("temp dir");
-    let mut wallet = Brc721Wallet::create(data_dir.path(), Network::Regtest, Some(mnemonic), None)
-        .expect("wallet");
+    let mut wallet = Brc721Wallet::create(
+        data_dir.path(),
+        Network::Regtest,
+        Some(mnemonic),
+        Some("passphrase".to_string()),
+    )
+    .expect("wallet");
 
     let node = Node::from_downloaded().unwrap();
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
@@ -47,8 +52,13 @@ fn test_setup_watch_only_idempotent() {
     ).expect("mnemonic");
 
     let data_dir = TempDir::new().expect("temp dir");
-    let wallet = Brc721Wallet::create(data_dir.path(), Network::Regtest, Some(mnemonic), None)
-        .expect("wallet");
+    let wallet = Brc721Wallet::create(
+        data_dir.path(),
+        Network::Regtest,
+        Some(mnemonic),
+        Some("passphrase".to_string()),
+    )
+    .expect("wallet");
 
     let node = Node::from_downloaded().unwrap();
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
