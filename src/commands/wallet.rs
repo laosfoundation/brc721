@@ -3,6 +3,7 @@ use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::{cli, context};
 use anyhow::{Context, Result};
 use bdk_wallet::bip39::{Language, Mnemonic};
+use crate::wallet::passphrase::prompt_new_passphrase;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
@@ -16,13 +17,18 @@ impl CommandRunner for cli::WalletCmd {
                     .as_ref()
                     .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
 
+                let passphrase = match passphrase.clone() {
+                    Some(p) => Some(p),
+                    None => prompt_new_passphrase()?,
+                };
+
                 let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
                     .or_else(|_| {
                         let w = Brc721Wallet::create(
                             &ctx.data_dir,
                             ctx.network,
                             mnemonic,
-                            passphrase.clone(),
+                            passphrase,
                         );
                         log::info!("🎉 New wallet created");
                         w
