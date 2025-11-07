@@ -5,48 +5,51 @@ use std::path::{Path, PathBuf};
 use age::secrecy::SecretString;
 use age::{scrypt, Decryptor, Encryptor};
 use anyhow::{bail, Context, Result};
-use bitcoin::bip32::Xpriv;
+use bitcoin::{bip32::Xpriv, Network};
 use std::str::FromStr;
 
-/// File name used to store the encrypted master key material.
-const MASTER_KEY_FILENAME: &str = "master-key.age";
-
-/// Stores and retrieves a 32-byte master private key encrypted with the age crate.
-///
-/// Encryption uses age's passphrase (scrypt) mode. The passphrase must be provided
-/// by the caller (e.g., from an env var, KMS, or user input) and is NOT stored on disk.
+/// Stores and retrieves a master private key (Xpriv) encrypted with the age crate.
 pub struct MasterKeyStore {
     path: PathBuf,
-    passphrase: SecretString,
 }
 
 impl MasterKeyStore {
-    /// Create a new store pointing at data_dir/master-key.age
-    pub fn new<P: AsRef<Path>>(data_dir: P, passphrase: SecretString) -> Self {
+    /// Create a new store with filename depending on network
+    pub fn new<P: AsRef<Path>>(data_dir: P, network: Network) -> Self {
         let mut path = PathBuf::from(data_dir.as_ref());
-        path.push(MASTER_KEY_FILENAME);
-        Self { path, passphrase }
+        let name = format!(
+            "master-key-{}.age",
+            match network {
+                Network::Bitcoin => "mainnet",
+                Network::Testnet => "testnet",
+                Network::Signet => "signet",
+                Network::Regtest => "regtest",
+                _ => "unknown",
+            }
+        );
+        path.push(name);
+        Self { path }
     }
 
     /// Store the provided Xpriv. Fails if a key is already stored.
-    pub fn store(&self, xpriv: &Xpriv) -> Result<()> {
+    pub fn store(&self, xpriv: &Xpriv, passphrase: &SecretString) -> Result<()> {
         if self.path.exists() {
             bail!("master key already stored");
         }
         let encoded = xpriv.to_string();
-        self.persist_encrypted(encoded.as_bytes())
+        self.persist_encrypted(passphrase, encoded.as_bytes())
     }
 
-    /// Load the stored Xpriv by decrypting it.
-    pub fn load(&self) -> Result<Xpriv> {
-        let plaintext = self.load_bytes()?;
+    /// Load the stored Xpriv by decrypting it with the provided passphrase.
+    pub fn load(&self, passphrase: &SecretString) -> Result<Xpriv> {
+        let plaintext = self.decrypt_bytes(passphrase)?;
         let s = String::from_utf8(plaintext).context("xpriv plaintext not valid utf-8")?;
         let x = Xpriv::from_str(&s).context("parsing xpriv")?;
         Ok(x)
     }
 
     /// Decrypt and return the existing master key bytes.
-    fn load_bytes(&self) -> Result<Vec<u8>> {
+    fn decrypt_bytes(&self, passphrase: &SecretString) -> Result<Vec<u8>> {
         let ciphertext = fs::read(&self.path).with_context(|| {
             format!("reading encrypted master key from {}", self.path.display())
         })?;
@@ -55,7 +58,7 @@ impl MasterKeyStore {
         if !decryptor.is_scrypt() {
             bail!("encrypted master key is not scrypt/passphrase protected");
         }
-        let identity = scrypt::Identity::new(self.passphrase.clone());
+        let identity = scrypt::Identity::new(passphrase.clone());
         let mut reader = decryptor
             .decrypt(std::iter::once(&identity as &dyn age::Identity))
             .context("decrypting master key")?;
@@ -66,11 +69,11 @@ impl MasterKeyStore {
         Ok(pt)
     }
 
-    fn persist_encrypted(&self, key: &[u8]) -> Result<()> {
+    fn persist_encrypted(&self, passphrase: &SecretString, key: &[u8]) -> Result<()> {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir).ok();
         }
-        let encryptor = Encryptor::with_user_passphrase(self.passphrase.clone());
+        let encryptor = Encryptor::with_user_passphrase(passphrase.clone());
         let mut out = Vec::new();
         {
             let mut writer = encryptor
@@ -90,26 +93,25 @@ impl MasterKeyStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{bip32::Xpriv, Network};
     use tempfile::TempDir;
 
     #[test]
     fn store_then_load_xpriv_roundtrip() {
         let dir = TempDir::new().unwrap();
         let passphrase = SecretString::from("test-passphrase".to_string());
-        let store = MasterKeyStore::new(dir.path(), passphrase.clone());
+        let store = MasterKeyStore::new(dir.path(), Network::Regtest);
 
         // User-provided master key
         let seed = [7u8; 32];
         let xpriv = Xpriv::new_master(Network::Regtest, &seed).expect("xpriv");
 
         // First store succeeds
-        store.store(&xpriv).expect("store");
+        store.store(&xpriv, &passphrase).expect("store");
         // Second store should fail because it already exists
-        assert!(store.store(&xpriv).is_err());
+        assert!(store.store(&xpriv, &passphrase).is_err());
 
         // Load back
-        let loaded = store.load().expect("load");
+        let loaded = store.load(&passphrase).expect("load");
         assert_eq!(loaded, xpriv);
     }
 }
