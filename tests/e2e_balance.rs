@@ -17,6 +17,8 @@ fn e2e_balance() {
     let stdout = common::base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("init")
+        .arg("--passphrase")
+        .arg("passphrase")
         .output()
         .expect("run wallet init");
     assert!(stdout.status.success());

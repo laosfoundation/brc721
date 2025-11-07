@@ -25,9 +25,18 @@ impl Context {
             _ => Auth::None,
         };
         let rpc_url = Url::parse(&cli.rpc_url).expect("rpc url");
+        let mut data_dir = PathBuf::from(&cli.data_dir);
+        let network_dir = match network {
+            Network::Bitcoin => "mainnet",
+            Network::Testnet => "testnet",
+            Network::Signet => "signet",
+            Network::Regtest => "regtest",
+            _ => "unknown",
+        };
+        data_dir.push(network_dir);
         Self {
             network,
-            data_dir: PathBuf::from(&cli.data_dir),
+            data_dir,
             rpc_url,
             auth,
             confirmations: cli.confirmations,

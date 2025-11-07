@@ -24,6 +24,8 @@ tracing-log = "0.2"
 anyhow = "1.0.100"
 sha2 = "0.10.9"
 url = "2.5.7"
+age = "0.11"
+rpassword = "7"
 
 [dev-dependencies]
 bdk_bitcoind_rpc = "0.22.0"
