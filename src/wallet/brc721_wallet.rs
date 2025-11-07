@@ -12,7 +12,7 @@ use rand::{rngs::OsRng, RngCore};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
-use crate::wallet::paths;
+use crate::wallet::{master_key_store::MasterKeyStore, paths};
 
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
@@ -35,18 +35,23 @@ impl Brc721Wallet {
         });
 
         // Derive BIP32 master private key from seed.
-        let seed = mnemonic.to_seed(passphrase.unwrap_or_default());
+        let passphrase_str = passphrase.clone().unwrap_or_default();
+        let seed = mnemonic.to_seed(passphrase_str.clone());
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
         let external = Bip86(master_xprv, KeychainKind::External);
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 
-        let db_path = paths::wallet_db_path(data_dir, network);
+        let db_path = paths::wallet_db_path(&data_dir, network);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
 
         let wallet = Wallet::create(external, internal)
             .network(network)
             .create_wallet(&mut conn)?;
+
+        // Store the master private key encrypted with age using the provided passphrase (or empty)
+        let store = MasterKeyStore::new(&data_dir, network);
+        let _ = store.store(&master_xprv, &age::secrecy::SecretString::from(passphrase_str));
 
         Ok(Self { wallet, conn })
     }
