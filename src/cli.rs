@@ -192,10 +192,7 @@ pub enum TxCmd {
         long_about = "Build and broadcast a transaction that sends the specified amount to the provided target address. Optionally set a custom fee rate (sat/vB)."
     )]
     SendAmount {
-        #[arg(
-            value_name = "ADDRESS",
-            help = "Target address to receive the funds"
-        )]
+        #[arg(value_name = "ADDRESS", help = "Target address to receive the funds")]
         to: String,
         #[arg(
             long = "amount-sat",
@@ -211,6 +208,13 @@ pub enum TxCmd {
             help = "Fee rate in sat/vB (optional)"
         )]
         fee_rate: Option<f64>,
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Passphrase for signing",
+            required = false
+        )]
+        passphrase: Option<String>,
     },
 }
 

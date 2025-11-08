@@ -16,11 +16,19 @@ impl CommandRunner for cli::TxCmd {
                 to,
                 amount_sat,
                 fee_rate,
+                passphrase,
             } => {
                 let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
                 let amount = Amount::from_sat(*amount_sat);
                 let address = Address::from_str(to)?.require_network(ctx.network)?;
-                wallet.send_amount(&ctx.rpc_url, ctx.auth.clone(), &address, amount, *fee_rate)?;
+                wallet.send_amount(
+                    &ctx.rpc_url,
+                    ctx.auth.clone(),
+                    &address,
+                    amount,
+                    *fee_rate,
+                    passphrase.clone(),
+                )?;
                 log::info!("✅ Sent {} sat to {}", amount_sat, to);
                 Ok(())
             }

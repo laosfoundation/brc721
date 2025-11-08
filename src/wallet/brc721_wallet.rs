@@ -15,7 +15,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use super::passphrase::prompt_passphrase;
-use crate::wallet::{master_key_store::MasterKeyStore, paths};
+use crate::wallet::{master_key_store::MasterKeyStore, passphrase, paths};
 
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
@@ -229,6 +229,7 @@ impl Brc721Wallet {
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
+        passphrase: Option<String>,
     ) -> Result<()> {
         // Compute our wallet's unique Core wallet name (from descriptor hash).
         let watch_name = self.id();
@@ -272,7 +273,7 @@ impl Brc721Wallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         // Sign any wallet-controlled inputs using BDK's wallet (private keys).
-        let finalized = self.sign(&mut psbt).context("bdk sign")?;
+        let finalized = self.sign(&mut psbt, passphrase).context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
         // If BDK couldn't finalize, try to finalize using rust-bitcoin's finalize.
@@ -292,11 +293,16 @@ impl Brc721Wallet {
         Ok(())
     }
 
-    fn sign(&self, psbt: &mut Psbt) -> Result<bool> {
-        let passphrase = prompt_passphrase()?.expect("passphrase");
+    fn sign(&self, psbt: &mut Psbt, passphrase: Option<String>) -> Result<bool> {
+        let passphrase = match passphrase.clone() {
+            Some(p) => Some(p),
+            None => prompt_passphrase()?,
+        };
+        let passphrase_str = passphrase.unwrap();
+
         let master_xprv = self
             .master_key_store
-            .load(&SecretString::from(passphrase))?;
+            .load(&SecretString::from(passphrase_str))?;
         let external = Bip86(master_xprv, KeychainKind::External);
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 
@@ -434,17 +440,22 @@ mod tests {
         let data_dir0 = TempDir::new().expect("temp dir");
         let data_dir1 = TempDir::new().expect("temp dir");
 
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+
         let wallet_regtest = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
-            None,
+            Some(mnemonic.clone()),
             Some("passphrase".to_string()),
         )
         .expect("regtest");
         let wallet_bitcoin = Brc721Wallet::create(
             &data_dir1,
             Network::Bitcoin,
-            None,
+            Some(mnemonic),
             Some("passphrase".to_string()),
         )
         .expect("bitcoin");

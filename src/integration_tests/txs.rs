@@ -39,15 +39,13 @@ fn test_send_amount_between_wallets_via_psbt() {
     assert_eq!(balances0.mine.untrusted_pending.to_btc(), 0.0);
     assert_eq!(balances0.mine.immature.to_btc(), 5000.0);
 
+    let passphrase = Some("passphrase".to_string());
+
     // Create second temporary wallet directory and initialize Brc721Wallet
     let data_dir1 = TempDir::new().expect("temp dir");
-    let mut wallet1 = Brc721Wallet::create(
-        data_dir1.path(),
-        Network::Regtest,
-        None,
-        Some("passphrase".to_string()),
-    )
-    .expect("wallet");
+    let mut wallet1 =
+        Brc721Wallet::create(data_dir1.path(), Network::Regtest, None, passphrase.clone())
+            .expect("wallet");
     wallet1
         .setup_watch_only(&node_url, auth.clone())
         .expect("setup watch only");
@@ -60,7 +58,14 @@ fn test_send_amount_between_wallets_via_psbt() {
     let fee = 2.5;
     // Send from wallet0 to wallet1 via PSBT flow
     wallet0
-        .send_amount(&node_url, auth.clone(), address1, amount, Some(fee))
+        .send_amount(
+            &node_url,
+            auth.clone(),
+            address1,
+            amount,
+            Some(fee),
+            passphrase,
+        )
         .expect("amount sent");
 
     // Mine a block to confirm the transaction so funds appear as trusted in wallet1
