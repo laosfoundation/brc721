@@ -15,7 +15,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use super::passphrase::prompt_passphrase;
-use crate::wallet::{master_key_store::MasterKeyStore, passphrase, paths};
+use crate::wallet::{master_key_store::MasterKeyStore, paths};
 
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
@@ -306,7 +306,9 @@ impl Brc721Wallet {
         let external = Bip86(master_xprv, KeychainKind::External);
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 
-        let wallet = Wallet::create(external, internal).create_wallet_no_persist()?;
+        let wallet = Wallet::create(external, internal)
+            .network(self.wallet.network())
+            .create_wallet_no_persist()?;
         let finalized = wallet.sign(psbt, Default::default()).expect("sign");
 
         Ok(finalized)
