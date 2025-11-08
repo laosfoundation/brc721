@@ -1,6 +1,3 @@
-use std::str::FromStr;
-
-use bitcoin::Address;
 use bitcoincore_rpc::{Client, RpcApi};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
@@ -9,7 +6,6 @@ mod common;
 
 const MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const PAYING_ADDRESS: &str = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
 
 #[test]
 fn e2e_send_amount() {
@@ -20,8 +16,9 @@ fn e2e_send_amount() {
 
     let root_client = Client::new(&rpc_url, auth.clone()).expect("rpc client initial");
 
-    let data_dir = TempDir::new().expect("temp dir");
-    let output = common::base_cmd(&rpc_url, &data_dir)
+    // Wallet A: create and fund
+    let data_dir_a = TempDir::new().expect("temp dir");
+    let output = common::base_cmd(&rpc_url, &data_dir_a)
         .arg("wallet")
         .arg("init")
         .arg("--passphrase")
@@ -32,22 +29,29 @@ fn e2e_send_amount() {
         .expect("run wallet init");
     assert!(output.status.success());
 
-    let mined_addr = common::wallet_address(&rpc_url, &data_dir);
+    let addr_a = common::wallet_address(&rpc_url, &data_dir_a);
 
-    // Mine coins to that address so wallet has UTXOs
-    root_client
-        .generate_to_address(101, &mined_addr)
-        .expect("mine");
+    // Mine coins to wallet A so it has UTXOs
+    root_client.generate_to_address(101, &addr_a).expect("mine");
 
-    // Now send some amount to another address using the CLI
-    let target = Address::from_str(PAYING_ADDRESS)
-        .expect("address")
-        .assume_checked();
+    // Wallet B: create and get receive address
+    let data_dir_b = TempDir::new().expect("temp dir");
+    let output = common::base_cmd(&rpc_url, &data_dir_b)
+        .arg("wallet")
+        .arg("init")
+        .arg("--passphrase")
+        .arg("passphrase")
+        .output()
+        .expect("run wallet init B");
+    assert!(output.status.success());
 
-    let output = common::base_cmd(&rpc_url, &data_dir)
+    let addr_b = common::wallet_address(&rpc_url, &data_dir_b);
+
+    // Send some amount from A to B using the CLI
+    let output = common::base_cmd(&rpc_url, &data_dir_a)
         .arg("tx")
         .arg("send-amount")
-        .arg(target.to_string())
+        .arg(addr_b.to_string())
         .arg("--amount-sat")
         .arg("10000")
         .arg("--passphrase")
@@ -55,4 +59,21 @@ fn e2e_send_amount() {
         .output()
         .expect("run tx send-amount");
     assert!(output.status.success(), "{:?}", output);
+
+    // Mine a block to confirm
+    root_client
+        .generate_to_address(1, &addr_a)
+        .expect("mine confirm");
+
+    // Check wallet B balance shows the received funds (trusted)
+    let output = common::base_cmd(&rpc_url, &data_dir_b)
+        .arg("wallet")
+        .arg("balance")
+        .output()
+        .expect("run wallet balance B");
+    assert!(output.status.success(), "{:?}", output);
+    let out = String::from_utf8_lossy(&output.stdout);
+    let err = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", out, err);
+    assert!(combined.contains("trusted: 6900 SAT"), "{}", combined);
 }
