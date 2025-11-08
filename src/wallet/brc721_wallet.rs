@@ -14,7 +14,7 @@ use rand::{rngs::OsRng, RngCore};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
-use super::passphrase::prompt_passphrase;
+use super::passphrase::{prompt_passphrase, prompt_passphrase_once};
 use crate::wallet::{master_key_store::MasterKeyStore, paths};
 
 pub struct Brc721Wallet {
@@ -273,6 +273,10 @@ impl Brc721Wallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         // Sign any wallet-controlled inputs using BDK's wallet (private keys).
+        let passphrase = match passphrase.clone() {
+            Some(p) => Some(p),
+            None => prompt_passphrase_once()?,
+        };
         let finalized = self.sign(&mut psbt, passphrase).context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
