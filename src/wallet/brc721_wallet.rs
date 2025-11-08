@@ -1,3 +1,4 @@
+use age::secrecy::SecretString;
 use bitcoincore_rpc::Auth;
 use std::path::Path;
 use url::Url;
@@ -19,6 +20,7 @@ use crate::wallet::{master_key_store::MasterKeyStore, paths};
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
     conn: Connection,
+    master_key_store: MasterKeyStore,
 }
 
 impl Brc721Wallet {
@@ -28,6 +30,11 @@ impl Brc721Wallet {
         mnemonic: Option<Mnemonic>,
         passphrase: Option<String>,
     ) -> Result<Brc721Wallet> {
+        let passphrase = match passphrase.clone() {
+            Some(p) => Some(p),
+            None => prompt_passphrase()?,
+        };
+
         let mnemonic = mnemonic.unwrap_or_else(|| {
             let mut entropy = [0u8; 32];
             OsRng.fill_bytes(&mut entropy);
@@ -36,18 +43,13 @@ impl Brc721Wallet {
             m
         });
 
-        let passphrase = match passphrase.clone() {
-            Some(p) => Some(p),
-            None => prompt_passphrase()?,
-        };
-
         let passphrase_str = passphrase.unwrap();
         let seed = mnemonic.to_seed(String::default());
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
         let external = Bip86(master_xprv, KeychainKind::External);
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 
-        let db_path = paths::wallet_db_path(&data_dir, network);
+        let db_path = paths::wallet_db_path(&data_dir);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
 
@@ -56,17 +58,21 @@ impl Brc721Wallet {
             .create_wallet(&mut conn)?;
 
         // Store the master private key encrypted with age using the provided passphrase (or empty)
-        let store = MasterKeyStore::new(&data_dir, network);
-        let _ = store.store(
+        let store = MasterKeyStore::new(&data_dir);
+        store.store(
             &master_xprv,
             &age::secrecy::SecretString::from(passphrase_str),
-        );
+        )?;
 
-        Ok(Self { wallet, conn })
+        Ok(Self {
+            wallet,
+            conn,
+            master_key_store: store,
+        })
     }
 
     pub fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
-        let db_path = paths::wallet_db_path(data_dir, network);
+        let db_path = paths::wallet_db_path(&data_dir);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
         let wallet = LoadParams::new()
@@ -75,7 +81,11 @@ impl Brc721Wallet {
             .context("loading wallet")?;
 
         wallet
-            .map(|wallet| Self { wallet, conn })
+            .map(|wallet| Self {
+                wallet,
+                conn,
+                master_key_store: MasterKeyStore::new(data_dir),
+            })
             .context("wallet not found")
     }
 
@@ -262,10 +272,7 @@ impl Brc721Wallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         // Sign any wallet-controlled inputs using BDK's wallet (private keys).
-        let finalized = self
-            .wallet
-            .sign(&mut psbt, Default::default())
-            .context("bdk sign")?;
+        let finalized = self.sign(&mut psbt).context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
         // If BDK couldn't finalize, try to finalize using rust-bitcoin's finalize.
@@ -283,6 +290,20 @@ impl Brc721Wallet {
         let _txid = client.send_raw_transaction(&tx).context("broadcast tx")?;
 
         Ok(())
+    }
+
+    fn sign(&self, psbt: &mut Psbt) -> Result<bool> {
+        let passphrase = prompt_passphrase()?.expect("passphrase");
+        let master_xprv = self
+            .master_key_store
+            .load(&SecretString::from(passphrase))?;
+        let external = Bip86(master_xprv, KeychainKind::External);
+        let internal = Bip86(master_xprv, KeychainKind::Internal);
+
+        let wallet = Wallet::create(external, internal).create_wallet_no_persist()?;
+        let finalized = wallet.sign(psbt, Default::default()).expect("sign");
+
+        Ok(finalized)
     }
 }
 
@@ -410,23 +431,20 @@ mod tests {
 
     #[test]
     fn test_wallet_id_uniqueness_across_networks() {
-        let data_dir = TempDir::new().expect("temp dir");
-        let mnemonic = Mnemonic::parse_in(
-            Language::English,
-            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-        ).expect("mnemonic");
+        let data_dir0 = TempDir::new().expect("temp dir");
+        let data_dir1 = TempDir::new().expect("temp dir");
 
         let wallet_regtest = Brc721Wallet::create(
-            &data_dir,
+            &data_dir0,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            None,
             Some("passphrase".to_string()),
         )
         .expect("regtest");
         let wallet_bitcoin = Brc721Wallet::create(
-            &data_dir,
+            &data_dir1,
             Network::Bitcoin,
-            Some(mnemonic),
+            None,
             Some("passphrase".to_string()),
         )
         .expect("bitcoin");
@@ -537,7 +555,7 @@ mod tests {
             Some("passphrase".to_string()),
         )
         .expect("wallet");
-        let expected_wallet_path = data_dir.path().join("wallet-regtest.sqlite");
+        let expected_wallet_path = data_dir.path().join("wallet.sqlite");
         assert!(expected_wallet_path.exists());
     }
 
@@ -556,7 +574,7 @@ mod tests {
             Some("passphrase".to_string()),
         )
         .expect("wallet");
-        let expected_wallet_path = data_dir.path().join("wallet-mainnet.sqlite");
+        let expected_wallet_path = data_dir.path().join("wallet.sqlite");
         assert!(expected_wallet_path.exists());
     }
 

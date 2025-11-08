@@ -24,6 +24,8 @@ fn e2e_send_amount() {
     let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("wallet")
         .arg("init")
+        .arg("--passphrase")
+        .arg("passphrase")
         .arg("--mnemonic")
         .arg(MNEMONIC)
         .output()
