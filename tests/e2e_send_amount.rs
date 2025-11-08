@@ -50,6 +50,8 @@ fn e2e_send_amount() {
         .arg(target.to_string())
         .arg("--amount-sat")
         .arg("10000")
+        .arg("--passphrase")
+        .arg("passphrase")
         .output()
         .expect("run tx send-amount");
     assert!(output.status.success(), "{:?}", output);
