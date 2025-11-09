@@ -186,6 +186,13 @@ pub enum TxCmd {
             help = "Fee rate in sat/vB (optional)"
         )]
         fee_rate: Option<f64>,
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Passphrase for signing",
+            required = false
+        )]
+        passphrase: Option<String>,
     },
     #[command(
         about = "Send a specific amount to an address",

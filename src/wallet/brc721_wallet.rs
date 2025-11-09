@@ -297,7 +297,7 @@ impl Brc721Wallet {
         Ok(())
     }
 
-    fn sign(&self, psbt: &mut Psbt, passphrase: Option<String>) -> Result<bool> {
+    pub(crate) fn sign(&self, psbt: &mut Psbt, passphrase: Option<String>) -> Result<bool> {
         let passphrase = match passphrase.clone() {
             Some(p) => Some(p),
             None => prompt_passphrase()?,
