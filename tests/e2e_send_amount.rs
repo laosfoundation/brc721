@@ -75,5 +75,5 @@ fn e2e_send_amount() {
     let out = String::from_utf8_lossy(&output.stdout);
     let err = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}{}", out, err);
-    assert!(combined.contains("trusted: 6900 SAT"), "{}", combined);
+    assert!(combined.contains("trusted: 10000 SAT"), "{}", combined);
 }

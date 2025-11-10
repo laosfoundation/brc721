@@ -246,9 +246,7 @@ impl Brc721Wallet {
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
 
         // Prepare options for Core's walletcreatefundedpsbt RPC.
-        let mut options = serde_json::json!({
-            "subtractFeeFromOutputs": [0], // subtract fees from recipient output
-        });
+        let mut options = serde_json::json!({});
         // If fee_rate is specified, apply (units: sat/vB)
         if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);

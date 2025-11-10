@@ -75,7 +75,7 @@ fn test_send_amount_between_wallets_via_psbt() {
 
     // Check wallet1 balance after transaction; account for any fee variance
     let balances1 = wallet1.balances(&node_url, auth).expect("balances");
-    assert_eq!(balances1.mine.trusted.to_btc(), 0.99999612);
+    assert_eq!(balances1.mine.trusted.to_btc(), 1.0);
     assert_eq!(balances1.mine.untrusted_pending.to_btc(), 0.0);
     assert_eq!(balances1.mine.immature.to_btc(), 0.0);
 }
