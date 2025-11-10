@@ -295,6 +295,59 @@ impl Brc721Wallet {
         Ok(())
     }
 
+    /// Create a funded PSBT from a list of arbitrary TxOuts (script_pubkey + value).
+    /// Uses fundrawtransaction + converttopsbt to support non-address scripts (e.g. OP_RETURN).
+    pub fn create_psbt_from_txouts(
+        &self,
+        rpc_url: &Url,
+        auth: Auth,
+        outputs: Vec<bitcoin::TxOut>,
+        fee_rate: Option<f64>,
+    ) -> Result<Psbt> {
+        let watch_name = self.id();
+        let watch_url = format!(
+            "{}/wallet/{}",
+            rpc_url.to_string().trim_end_matches('/'),
+            watch_name
+        );
+        let client = Client::new(&watch_url, auth).context("creat Core wallet client")?;
+
+        // Build raw tx with provided outputs and no inputs; Core will fund it
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint::null(),
+                script_sig: bitcoin::ScriptBuf::new(),
+                sequence: bitcoin::Sequence::MAX,
+                witness: bitcoin::Witness::new(),
+            }],
+            output: outputs,
+        };
+        let raw_hex = hex::encode(bitcoin::consensus::serialize(&tx));
+
+        let mut options = serde_json::json!({});
+        if let Some(fr) = fee_rate {
+            options["fee_rate"] = serde_json::json!(fr);
+        }
+        // Use watch wallet to fund and convert to PSBT in one step
+        let funded: serde_json::Value = client
+            .call(
+                "walletcreatefundedpsbt",
+                &[
+                    serde_json::json!([]),
+                    serde_json::json!([{"data": raw_hex}]), // data-raw tx as output via descriptor format
+                    serde_json::json!(0),
+                    options,
+                    serde_json::json!(true),
+                ],
+            )
+            .context("walletcreatefundedpsbt from raw tx data")?;
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
+        Ok(psbt)
+    }
+
     pub(crate) fn sign(&self, psbt: &mut Psbt, passphrase: Option<String>) -> Result<bool> {
         let passphrase = match passphrase.clone() {
             Some(p) => Some(p),

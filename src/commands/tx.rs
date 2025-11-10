@@ -28,45 +28,10 @@ impl CommandRunner for cli::TxCmd {
                     rebaseable: *rebaseable,
                 };
                 let brc_tx = build_register_collection_tx(&msg);
-
-                // Create a PSBT funding the OP_RETURN output
-                let watch_name = wallet.id();
-                let watch_url = format!(
-                    "{}/wallet/{}",
-                    ctx.rpc_url.to_string().trim_end_matches('/'),
-                    watch_name
-                );
-                let client = Client::new(&watch_url, ctx.auth.clone()).expect("watch client");
-
-                // Serialize our single-output OP_RETURN transaction to hex
-                let raw_hex = hex::encode(bitcoin::consensus::serialize(&brc_tx));
-
-                // Fund it from the watch-only wallet (select inputs, add change)
-                let mut options = serde_json::json!({});
-                if let Some(fr) = fee_rate {
-                    options["fee_rate"] = serde_json::json!(*fr);
-                }
-                let funded: serde_json::Value =
-                    client.call("fundrawtransaction", &[serde_json::json!(raw_hex), options])?;
-                let funded_hex = funded["hex"]
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("funded hex"))?;
-
-                // Convert to PSBT and let Core fill UTXO/derivations
-                let psbt_from_raw: serde_json::Value = client
-                    .call(
-                        "converttopsbt",
-                        &[
-                            serde_json::json!(funded_hex),
-                            serde_json::json!(false),
-                            serde_json::json!(true),
-                        ],
-                    )
-                    .context("convert to psbt")?;
-                let psbt_b64 = psbt_from_raw
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("psbt tmp"))?;
-                let mut psbt: Psbt = psbt_b64.parse().context("parse psbt")?;
+                let outputs = brc_tx.output;
+                let mut psbt = wallet
+                    .create_psbt_from_txouts(&ctx.rpc_url, ctx.auth.clone(), outputs, *fee_rate)
+                    .unwrap();
 
                 let finalized = wallet
                     .sign(&mut psbt, passphrase.clone())
