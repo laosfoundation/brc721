@@ -1,9 +1,12 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
+use crate::types::{build_register_collection_tx, RegisterCollectionMessage};
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
+use bitcoincore_rpc::{Client, RpcApi};
+use ethereum_types::H160;
 
 impl CommandRunner for cli::TxCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
@@ -14,11 +17,6 @@ impl CommandRunner for cli::TxCmd {
                 fee_rate,
                 passphrase,
             } => {
-                use crate::types::{build_register_collection_tx, RegisterCollectionMessage};
-                use bitcoin::psbt::Psbt;
-                use bitcoincore_rpc::{Client, RpcApi};
-                use ethereum_types::H160;
-
                 let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
 
                 // Parse 20-byte hex EVM address
