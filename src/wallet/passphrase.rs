@@ -20,3 +20,16 @@ pub fn prompt_passphrase() -> Result<Option<String>> {
         Ok(None)
     }
 }
+
+pub fn prompt_passphrase_once() -> Result<Option<String>> {
+    if std::io::stdin().is_terminal() {
+        let p = rpassword::prompt_password("Enter passphrase: ").context("read passphrase")?;
+        if p.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(p))
+        }
+    } else {
+        Ok(None)
+    }
+}
