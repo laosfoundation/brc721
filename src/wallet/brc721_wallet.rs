@@ -19,7 +19,7 @@ use crate::wallet::{paths, signer::Signer};
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
     conn: Connection,
-    signer: Signer,
+    pub(crate) signer: Signer,
 }
 
 impl Brc721Wallet {
@@ -272,7 +272,11 @@ impl Brc721Wallet {
             Some(p) => Some(p),
             None => prompt_passphrase_once()?,
         };
-        let finalized = self.sign(&mut psbt, passphrase).context("bdk sign")?;
+        let passphrase_str = passphrase.unwrap();
+        let finalized = self
+            .signer
+            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase_str))
+            .context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
         // If BDK couldn't finalize, try to finalize using rust-bitcoin's finalize.
@@ -345,16 +349,44 @@ impl Brc721Wallet {
         Ok(psbt)
     }
 
-    pub(crate) fn sign(&self, psbt: &mut Psbt, passphrase: Option<String>) -> Result<bool> {
+    pub fn send_tx(
+        &self,
+        rpc_url: &Url,
+        auth: Auth,
+        outputs: Vec<bitcoin::TxOut>,
+        fee_rate: Option<f64>,
+        passphrase: Option<String>,
+    ) -> Result<bitcoin::Txid> {
+        let mut psbt = self
+            .create_psbt_from_txouts(rpc_url, auth.clone(), outputs, fee_rate)
+            .context("create psbt from outputs")?;
+
         let passphrase = match passphrase.clone() {
             Some(p) => Some(p),
-            None => prompt_passphrase()?,
+            None => prompt_passphrase_once()?,
         };
         let passphrase_str = passphrase.unwrap();
-        let pass = age::secrecy::SecretString::from(passphrase_str);
+        let finalized = self
+            .signer
+            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase_str))
+            .context("bdk sign")?;
 
-        self.signer.sign(psbt, &pass)
+        let secp = bitcoin::secp256k1::Secp256k1::verification_only();
+        if !finalized {
+            psbt.finalize_mut(&secp)
+                .map_err(|errs| anyhow::anyhow!("finalize_mut: {:?}", errs))?;
+        }
+        let tx = psbt
+            .extract(&secp)
+            .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
+
+        let txid = Client::new(rpc_url.as_ref(), auth)
+            .context("create root client")?
+            .send_raw_transaction(&tx)
+            .context("broadcast tx")?;
+        Ok(txid)
     }
+
 }
 
 #[cfg(test)]

@@ -27,20 +27,16 @@ impl CommandRunner for cli::TxCmd {
                 };
                 let brc_tx = build_register_collection_tx(&msg);
                 let outputs = brc_tx.output;
-                let mut psbt = wallet
-                    .create_psbt_from_txouts(&ctx.rpc_url, ctx.auth.clone(), outputs, *fee_rate)
-                    .unwrap();
 
-                let finalized = wallet
-                    .sign(&mut psbt, passphrase.clone())
-                    .context("psbt sign")?;
-                assert!(finalized);
-                let tx = psbt
-                    .extract_tx()
-                    .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
-                // Broadcast using root client since wallet client may lack mempool policy overrides
-                let txid = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())?
-                    .send_raw_transaction(&tx)?;
+                let txid = wallet
+                    .send_tx(
+                        &ctx.rpc_url,
+                        ctx.auth.clone(),
+                        outputs,
+                        *fee_rate,
+                        passphrase.clone(),
+                    )
+                    .context("sending tx")?;
 
                 log::info!(
                     "✅ Registered collection {}, rebaseable: {}, txid: {}",
