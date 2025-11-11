@@ -6,37 +6,39 @@ use url::Url;
 
 pub struct RemoteWallet {
     watch_name: String,
+    rpc_url: Url,
+    auth: Auth,
 }
 
 impl RemoteWallet {
-    pub fn new(watch_name: String) -> Self {
-        Self { watch_name }
+    pub fn new(watch_name: String, rpc_url: &Url, auth: Auth) -> Self {
+        Self { watch_name, rpc_url: rpc_url.clone(), auth }
     }
 
-    fn watch_url(&self, rpc_url: &Url) -> String {
+    fn watch_url(&self) -> String {
         format!(
             "{}/wallet/{}",
-            rpc_url.to_string().trim_end_matches('/'),
+            self.rpc_url.to_string().trim_end_matches('/'),
             self.watch_name
         )
     }
 
-    fn watch_client(&self, rpc_url: &Url, auth: Auth) -> Result<Client> {
-        let url = self.watch_url(rpc_url);
-        Client::new(&url, auth).context("creat Core wallet client")
+    fn watch_client(&self) -> Result<Client> {
+        let url = self.watch_url();
+        Client::new(&url, self.auth.clone()).context("creat Core wallet client")
     }
 
-    fn root_client(rpc_url: &Url, auth: Auth) -> Result<Client> {
-        Client::new(rpc_url.as_ref(), auth).context("create root client")
+    fn root_client(&self) -> Result<Client> {
+        Client::new(self.rpc_url.as_ref(), self.auth.clone()).context("create root client")
     }
 
-    pub fn balances(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
-        let client = self.watch_client(rpc_url, auth)?;
+    pub fn balances(&self) -> Result<json::GetBalancesResult> {
+        let client = self.watch_client()?;
         client.get_balances().context("get balance")
     }
 
-    pub fn rescan(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
-        let client = self.watch_client(rpc_url, auth)?;
+    pub fn rescan(&self) -> Result<()> {
+        let client = self.watch_client()?;
         let mut params = Vec::new();
         let start_block = 0;
         params.push(serde_json::json!(start_block));
@@ -47,12 +49,10 @@ impl RemoteWallet {
 
     pub fn setup(
         &self,
-        rpc_url: &Url,
-        auth: Auth,
         external_desc: String,
         internal_desc: String,
     ) -> Result<()> {
-        let root = Self::root_client(rpc_url, auth.clone())?;
+        let root = self.root_client()?;
         let existing_wallets: Vec<String> = root.list_wallets().context("list wallets")?;
         if existing_wallets.contains(&self.watch_name) {
             return Ok(());
@@ -80,7 +80,7 @@ impl RemoteWallet {
             ));
         }
 
-        let client = self.watch_client(rpc_url, auth)?;
+        let client = self.watch_client()?;
         let imports = serde_json::json!([
             {
                 "desc": external_desc,
@@ -113,13 +113,11 @@ impl RemoteWallet {
 
     pub fn create_psbt_for_payment(
         &self,
-        rpc_url: &Url,
-        auth: Auth,
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
-        let client = self.watch_client(rpc_url, auth)?;
+        let client = self.watch_client()?;
         let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
@@ -144,12 +142,10 @@ impl RemoteWallet {
 
     pub fn create_psbt_from_txouts(
         &self,
-        rpc_url: &Url,
-        auth: Auth,
         outputs: Vec<TxOut>,
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
-        let client = self.watch_client(rpc_url, auth)?;
+        let client = self.watch_client()?;
         let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
@@ -183,8 +179,8 @@ impl RemoteWallet {
         Ok(psbt)
     }
 
-    pub fn broadcast(&self, rpc_url: &Url, auth: Auth, tx: &Transaction) -> Result<bitcoin::Txid> {
-        let root = Self::root_client(rpc_url, auth)?;
+    pub fn broadcast(&self, tx: &Transaction) -> Result<bitcoin::Txid> {
+        let root = self.root_client()?;
         let txid = root.send_raw_transaction(tx).context("broadcast tx")?;
         Ok(txid)
     }

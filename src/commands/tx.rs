@@ -6,31 +6,26 @@ use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use crate::wallet::passphrase::prompt_passphrase_once;
 use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
-use ethereum_types::H160;
 
 impl CommandRunner for cli::TxCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
         match self {
             cli::TxCmd::RegisterCollection {
-                laos_hex,
+                collection_address,
                 rebaseable,
                 fee_rate,
                 passphrase,
             } => {
-                // Parse 20-byte hex EVM address
-                let laos = H160::from_slice(&hex::decode(laos_hex)?);
                 let msg = RegisterCollectionMessage {
-                    collection_address: laos,
+                    collection_address: *collection_address,
                     rebaseable: *rebaseable,
                 };
                 let output = brc721_output(&msg.encode());
 
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
                 let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
                 let txid = wallet
                     .send_tx(
-                        &ctx.rpc_url,
-                        ctx.auth.clone(),
                         vec![output],
                         *fee_rate,
                         passphrase,
@@ -38,8 +33,8 @@ impl CommandRunner for cli::TxCmd {
                     .context("sending tx")?;
 
                 log::info!(
-                    "✅ Registered collection {}, rebaseable: {}, txid: {}",
-                    laos_hex,
+                    "✅ Registered collection {:#x}, rebaseable: {}, txid: {}",
+                    collection_address,
                     rebaseable,
                     txid
                 );
@@ -51,13 +46,11 @@ impl CommandRunner for cli::TxCmd {
                 fee_rate,
                 passphrase,
             } => {
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
                 let amount = Amount::from_sat(*amount_sat);
                 let address = Address::from_str(to)?.require_network(ctx.network)?;
                 let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
                 wallet.send_amount(
-                    &ctx.rpc_url,
-                    ctx.auth.clone(),
                     &address,
                     amount,
                     *fee_rate,

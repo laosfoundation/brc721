@@ -20,10 +20,12 @@ fn test_send_amount_between_wallets_via_psbt() {
         Network::Regtest,
         None,
         "passphrase".to_string(),
+        &node_url,
+        auth.clone(),
     )
     .expect("wallet");
     wallet0
-        .setup_watch_only(&node_url, auth.clone())
+        .setup_watch_only()
         .expect("setup watch only");
 
     // Get the payment address for wallet0
@@ -34,7 +36,7 @@ fn test_send_amount_between_wallets_via_psbt() {
         .expect("mint");
 
     // Check wallet0 balance (should have 50 BTC mature, 0 untrusted, 5000 BTC immature)
-    let balances0 = wallet0.balances(&node_url, auth.clone()).expect("balances");
+    let balances0 = wallet0.balances().expect("balances");
     assert_eq!(balances0.mine.trusted.to_btc(), 50.0);
     assert_eq!(balances0.mine.untrusted_pending.to_btc(), 0.0);
     assert_eq!(balances0.mine.immature.to_btc(), 5000.0);
@@ -44,10 +46,10 @@ fn test_send_amount_between_wallets_via_psbt() {
     // Create second temporary wallet directory and initialize Brc721Wallet
     let data_dir1 = TempDir::new().expect("temp dir");
     let mut wallet1 =
-        Brc721Wallet::create(data_dir1.path(), Network::Regtest, None, passphrase.clone())
+        Brc721Wallet::create(data_dir1.path(), Network::Regtest, None, passphrase.clone(), &node_url, auth.clone())
             .expect("wallet");
     wallet1
-        .setup_watch_only(&node_url, auth.clone())
+        .setup_watch_only()
         .expect("setup watch only");
 
     // Get the payment address for wallet1
@@ -59,8 +61,6 @@ fn test_send_amount_between_wallets_via_psbt() {
     // Send from wallet0 to wallet1 via PSBT flow
     wallet0
         .send_amount(
-            &node_url,
-            auth.clone(),
             address1,
             amount,
             Some(fee),
@@ -74,7 +74,7 @@ fn test_send_amount_between_wallets_via_psbt() {
         .expect("mine confirm");
 
     // Check wallet1 balance after transaction; account for any fee variance
-    let balances1 = wallet1.balances(&node_url, auth).expect("balances");
+    let balances1 = wallet1.balances().expect("balances");
     assert_eq!(balances1.mine.trusted.to_btc(), 1.0);
     assert_eq!(balances1.mine.untrusted_pending.to_btc(), 0.0);
     assert_eq!(balances1.mine.immature.to_btc(), 0.0);

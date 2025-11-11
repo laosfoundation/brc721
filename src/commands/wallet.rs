@@ -17,7 +17,7 @@ impl CommandRunner for cli::WalletCmd {
                     .as_ref()
                     .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
 
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
                     .or_else(|_| {
                         let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase().expect("prompt").unwrap_or_default());
                         let w = Brc721Wallet::create(
@@ -25,6 +25,8 @@ impl CommandRunner for cli::WalletCmd {
                             ctx.network,
                             mnemonic,
                             passphrase,
+                            &ctx.rpc_url,
+                            ctx.auth.clone(),
                         );
                         log::info!("🎉 New wallet created");
                         w
@@ -32,7 +34,7 @@ impl CommandRunner for cli::WalletCmd {
                     .context("wallet initialization")?;
 
                 wallet
-                    .setup_watch_only(&ctx.rpc_url, ctx.auth.clone())
+                    .setup_watch_only()
                     .expect("setup watch only");
 
                 log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
@@ -40,7 +42,7 @@ impl CommandRunner for cli::WalletCmd {
             }
             cli::WalletCmd::Address => {
                 let mut wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone()).context("loading wallet")?;
 
                 let addr = wallet
                     .reveal_next_payment_address()
@@ -51,18 +53,18 @@ impl CommandRunner for cli::WalletCmd {
             }
             cli::WalletCmd::Balance => {
                 let wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone()).context("loading wallet")?;
 
-                let balances = wallet.balances(&ctx.rpc_url, ctx.auth.clone())?;
+                let balances = wallet.balances()?;
                 log::info!("💰 {:?}", balances);
                 Ok(())
             }
             cli::WalletCmd::Rescan => {
                 let wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network).context("loading wallet")?;
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone()).context("loading wallet")?;
 
                 wallet
-                    .rescan_watch_only(&ctx.rpc_url, ctx.auth.clone())
+                    .rescan_watch_only()
                     .context("rescan watch-only wallet")?;
                 log::info!("🔄 Rescan started for watch-only wallet '{}'", wallet.id());
                 Ok(())

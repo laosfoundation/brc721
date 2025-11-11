@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use ethereum_types::H160;
 use std::env;
 
 #[derive(Parser, Debug)]
@@ -167,12 +168,12 @@ pub enum TxCmd {
     )]
     RegisterCollection {
         #[arg(
-            long = "laos-hex",
-            value_name = "20-BYTE-HEX",
-            help = "20-byte hex collection address (EVM H160)",
+            long = "collection-address",
+            value_name = "H160",
+            help = "20-byte EVM collection address (H160)",
             required = true
         )]
-        laos_hex: String,
+        collection_address: H160,
         #[arg(
             long,
             default_value_t = false,

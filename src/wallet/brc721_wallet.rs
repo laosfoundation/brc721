@@ -3,9 +3,7 @@ use std::path::Path;
 use url::Url;
 
 use anyhow::{Context, Ok, Result};
-use bdk_wallet::{
-    bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind,
-};
+use bdk_wallet::{bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind};
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::json;
 use rand::{rngs::OsRng, RngCore};
@@ -14,6 +12,7 @@ use crate::wallet::{local_wallet::LocalWallet, remote_wallet::RemoteWallet, sign
 
 pub struct Brc721Wallet {
     local: LocalWallet,
+    remote: RemoteWallet,
     signer: Signer,
 }
 
@@ -23,6 +22,8 @@ impl Brc721Wallet {
         network: Network,
         mnemonic: Option<Mnemonic>,
         passphrase: String,
+        rpc_url: &Url,
+        auth: Auth,
     ) -> Result<Brc721Wallet> {
         let mnemonic = mnemonic.unwrap_or_else(|| {
             let mut entropy = [0u8; 32];
@@ -36,18 +37,30 @@ impl Brc721Wallet {
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
 
         let local = LocalWallet::create(&data_dir, network, &master_xprv)?;
+        let remote = RemoteWallet::new(local.id(), rpc_url, auth);
 
         let pass = age::secrecy::SecretString::from(passphrase);
         let signer = Signer::new().with_data_dir(&data_dir).with_network(network);
         signer.store_master_key(&master_xprv, &pass)?;
 
-        Ok(Self { local, signer })
-    }
-
-    pub fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
-        let local = LocalWallet::load(&data_dir, network)?;
         Ok(Self {
             local,
+            remote,
+            signer,
+        })
+    }
+
+    pub fn load<P: AsRef<Path>>(
+        data_dir: P,
+        network: Network,
+        rpc_url: &Url,
+        auth: Auth,
+    ) -> Result<Brc721Wallet> {
+        let local = LocalWallet::load(&data_dir, network)?;
+        let remote = RemoteWallet::new(local.id(), rpc_url, auth);
+        Ok(Self {
+            local,
+            remote,
             signer: Signer::new().with_data_dir(&data_dir).with_network(network),
         })
     }
@@ -56,26 +69,22 @@ impl Brc721Wallet {
         self.local.id()
     }
 
-    fn remote(&self) -> RemoteWallet {
-        RemoteWallet::new(self.id())
-    }
-
     pub fn reveal_next_payment_address(&mut self) -> Result<AddressInfo> {
         self.local.reveal_next_payment_address()
     }
 
-    pub fn balances(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
-        self.remote().balances(rpc_url, auth)
+    pub fn balances(&self) -> Result<json::GetBalancesResult> {
+        self.remote.balances()
     }
 
-    pub fn rescan_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
-        self.remote().rescan(rpc_url, auth)
+    pub fn rescan_watch_only(&self) -> Result<()> {
+        self.remote.rescan()
     }
 
-    pub fn setup_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
+    pub fn setup_watch_only(&self) -> Result<()> {
         let external = self.local.public_descriptor(KeychainKind::External);
         let internal = self.local.public_descriptor(KeychainKind::Internal);
-        self.remote().setup(rpc_url, auth, external, internal)
+        self.remote.setup(external, internal)
     }
 
     /// Send `amount` to `target_address` using funds from this wallet.
@@ -93,16 +102,14 @@ impl Brc721Wallet {
     /// Returns Ok(()) if broadcast succeeded, otherwise error.
     pub fn send_amount(
         &self,
-        rpc_url: &Url,
-        auth: Auth,
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
         passphrase: String,
     ) -> Result<()> {
-        let mut psbt: Psbt = self
-            .remote()
-            .create_psbt_for_payment(rpc_url, auth.clone(), target_address, amount, fee_rate)?;
+        let mut psbt: Psbt =
+            self.remote
+                .create_psbt_for_payment(target_address, amount, fee_rate)?;
 
         let finalized = self
             .signer
@@ -118,7 +125,7 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        let _txid = self.remote().broadcast(rpc_url, auth, &tx)?;
+        self.remote.broadcast(&tx)?;
 
         Ok(())
     }
@@ -127,25 +134,20 @@ impl Brc721Wallet {
     /// Uses fundrawtransaction + converttopsbt to support non-address scripts (e.g. OP_RETURN).
     fn create_psbt_from_txouts(
         &self,
-        rpc_url: &Url,
-        auth: Auth,
         outputs: Vec<bitcoin::TxOut>,
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
-        self.remote()
-            .create_psbt_from_txouts(rpc_url, auth, outputs, fee_rate)
+        self.remote.create_psbt_from_txouts(outputs, fee_rate)
     }
 
     pub fn send_tx(
         &self,
-        rpc_url: &Url,
-        auth: Auth,
         outputs: Vec<bitcoin::TxOut>,
         fee_rate: Option<f64>,
         passphrase: String,
     ) -> Result<bitcoin::Txid> {
         let mut psbt = self
-            .create_psbt_from_txouts(rpc_url, auth.clone(), outputs, fee_rate)
+            .create_psbt_from_txouts(outputs, fee_rate)
             .context("create psbt from outputs")?;
 
         let finalized = self
@@ -162,7 +164,7 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        let txid = self.remote().broadcast(rpc_url, auth, &tx)?;
+        let txid = self.remote.broadcast(&tx)?;
         Ok(txid)
     }
 }
@@ -180,11 +182,16 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let data_dir = TempDir::new().expect("temp dir");
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let wallet = Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet");
         let wallet_id = wallet.id();
@@ -207,11 +214,16 @@ mod tests {
         let network = Network::Regtest;
 
         // Create wallet and reveal a couple of payment addresses
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let mut wallet = Brc721Wallet::create(
             &data_dir,
             network,
             Some(mnemonic.clone()),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("create wallet");
         let addr1 = wallet
@@ -220,8 +232,13 @@ mod tests {
             .address;
 
         // Reload the wallet from storage
-        let mut loaded_wallet =
-            Brc721Wallet::load(&data_dir, network).expect("load should not fail");
+        let mut loaded_wallet = Brc721Wallet::load(
+            &data_dir,
+            network,
+            &node_url,
+            bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone()),
+        )
+        .expect("load should not fail");
 
         let addr2 = loaded_wallet
             .reveal_next_payment_address()
@@ -239,11 +256,16 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let network = Network::Regtest;
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let mut wallet = Brc721Wallet::create(
             &data_dir,
             network,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet");
         let address_info = wallet.reveal_next_payment_address().expect("address");
@@ -262,11 +284,16 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
         let network = Network::Regtest;
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let mut wallet = Brc721Wallet::create(
             &data_dir,
             network,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet");
         let address_info_1 = wallet.reveal_next_payment_address().unwrap();
@@ -282,7 +309,10 @@ mod tests {
     fn test_load_returns_error_for_unexistent_wallet() {
         let data_dir = TempDir::new().expect("temp dir");
         // No wallet created
-        let result = Brc721Wallet::load(&data_dir, Network::Regtest);
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
+        let result = Brc721Wallet::load(&data_dir, Network::Regtest, &node_url, auth);
         assert!(
             result.is_err(),
             "Expected an error when loading a wallet that doesn't exist"
@@ -299,11 +329,16 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
 
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let wallet_regtest = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
             "passphrase".to_string(),
+            &node_url,
+            auth.clone(),
         )
         .expect("regtest");
         let wallet_bitcoin = Brc721Wallet::create(
@@ -311,6 +346,8 @@ mod tests {
             Network::Bitcoin,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("bitcoin");
         let id_regtest = wallet_regtest.id();
@@ -329,11 +366,16 @@ mod tests {
         ).expect("mnemonic");
 
         let data_dir0 = TempDir::new().expect("temp dir");
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let wallet0 = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
             "passphrase".to_string(),
+            &node_url,
+            auth.clone(),
         )
         .expect("wallet0");
 
@@ -343,6 +385,8 @@ mod tests {
             Network::Regtest,
             Some(mnemonic.clone()),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet1");
 
@@ -361,11 +405,16 @@ mod tests {
         ).expect("mnemonic");
 
         let data_dir0 = TempDir::new().expect("temp dir");
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let wallet0 = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
             "passphrase1".to_string(),
+            &node_url,
+            auth.clone(),
         )
         .expect("wallet0");
 
@@ -375,6 +424,8 @@ mod tests {
             Network::Regtest,
             Some(mnemonic.clone()),
             "passphrase1".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet1");
 
@@ -394,14 +445,19 @@ mod tests {
         ).expect("mnemonic");
 
         let network = Network::Regtest;
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         Brc721Wallet::create(
             &data_dir,
             network,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth.clone(),
         )
         .expect("wallet");
-        let wallet = Brc721Wallet::load(&data_dir, network).expect("wallet");
+        let wallet = Brc721Wallet::load(&data_dir, network, &node_url, auth).expect("wallet");
         assert!(!wallet.id().is_empty());
     }
 
@@ -413,11 +469,16 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
 
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet.sqlite");
@@ -432,11 +493,16 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         ).expect("mnemonic");
 
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         Brc721Wallet::create(
             &data_dir,
             Network::Bitcoin,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth,
         )
         .expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet.sqlite");
@@ -452,11 +518,16 @@ mod tests {
         ).expect("mnemonic");
 
         // First creation should succeed
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
             Some(mnemonic.clone()),
             "passphrase".to_string(),
+            &node_url,
+            auth.clone(),
         )
         .expect("first wallet");
         // Second creation should error because the db is already there
@@ -465,6 +536,8 @@ mod tests {
             Network::Regtest,
             Some(mnemonic),
             "passphrase".to_string(),
+            &node_url,
+            auth.clone(),
         );
         assert!(
             result.is_err(),
