@@ -298,7 +298,7 @@ impl Brc721Wallet {
 
     /// Create a funded PSBT from a list of arbitrary TxOuts (script_pubkey + value).
     /// Uses fundrawtransaction + converttopsbt to support non-address scripts (e.g. OP_RETURN).
-    pub fn create_psbt_from_txouts(
+    fn create_psbt_from_txouts(
         &self,
         rpc_url: &Url,
         auth: Auth,
@@ -386,7 +386,6 @@ impl Brc721Wallet {
             .context("broadcast tx")?;
         Ok(txid)
     }
-
 }
 
 #[cfg(test)]
