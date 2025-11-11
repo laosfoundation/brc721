@@ -1,11 +1,10 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
-use crate::types::{build_register_collection_tx, RegisterCollectionMessage};
+use crate::types::{brc721_output, RegisterCollectionMessage};
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
-use bitcoincore_rpc::{Client, RpcApi};
 use ethereum_types::H160;
 
 impl CommandRunner for cli::TxCmd {
@@ -17,22 +16,20 @@ impl CommandRunner for cli::TxCmd {
                 fee_rate,
                 passphrase,
             } => {
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
-
                 // Parse 20-byte hex EVM address
                 let laos = H160::from_slice(&hex::decode(laos_hex)?);
                 let msg = RegisterCollectionMessage {
                     collection_address: laos,
                     rebaseable: *rebaseable,
                 };
-                let brc_tx = build_register_collection_tx(&msg);
-                let outputs = brc_tx.output;
+                let output = brc721_output(&msg.encode());
 
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
                 let txid = wallet
                     .send_tx(
                         &ctx.rpc_url,
                         ctx.auth.clone(),
-                        outputs,
+                        vec![output],
                         *fee_rate,
                         passphrase.clone(),
                     )
