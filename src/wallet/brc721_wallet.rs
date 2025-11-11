@@ -4,20 +4,16 @@ use url::Url;
 
 use anyhow::{Context, Ok, Result};
 use bdk_wallet::{
-    bip39::Mnemonic, miniscript::psbt::PsbtExt, template::Bip86, AddressInfo, KeychainKind,
-    LoadParams, PersistedWallet, Wallet,
+    bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind,
 };
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::{json, Client, RpcApi};
 use rand::{rngs::OsRng, RngCore};
-use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 
-use crate::wallet::{paths, signer::Signer};
+use crate::wallet::{local_wallet::LocalWallet, signer::Signer};
 
 pub struct Brc721Wallet {
-    wallet: PersistedWallet<Connection>,
-    conn: Connection,
+    local: LocalWallet,
     signer: Signer,
 }
 
@@ -38,60 +34,30 @@ impl Brc721Wallet {
 
         let seed = mnemonic.to_seed(String::default());
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
-        let external = Bip86(master_xprv, KeychainKind::External);
-        let internal = Bip86(master_xprv, KeychainKind::Internal);
 
-        let db_path = paths::wallet_db_path(&data_dir);
-        let mut conn = Connection::open(&db_path)
-            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
-
-        let wallet = Wallet::create(external, internal)
-            .network(network)
-            .create_wallet(&mut conn)?;
+        let local = LocalWallet::create(&data_dir, network, &master_xprv)?;
 
         let pass = age::secrecy::SecretString::from(passphrase);
         let signer = Signer::new().with_data_dir(&data_dir).with_network(network);
         signer.store_master_key(&master_xprv, &pass)?;
 
-        Ok(Self {
-            wallet,
-            conn,
-            signer,
-        })
+        Ok(Self { local, signer })
     }
 
     pub fn load<P: AsRef<Path>>(data_dir: P, network: Network) -> Result<Brc721Wallet> {
-        let db_path = paths::wallet_db_path(&data_dir);
-        let mut conn = Connection::open(&db_path)
-            .with_context(|| format!("opening wallet db at {}", db_path.display()))?;
-        let wallet = LoadParams::new()
-            .check_network(network)
-            .load_wallet(&mut conn)
-            .context("loading wallet")?;
-
-        wallet
-            .map(|wallet| Self {
-                wallet,
-                conn,
-                signer: Signer::new().with_data_dir(&data_dir).with_network(network),
-            })
-            .context("wallet not found")
+        let local = LocalWallet::load(&data_dir, network)?;
+        Ok(Self {
+            local,
+            signer: Signer::new().with_data_dir(&data_dir).with_network(network),
+        })
     }
 
     pub fn id(&self) -> String {
-        let external = self.wallet.public_descriptor(KeychainKind::External);
-        let internal = self.wallet.public_descriptor(KeychainKind::Internal);
-        let combined = format!("{external}{internal}");
-        let hash = Sha256::digest(combined.as_bytes());
-        hex::encode(hash)
+        self.local.id()
     }
 
     pub fn reveal_next_payment_address(&mut self) -> Result<AddressInfo> {
-        let address = self.wallet.reveal_next_address(KeychainKind::External);
-        self.wallet
-            .persist(&mut self.conn)
-            .context("persisting the wallet")?;
-        Ok(address)
+        self.local.reveal_next_payment_address()
     }
 
     pub fn balances(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
@@ -168,14 +134,14 @@ impl Brc721Wallet {
         // Import the wallet's external and internal public descriptors into the watch-only wallet.
         let imports = serde_json::json!([
             {
-                "desc": self.wallet.public_descriptor(KeychainKind::External),
+                "desc": self.local.public_descriptor(KeychainKind::External),
                 "timestamp": "now",
                 "active": true,
                 "range": [0,999],
                 "internal": false
             },
             {
-                "desc": self.wallet.public_descriptor(KeychainKind::Internal),
+                "desc": self.local.public_descriptor(KeychainKind::Internal),
                 "timestamp": "now",
                 "active": true,
                 "range": [0,999],
