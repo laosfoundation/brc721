@@ -23,11 +23,11 @@ impl RemoteWallet {
 
     fn watch_client(&self, rpc_url: &Url, auth: Auth) -> Result<Client> {
         let url = self.watch_url(rpc_url);
-        Ok(Client::new(&url, auth).context("creat Core wallet client")?)
+        Client::new(&url, auth).context("creat Core wallet client")
     }
 
     fn root_client(rpc_url: &Url, auth: Auth) -> Result<Client> {
-        Ok(Client::new(rpc_url.as_ref(), auth).context("create root client")?)
+        Client::new(rpc_url.as_ref(), auth).context("create root client")
     }
 
     pub fn balances(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
