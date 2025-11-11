@@ -19,7 +19,7 @@ use crate::wallet::{paths, signer::Signer};
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
     conn: Connection,
-    pub(crate) signer: Signer,
+    signer: Signer,
 }
 
 impl Brc721Wallet {
