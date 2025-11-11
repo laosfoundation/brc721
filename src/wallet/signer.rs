@@ -2,6 +2,7 @@ use age::secrecy::SecretString;
 use anyhow::Result;
 use bdk_wallet::{template::Bip86, KeychainKind, Wallet};
 use bitcoin::{Network, Psbt};
+use bitcoin::bip32::Xpriv;
 
 use crate::wallet::master_key_store::MasterKeyStore;
 
@@ -28,6 +29,12 @@ impl Signer {
     pub fn with_network(mut self, network: Network) -> Self {
         self.network = network;
         self
+    }
+
+    /// Persist the provided master private key using MasterKeyStore with encryption.
+    pub fn store_master_key(&self, xpriv: &Xpriv, passphrase: &SecretString) -> Result<()> {
+        let store = MasterKeyStore::new(&self.data_dir);
+        store.store(xpriv, passphrase)
     }
 
     /// Sign the provided PSBT using the wallet's master private key stored in MasterKeyStore.

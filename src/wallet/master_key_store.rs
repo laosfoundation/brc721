@@ -16,12 +16,6 @@ pub struct MasterKeyStore {
 }
 
 impl MasterKeyStore {
-    pub fn base_dir(&self) -> &std::path::Path {
-        self.path.parent().unwrap_or(std::path::Path::new("."))
-    }
-}
-
-impl MasterKeyStore {
     /// Create a new store with filename depending on network
     pub fn new<P: AsRef<Path>>(data_dir: P) -> Self {
         let mut path = PathBuf::from(data_dir.as_ref());

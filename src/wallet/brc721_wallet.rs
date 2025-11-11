@@ -1,4 +1,3 @@
-use age::secrecy::SecretString;
 use bitcoincore_rpc::Auth;
 use std::path::Path;
 use url::Url;
@@ -15,12 +14,12 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use super::passphrase::{prompt_passphrase, prompt_passphrase_once};
-use crate::wallet::{master_key_store::MasterKeyStore, paths};
+use crate::wallet::{paths, signer::Signer};
 
 pub struct Brc721Wallet {
     wallet: PersistedWallet<Connection>,
     conn: Connection,
-    master_key_store: MasterKeyStore,
+    signer: Signer,
 }
 
 impl Brc721Wallet {
@@ -58,16 +57,14 @@ impl Brc721Wallet {
             .create_wallet(&mut conn)?;
 
         // Store the master private key encrypted with age using the provided passphrase (or empty)
-        let store = MasterKeyStore::new(&data_dir);
-        store.store(
-            &master_xprv,
-            &age::secrecy::SecretString::from(passphrase_str),
-        )?;
+        let pass = age::secrecy::SecretString::from(passphrase_str);
+        let signer = Signer::new().with_data_dir(&data_dir).with_network(network);
+        signer.store_master_key(&master_xprv, &pass)?;
 
         Ok(Self {
             wallet,
             conn,
-            master_key_store: store,
+            signer,
         })
     }
 
@@ -84,7 +81,7 @@ impl Brc721Wallet {
             .map(|wallet| Self {
                 wallet,
                 conn,
-                master_key_store: MasterKeyStore::new(data_dir),
+                signer: Signer::new().with_data_dir(&data_dir).with_network(network),
             })
             .context("wallet not found")
     }
@@ -356,17 +353,7 @@ impl Brc721Wallet {
         let passphrase_str = passphrase.unwrap();
         let pass = age::secrecy::SecretString::from(passphrase_str);
 
-        // Use the new Signer builder with the data_dir captured by MasterKeyStore
-        let signer = crate::wallet::signer::Signer::new()
-            .with_data_dir(self.master_key_store_base_dir())
-            .with_network(self.wallet.network());
-
-        signer.sign(psbt, &pass)
-    }
-
-    fn master_key_store_base_dir(&self) -> &std::path::Path {
-        // MasterKeyStore stores file at data_dir/master-key.age; derive base_dir via parent()
-        self.master_key_store.base_dir()
+        self.signer.sign(psbt, &pass)
     }
 }
 
