@@ -25,7 +25,7 @@ impl RemoteWallet {
 
     fn watch_client(&self) -> Result<Client> {
         let url = self.watch_url();
-        Client::new(&url, self.auth.clone()).context("creat Core wallet client")
+        Client::new(&url, self.auth.clone()).context("create Core wallet client")
     }
 
     fn root_client(&self) -> Result<Client> {
