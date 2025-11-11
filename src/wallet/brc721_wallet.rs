@@ -130,16 +130,6 @@ impl Brc721Wallet {
         Ok(())
     }
 
-    /// Create a funded PSBT from a list of arbitrary TxOuts (script_pubkey + value).
-    /// Uses fundrawtransaction + converttopsbt to support non-address scripts (e.g. OP_RETURN).
-    fn create_psbt_from_txouts(
-        &self,
-        outputs: Vec<bitcoin::TxOut>,
-        fee_rate: Option<f64>,
-    ) -> Result<Psbt> {
-        self.remote.create_psbt_from_txouts(outputs, fee_rate)
-    }
-
     pub fn send_tx(
         &self,
         outputs: Vec<bitcoin::TxOut>,
@@ -147,6 +137,7 @@ impl Brc721Wallet {
         passphrase: String,
     ) -> Result<bitcoin::Txid> {
         let mut psbt = self
+            .remote
             .create_psbt_from_txouts(outputs, fee_rate)
             .context("create psbt from outputs")?;
 
