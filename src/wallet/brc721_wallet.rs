@@ -7,10 +7,10 @@ use bdk_wallet::{
     bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind,
 };
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
-use bitcoincore_rpc::{json, Client, RpcApi};
+use bitcoincore_rpc::json;
 use rand::{rngs::OsRng, RngCore};
 
-use crate::wallet::{local_wallet::LocalWallet, signer::Signer};
+use crate::wallet::{local_wallet::LocalWallet, remote_wallet::RemoteWallet, signer::Signer};
 
 pub struct Brc721Wallet {
     local: LocalWallet,
@@ -56,112 +56,26 @@ impl Brc721Wallet {
         self.local.id()
     }
 
+    fn remote(&self) -> RemoteWallet {
+        RemoteWallet::new(self.id())
+    }
+
     pub fn reveal_next_payment_address(&mut self) -> Result<AddressInfo> {
         self.local.reveal_next_payment_address()
     }
 
     pub fn balances(&self, rpc_url: &Url, auth: Auth) -> Result<json::GetBalancesResult> {
-        let watch_name = self.id();
-        let watch_url = format!(
-            "{}/wallet/{}",
-            rpc_url.to_string().trim_end_matches('/'),
-            watch_name
-        );
-        let watch_client = Client::new(&watch_url, auth).expect("watch client");
-        watch_client.get_balances().context("get balance")
+        self.remote().balances(rpc_url, auth)
     }
 
     pub fn rescan_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
-        let watch_name = self.id();
-        let watch_url = format!(
-            "{}/wallet/{}",
-            rpc_url.to_string().trim_end_matches('/'),
-            watch_name
-        );
-        let watch_client = Client::new(&watch_url, auth).expect("watch client");
-
-        let mut params = Vec::new();
-        let start_block = 0;
-        params.push(serde_json::json!(start_block));
-
-        let _ans: serde_json::Value = watch_client
-            .call::<serde_json::Value>("rescanblockchain", &params)
-            .context("rescanblockchain")?;
-
-        Ok(())
+        self.remote().rescan(rpc_url, auth)
     }
 
     pub fn setup_watch_only(&self, rpc_url: &Url, auth: Auth) -> Result<()> {
-        let watch_name = self.id();
-        let root_client = Client::new(rpc_url.as_ref(), auth.clone()).unwrap();
-
-        // Check if the watch-only wallet already exists
-        let existing_wallets: Vec<String> = root_client.list_wallets().context("list wallets")?;
-        if existing_wallets.contains(&watch_name) {
-            return Ok(());
-        }
-
-        let ans: serde_json::Value = root_client
-            .call::<serde_json::Value>(
-                "createwallet",
-                &[
-                    serde_json::json!(watch_name), // Wallet name
-                    serde_json::json!(true),       // Disable private keys
-                    serde_json::json!(true),       // Blank wallet
-                    serde_json::json!(""),         // Passphrase
-                    serde_json::json!(false),      // avoid_reuse
-                    serde_json::json!(true),       // Descriptors enabled
-                ],
-            )
-            .context("watch wallet created")?;
-        if ans["name"].as_str().unwrap() != watch_name {
-            return Err(anyhow::anyhow!("Unexpected wallet name: {:?}", ans["name"]));
-        }
-        if !ans["warning"].is_null() {
-            return Err(anyhow::anyhow!(
-                "watch_only wallet created with warning: {}",
-                ans["warning"]
-            ));
-        }
-
-        let watch_url = format!(
-            "{}/wallet/{}",
-            rpc_url.to_string().trim_end_matches('/'),
-            watch_name
-        );
-        let watch_client = Client::new(&watch_url, auth).expect("watch client");
-
-        // Import the wallet's external and internal public descriptors into the watch-only wallet.
-        let imports = serde_json::json!([
-            {
-                "desc": self.local.public_descriptor(KeychainKind::External),
-                "timestamp": "now",
-                "active": true,
-                "range": [0,999],
-                "internal": false
-            },
-            {
-                "desc": self.local.public_descriptor(KeychainKind::Internal),
-                "timestamp": "now",
-                "active": true,
-                "range": [0,999],
-                "internal": true
-            }
-        ]);
-        let ans: serde_json::Value = watch_client
-            .call::<serde_json::Value>("importdescriptors", &[imports])
-            .context("import descriptor")?;
-
-        let arr = ans.as_array().expect("array");
-
-        // Require all imports to be successful. If not, return error with details.
-        if !arr.iter().all(|e| e["success"].as_bool() == Some(true)) {
-            return Err(anyhow::anyhow!(
-                "Failed to import descriptors: {}",
-                serde_json::to_string_pretty(&ans).unwrap()
-            ));
-        }
-        Ok(())
+        let external = self.local.public_descriptor(KeychainKind::External);
+        let internal = self.local.public_descriptor(KeychainKind::Internal);
+        self.remote().setup(rpc_url, auth, external, internal)
     }
 
     /// Send `amount` to `target_address` using funds from this wallet.
@@ -186,65 +100,25 @@ impl Brc721Wallet {
         fee_rate: Option<f64>,
         passphrase: String,
     ) -> Result<()> {
-        // Compute our wallet's unique Core wallet name (from descriptor hash).
-        let watch_name = self.id();
-        // Compose the endpoint URL for the watch-only wallet.
-        let watch_url = format!(
-            "{}/wallet/{}",
-            rpc_url.to_string().trim_end_matches('/'),
-            watch_name
-        );
-        // Connect to Core's RPC for the specific wallet.
-        let client = Client::new(&watch_url, auth).context("creat Core wallet client")?;
+        let mut psbt: Psbt = self
+            .remote()
+            .create_psbt_for_payment(rpc_url, auth.clone(), target_address, amount, fee_rate)?;
 
-        // Build the transaction outputs: one payment to the recipient.
-        let outputs = serde_json::json!([{ target_address.to_string(): amount.to_btc() }]);
-
-        // Prepare options for Core's walletcreatefundedpsbt RPC.
-        let mut options = serde_json::json!({});
-        // If fee_rate is specified, apply (units: sat/vB)
-        if let Some(fr) = fee_rate {
-            options["fee_rate"] = serde_json::json!(fr);
-        }
-        // Request Core to create a PSBT with auto-selected inputs and specified outputs/options.
-        let funded: serde_json::Value = client
-            .call(
-                "walletcreatefundedpsbt",
-                &[
-                    serde_json::json!([]),   // Inputs: empty array means wallet will select inputs
-                    outputs.clone(),         // Outputs: the transaction outputs
-                    serde_json::json!(0),    // Locktime: 0 means default, no locktime
-                    options,                 // Options: additional coin selection options
-                    serde_json::json!(true), // bip32derivs: include BIP32 derivation paths
-                ],
-            )
-            .context("walletcreatefundedpsbt")?;
-
-        // Get the base64-encoded PSBT string.
-        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
-        // Parse base64 PSBT to a rust-bitcoin PSBT struct for signing.
-        let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
-
-        // Sign any wallet-controlled inputs using BDK's wallet (private keys).
         let finalized = self
             .signer
             .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase))
             .context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
-        // If BDK couldn't finalize, try to finalize using rust-bitcoin's finalize.
         if !finalized {
             psbt.finalize_mut(&secp)
                 .map_err(|errs| anyhow::anyhow!("finalize_mut: {:?}", errs))?;
         }
-
-        // Once finalized, extract the transaction.
         let tx = psbt
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        // Broadcast the finalized transaction to the Bitcoin network via Core.
-        let _txid = client.send_raw_transaction(&tx).context("broadcast tx")?;
+        let _txid = self.remote().broadcast(rpc_url, auth, &tx)?;
 
         Ok(())
     }
@@ -258,48 +132,8 @@ impl Brc721Wallet {
         outputs: Vec<bitcoin::TxOut>,
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
-        let watch_name = self.id();
-        let watch_url = format!(
-            "{}/wallet/{}",
-            rpc_url.to_string().trim_end_matches('/'),
-            watch_name
-        );
-        let client = Client::new(&watch_url, auth).context("creat Core wallet client")?;
-
-        // Build raw tx with provided outputs and no inputs; Core will fund it
-        let tx = bitcoin::Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::null(),
-                script_sig: bitcoin::ScriptBuf::new(),
-                sequence: bitcoin::Sequence::MAX,
-                witness: bitcoin::Witness::new(),
-            }],
-            output: outputs,
-        };
-        let raw_hex = hex::encode(bitcoin::consensus::serialize(&tx));
-
-        let mut options = serde_json::json!({});
-        if let Some(fr) = fee_rate {
-            options["fee_rate"] = serde_json::json!(fr);
-        }
-        // Use watch wallet to fund and convert to PSBT in one step
-        let funded: serde_json::Value = client
-            .call(
-                "walletcreatefundedpsbt",
-                &[
-                    serde_json::json!([]),
-                    serde_json::json!([{"data": raw_hex}]), // data-raw tx as output via descriptor format
-                    serde_json::json!(0),
-                    options,
-                    serde_json::json!(true),
-                ],
-            )
-            .context("walletcreatefundedpsbt from raw tx data")?;
-        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
-        let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
-        Ok(psbt)
+        self.remote()
+            .create_psbt_from_txouts(rpc_url, auth, outputs, fee_rate)
     }
 
     pub fn send_tx(
@@ -328,10 +162,7 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        let txid = Client::new(rpc_url.as_ref(), auth)
-            .context("create root client")?
-            .send_raw_transaction(&tx)
-            .context("broadcast tx")?;
+        let txid = self.remote().broadcast(rpc_url, auth, &tx)?;
         Ok(txid)
     }
 }
