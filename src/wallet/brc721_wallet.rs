@@ -354,19 +354,19 @@ impl Brc721Wallet {
             None => prompt_passphrase()?,
         };
         let passphrase_str = passphrase.unwrap();
+        let pass = age::secrecy::SecretString::from(passphrase_str);
 
-        let master_xprv = self
-            .master_key_store
-            .load(&SecretString::from(passphrase_str))?;
-        let external = Bip86(master_xprv, KeychainKind::External);
-        let internal = Bip86(master_xprv, KeychainKind::Internal);
+        // Use the new Signer builder with the data_dir captured by MasterKeyStore
+        let signer = crate::wallet::signer::Signer::new()
+            .with_data_dir(self.master_key_store_base_dir())
+            .with_network(self.wallet.network());
 
-        let wallet = Wallet::create(external, internal)
-            .network(self.wallet.network())
-            .create_wallet_no_persist()?;
-        let finalized = wallet.sign(psbt, Default::default()).expect("sign");
+        signer.sign(psbt, &pass)
+    }
 
-        Ok(finalized)
+    fn master_key_store_base_dir(&self) -> &std::path::Path {
+        // MasterKeyStore stores file at data_dir/master-key.age; derive base_dir via parent()
+        self.master_key_store.base_dir()
     }
 }
 
