@@ -19,7 +19,7 @@ fn test_send_amount_between_wallets_via_psbt() {
         data_dir0.path(),
         Network::Regtest,
         None,
-        Some("passphrase".to_string()),
+        "passphrase".to_string(),
     )
     .expect("wallet");
     wallet0
@@ -44,7 +44,7 @@ fn test_send_amount_between_wallets_via_psbt() {
     // Create second temporary wallet directory and initialize Brc721Wallet
     let data_dir1 = TempDir::new().expect("temp dir");
     let mut wallet1 =
-        Brc721Wallet::create(data_dir1.path(), Network::Regtest, None, passphrase.clone())
+        Brc721Wallet::create(data_dir1.path(), Network::Regtest, None, passphrase.clone().unwrap_or_default())
             .expect("wallet");
     wallet1
         .setup_watch_only(&node_url, auth.clone())
@@ -64,7 +64,7 @@ fn test_send_amount_between_wallets_via_psbt() {
             address1,
             amount,
             Some(fee),
-            passphrase,
+            passphrase.unwrap_or_default(),
         )
         .expect("amount sent");
 

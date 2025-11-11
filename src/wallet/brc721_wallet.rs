@@ -13,7 +13,6 @@ use rand::{rngs::OsRng, RngCore};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
-use super::passphrase::{prompt_passphrase, prompt_passphrase_once};
 use crate::wallet::{paths, signer::Signer};
 
 pub struct Brc721Wallet {
@@ -27,13 +26,8 @@ impl Brc721Wallet {
         data_dir: P,
         network: Network,
         mnemonic: Option<Mnemonic>,
-        passphrase: Option<String>,
+        passphrase: String,
     ) -> Result<Brc721Wallet> {
-        let passphrase = match passphrase.clone() {
-            Some(p) => Some(p),
-            None => prompt_passphrase()?,
-        };
-
         let mnemonic = mnemonic.unwrap_or_else(|| {
             let mut entropy = [0u8; 32];
             OsRng.fill_bytes(&mut entropy);
@@ -42,7 +36,6 @@ impl Brc721Wallet {
             m
         });
 
-        let passphrase_str = passphrase.unwrap();
         let seed = mnemonic.to_seed(String::default());
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
         let external = Bip86(master_xprv, KeychainKind::External);
@@ -56,8 +49,7 @@ impl Brc721Wallet {
             .network(network)
             .create_wallet(&mut conn)?;
 
-        // Store the master private key encrypted with age using the provided passphrase (or empty)
-        let pass = age::secrecy::SecretString::from(passphrase_str);
+        let pass = age::secrecy::SecretString::from(passphrase);
         let signer = Signer::new().with_data_dir(&data_dir).with_network(network);
         signer.store_master_key(&master_xprv, &pass)?;
 
@@ -226,7 +218,7 @@ impl Brc721Wallet {
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
-        passphrase: Option<String>,
+        passphrase: String,
     ) -> Result<()> {
         // Compute our wallet's unique Core wallet name (from descriptor hash).
         let watch_name = self.id();
@@ -268,14 +260,9 @@ impl Brc721Wallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         // Sign any wallet-controlled inputs using BDK's wallet (private keys).
-        let passphrase = match passphrase.clone() {
-            Some(p) => Some(p),
-            None => prompt_passphrase_once()?,
-        };
-        let passphrase_str = passphrase.unwrap();
         let finalized = self
             .signer
-            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase_str))
+            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase))
             .context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
@@ -355,20 +342,15 @@ impl Brc721Wallet {
         auth: Auth,
         outputs: Vec<bitcoin::TxOut>,
         fee_rate: Option<f64>,
-        passphrase: Option<String>,
+        passphrase: String,
     ) -> Result<bitcoin::Txid> {
         let mut psbt = self
             .create_psbt_from_txouts(rpc_url, auth.clone(), outputs, fee_rate)
             .context("create psbt from outputs")?;
 
-        let passphrase = match passphrase.clone() {
-            Some(p) => Some(p),
-            None => prompt_passphrase_once()?,
-        };
-        let passphrase_str = passphrase.unwrap();
         let finalized = self
             .signer
-            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase_str))
+            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase))
             .context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
@@ -405,7 +387,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet");
         let wallet_id = wallet.id();
@@ -432,7 +414,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic.clone()),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("create wallet");
         let addr1 = wallet
@@ -464,7 +446,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet");
         let address_info = wallet.reveal_next_payment_address().expect("address");
@@ -487,7 +469,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet");
         let address_info_1 = wallet.reveal_next_payment_address().unwrap();
@@ -524,14 +506,14 @@ mod tests {
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("regtest");
         let wallet_bitcoin = Brc721Wallet::create(
             &data_dir1,
             Network::Bitcoin,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("bitcoin");
         let id_regtest = wallet_regtest.id();
@@ -554,7 +536,7 @@ mod tests {
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet0");
 
@@ -563,7 +545,7 @@ mod tests {
             &data_dir1,
             Network::Regtest,
             Some(mnemonic.clone()),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet1");
 
@@ -586,7 +568,7 @@ mod tests {
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
-            Some("passphrase1".to_string()),
+            "passphrase1".to_string(),
         )
         .expect("wallet0");
 
@@ -595,7 +577,7 @@ mod tests {
             &data_dir1,
             Network::Regtest,
             Some(mnemonic.clone()),
-            Some("passphrase1".to_string()),
+            "passphrase1".to_string(),
         )
         .expect("wallet1");
 
@@ -619,7 +601,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet");
         let wallet = Brc721Wallet::load(&data_dir, network).expect("wallet");
@@ -638,7 +620,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet.sqlite");
@@ -657,7 +639,7 @@ mod tests {
             &data_dir,
             Network::Bitcoin,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("wallet");
         let expected_wallet_path = data_dir.path().join("wallet.sqlite");
@@ -677,7 +659,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic.clone()),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         )
         .expect("first wallet");
         // Second creation should error because the db is already there
@@ -685,7 +667,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
-            Some("passphrase".to_string()),
+            "passphrase".to_string(),
         );
         assert!(
             result.is_err(),

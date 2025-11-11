@@ -19,7 +19,7 @@ fn test_wallet_creation() {
         data_dir.path(),
         Network::Regtest,
         Some(mnemonic),
-        Some("passphrase".to_string()),
+        "passphrase".to_string(),
     )
     .expect("wallet");
 
@@ -56,7 +56,7 @@ fn test_setup_watch_only_idempotent() {
         data_dir.path(),
         Network::Regtest,
         Some(mnemonic),
-        Some("passphrase".to_string()),
+        "passphrase".to_string(),
     )
     .expect("wallet");
 

@@ -3,6 +3,7 @@ use std::str::FromStr;
 use super::CommandRunner;
 use crate::types::{brc721_output, RegisterCollectionMessage};
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
+use crate::wallet::passphrase::prompt_passphrase_once;
 use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
 use ethereum_types::H160;
@@ -25,13 +26,14 @@ impl CommandRunner for cli::TxCmd {
                 let output = brc721_output(&msg.encode());
 
                 let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
                 let txid = wallet
                     .send_tx(
                         &ctx.rpc_url,
                         ctx.auth.clone(),
                         vec![output],
                         *fee_rate,
-                        passphrase.clone(),
+                        passphrase,
                     )
                     .context("sending tx")?;
 
@@ -52,13 +54,14 @@ impl CommandRunner for cli::TxCmd {
                 let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
                 let amount = Amount::from_sat(*amount_sat);
                 let address = Address::from_str(to)?.require_network(ctx.network)?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
                 wallet.send_amount(
                     &ctx.rpc_url,
                     ctx.auth.clone(),
                     &address,
                     amount,
                     *fee_rate,
-                    passphrase.clone(),
+                    passphrase,
                 )?;
                 log::info!("✅ Sent {} sat to {}", amount_sat, to);
                 Ok(())

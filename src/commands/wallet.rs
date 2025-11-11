@@ -1,5 +1,6 @@
 use super::CommandRunner;
 use crate::wallet::brc721_wallet::Brc721Wallet;
+use crate::wallet::passphrase::prompt_passphrase;
 use crate::{cli, context};
 use anyhow::{Context, Result};
 use bdk_wallet::bip39::{Language, Mnemonic};
@@ -18,11 +19,12 @@ impl CommandRunner for cli::WalletCmd {
 
                 let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)
                     .or_else(|_| {
+                        let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase().expect("prompt").unwrap_or_default());
                         let w = Brc721Wallet::create(
                             &ctx.data_dir,
                             ctx.network,
                             mnemonic,
-                            passphrase.clone(),
+                            passphrase,
                         );
                         log::info!("🎉 New wallet created");
                         w
