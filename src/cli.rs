@@ -93,7 +93,7 @@ pub struct Cli {
         long = "api-listen",
         env = "BRC721_API_LISTEN",
         value_name = "ADDR",
-        default_value = "127.0.0.1:8080",
+        default_value = "127.0.0.1:8083",
         help = "REST API listen address (host:port)"
     )]
     pub api_listen: std::net::SocketAddr,
