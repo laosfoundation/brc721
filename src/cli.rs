@@ -89,13 +89,6 @@ pub struct Cli {
     )]
     pub log_file: Option<String>,
 
-    #[arg(
-        long,
-        value_name = "NETWORK",
-        help = "bitcoin|testnet|signet|regtest",
-        default_value = "bitcoin"
-    )]
-    pub network: String,
 
     #[command(subcommand)]
     pub cmd: Option<Command>,

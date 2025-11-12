@@ -3,7 +3,7 @@ use bitcoincore_rpc::Auth;
 use std::path::PathBuf;
 use url::Url;
 
-use crate::network::parse_network;
+use crate::wallet::remote_wallet::RemoteWallet;
 
 pub struct Context {
     pub network: Network,
@@ -19,20 +19,15 @@ pub struct Context {
 
 impl Context {
     pub fn from_cli(cli: &crate::cli::Cli) -> Self {
-        let network = parse_network(Some(cli.network.clone()));
         let auth = match (&cli.rpc_user, &cli.rpc_pass) {
             (Some(user), Some(pass)) => Auth::UserPass(user.clone(), pass.clone()),
             _ => Auth::None,
         };
         let rpc_url = Url::parse(&cli.rpc_url).expect("rpc url");
+        let network =
+            RemoteWallet::detect_network(&rpc_url, &auth).expect("detect network from node");
         let mut data_dir = PathBuf::from(&cli.data_dir);
-        let network_dir = match network {
-            Network::Bitcoin => "mainnet",
-            Network::Testnet => "testnet",
-            Network::Signet => "signet",
-            Network::Regtest => "regtest",
-            _ => "unknown",
-        };
+        let network_dir = network.to_string();
         data_dir.push(network_dir);
         Self {
             network,
