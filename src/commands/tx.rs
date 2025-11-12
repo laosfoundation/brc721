@@ -1,16 +1,44 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
+use crate::types::{brc721_output, RegisterCollectionMessage};
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
-use anyhow::Result;
+use crate::wallet::passphrase::prompt_passphrase_once;
+use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
 
 impl CommandRunner for cli::TxCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
         match self {
-            cli::TxCmd::RegisterCollection { .. } => {
-                // existing register collection will be implemented elsewhere
-                todo!("RegisterCollection not implemented yet")
+            cli::TxCmd::RegisterCollection {
+                collection_address,
+                rebaseable,
+                fee_rate,
+                passphrase,
+            } => {
+                let msg = RegisterCollectionMessage {
+                    collection_address: *collection_address,
+                    rebaseable: *rebaseable,
+                };
+                let output = brc721_output(&msg.encode());
+
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
+                let txid = wallet
+                    .send_tx(
+                        vec![output],
+                        *fee_rate,
+                        passphrase,
+                    )
+                    .context("sending tx")?;
+
+                log::info!(
+                    "✅ Registered collection {:#x}, rebaseable: {}, txid: {}",
+                    collection_address,
+                    rebaseable,
+                    txid
+                );
+                Ok(())
             }
             cli::TxCmd::SendAmount {
                 to,
@@ -18,16 +46,15 @@ impl CommandRunner for cli::TxCmd {
                 fee_rate,
                 passphrase,
             } => {
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network)?;
+                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
                 let amount = Amount::from_sat(*amount_sat);
                 let address = Address::from_str(to)?.require_network(ctx.network)?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
                 wallet.send_amount(
-                    &ctx.rpc_url,
-                    ctx.auth.clone(),
                     &address,
                     amount,
                     *fee_rate,
-                    passphrase.clone(),
+                    passphrase,
                 )?;
                 log::info!("✅ Sent {} sat to {}", amount_sat, to);
                 Ok(())
