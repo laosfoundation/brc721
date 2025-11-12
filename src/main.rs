@@ -14,6 +14,7 @@ mod storage;
 mod tracing;
 pub mod types;
 mod wallet;
+mod rest;
 
 fn main() -> Result<()> {
     let cli = cli::parse();
@@ -48,6 +49,19 @@ fn main() -> Result<()> {
     let parser = parser::Parser {};
 
     let core = core::Core::new(storage.clone(), scanner, parser);
+
+    // Start REST API concurrently
+    let api_addr = cli.api_listen;
+    std::thread::spawn({
+        let storage = storage.clone();
+        move || {
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            rt.block_on(async move {
+                let _ = rest::serve(api_addr, storage).await;
+            });
+        }
+    });
+
     core.run();
 }
 

@@ -90,6 +90,15 @@ pub struct Cli {
     pub log_file: Option<String>,
 
     #[arg(
+        long = "api-listen",
+        env = "BRC721_API_LISTEN",
+        value_name = "ADDR",
+        default_value = "127.0.0.1:8080",
+        help = "REST API listen address (host:port)"
+    )]
+    pub api_listen: std::net::SocketAddr,
+
+    #[arg(
         long,
         value_name = "NETWORK",
         help = "bitcoin|testnet|signet|regtest",
