@@ -9,14 +9,15 @@ mod context;
 mod core;
 mod network;
 mod parser;
+mod rest;
 mod scanner;
 mod storage;
 mod tracing;
 pub mod types;
 mod wallet;
-mod rest;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = cli::parse();
     let ctx = context::Context::from_cli(&cli);
 
@@ -48,21 +49,20 @@ fn main() -> Result<()> {
     let scanner = init_scanner(&ctx, starting_block);
     let parser = parser::Parser {};
 
-    let core = core::Core::new(storage.clone(), scanner, parser);
-
-    // Start REST API concurrently
     let api_addr = cli.api_listen;
-    std::thread::spawn({
-        let storage = storage.clone();
-        move || {
-            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-            rt.block_on(async move {
-                let _ = rest::serve(api_addr, storage).await;
-            });
+    let rest_storage = storage.clone();
+    tokio::spawn(async move {
+        if let Err(e) = rest::serve(api_addr, rest_storage).await {
+            log::error!("REST server error: {}", e);
         }
     });
 
-    core.run();
+    let core = core::Core::new(storage.clone(), scanner, parser);
+    tokio::task::spawn_blocking(move || {
+        core.run();
+    });
+
+    Ok(())
 }
 
 fn init_data_dir(ctx: &context::Context) {
