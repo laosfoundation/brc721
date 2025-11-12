@@ -59,11 +59,7 @@ async fn main() -> Result<()> {
     });
 
     let core = core::Core::new(storage.clone(), scanner, parser);
-    tokio::task::spawn_blocking(move || {
-        core.run();
-    });
-
-    Ok(())
+    core.run();
 }
 
 fn init_data_dir(ctx: &context::Context) {
