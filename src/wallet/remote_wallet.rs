@@ -15,6 +15,12 @@ impl RemoteWallet {
         Self { watch_name, rpc_url: rpc_url.clone(), auth }
     }
 
+    pub fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
+        let client = Client::new(rpc_url.as_ref(), auth.clone()).context("create root client")?;
+        let info = client.get_blockchain_info().context("get_blockchain_info")?;
+        Ok(info.chain)
+    }
+
     fn watch_url(&self) -> String {
         format!(
             "{}/wallet/{}",

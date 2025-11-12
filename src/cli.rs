@@ -98,14 +98,6 @@ pub struct Cli {
     )]
     pub api_listen: std::net::SocketAddr,
 
-    #[arg(
-        long,
-        value_name = "NETWORK",
-        help = "bitcoin|testnet|signet|regtest",
-        default_value = "bitcoin"
-    )]
-    pub network: String,
-
     #[command(subcommand)]
     pub cmd: Option<Command>,
 }
