@@ -7,7 +7,6 @@ mod cli;
 mod commands;
 mod context;
 mod core;
-mod network;
 mod parser;
 mod scanner;
 mod storage;
@@ -30,9 +29,10 @@ fn main() -> Result<()> {
 
     log::info!("🚀 Starting brc721");
     log::info!("🔗 RPC URL: {}", ctx.rpc_url);
+    log::info!("🌐 Network: {}", ctx.network);
     log::info!("🔐 Auth: user/pass");
-    log::info!("🧮 Confirmations: {}", ctx.confirmations);
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
+    log::info!("🧮 Confirmations: {}", ctx.confirmations);
     log::info!("🧮 Batch size: {}", ctx.batch_size);
     if let Some(path) = ctx.log_file.as_deref() {
         log::info!("📝 Log file: {}", path.to_string_lossy());

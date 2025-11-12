@@ -177,7 +177,7 @@ docker compose up -d
 
 Initialize wallet:
 ```bash
-DOTENV_PATH=.env.testing cargo run -- --network regtest wallet init
+DOTENV_PATH=.env.testing cargo run -- wallet init
 ```
 
 Example output:
@@ -197,7 +197,7 @@ docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev 
 
 Get one of the addresses in your derivation path (on every run, you will get a different address):
 ```bash
-ADDR=$(DOTENV_PATH=.env.testing cargo run -- --network regtest wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
+ADDR=$(DOTENV_PATH=.env.testing cargo run -- wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
 echo $ADDR
 ```
 

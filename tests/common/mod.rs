@@ -43,8 +43,6 @@ pub fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
         .arg("run")
         .arg("--quiet")
         .arg("--")
-        .arg("--network")
-        .arg("regtest")
         .arg("--data-dir")
         .arg(data_dir.path())
         .arg("--rpc-url")
