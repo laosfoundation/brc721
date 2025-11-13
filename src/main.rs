@@ -52,8 +52,9 @@ async fn main() -> Result<()> {
 
     let api_addr = cli.api_listen;
     let rest_storage = storage.clone();
+    let shutdown = tokio_util::sync::CancellationToken::new();
     tokio::spawn(async move {
-        if let Err(e) = rest::serve(api_addr, rest_storage).await {
+        if let Err(e) = rest::serve(api_addr, rest_storage, shutdown.clone()).await {
             log::error!("REST server error: {}", e);
         }
     });

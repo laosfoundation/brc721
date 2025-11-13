@@ -33,6 +33,7 @@ struct LastBlock {
 pub async fn serve(
     addr: SocketAddr,
     storage: Arc<dyn Storage + Send + Sync>,
+    shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
     let state = AppState {
         storage,
@@ -46,7 +47,13 @@ pub async fn serve(
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     log::info!("🌐 REST listening on http://{}", listener.local_addr()?);
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.cancelled().await;
+            log::info!("🛑 REST shutdown requested");
+        })
+        .await?;
+    log::info!("👋 REST server exited");
     Ok(())
 }
 
