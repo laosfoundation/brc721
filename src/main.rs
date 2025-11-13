@@ -42,18 +42,10 @@ async fn main() -> Result<()> {
     }
 
     let storage = init_storage(&ctx);
-    let starting_block = storage
-        .load_last()
-        .unwrap_or_default()
-        .map(|last| last.height + 1)
-        .unwrap_or(ctx.start);
-    let scanner = init_scanner(&ctx, starting_block);
-    let parser = parser::Parser {};
+    let shutdown = tokio_util::sync::CancellationToken::new();
 
     let api_addr = cli.api_listen;
     let rest_storage = storage.clone();
-    let shutdown = tokio_util::sync::CancellationToken::new();
-
     let mut rest_handle = tokio::spawn({
         let shutdown = shutdown.clone();
         async move {
@@ -63,6 +55,13 @@ async fn main() -> Result<()> {
         }
     });
 
+    let starting_block = storage
+        .load_last()
+        .unwrap_or_default()
+        .map(|last| last.height + 1)
+        .unwrap_or(ctx.start);
+    let scanner = init_scanner(&ctx, starting_block);
+    let parser = parser::Parser {};
     let core = core::Core::new(storage.clone(), scanner, parser);
     let shutdown_core = shutdown.clone();
     let mut core_handle = tokio::task::spawn_blocking(move || {
@@ -80,7 +79,6 @@ async fn main() -> Result<()> {
     }
     shutdown.cancel();
 
-    // Aspetta che finiscano davvero
     let _ = rest_handle.await;
     let _ = core_handle.await;
 
