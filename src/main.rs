@@ -21,6 +21,11 @@ async fn main() -> Result<()> {
     let ctx = context::Context::from_cli(&cli);
 
     tracing::init(ctx.log_file.as_deref().map(Path::new));
+    log::info!("🚀 Starting brc721");
+    log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
+    log::info!("🔐 Auth: user/pass");
+    log::info!("🌐 Network: {}", ctx.network);
+    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 
     init_data_dir(&ctx);
 
@@ -29,12 +34,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    log::info!("🚀 Starting brc721");
-    log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
-    log::info!("🌐 Network: {}", ctx.network);
     log::info!("🌐 REST API: http://{}", cli.api_listen);
-    log::info!("🔐 Auth: user/pass");
-    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
     log::info!("🧮 Confirmations: {}", ctx.confirmations);
     log::info!("🧮 Batch size: {}", ctx.batch_size);
     if let Some(path) = ctx.log_file.as_deref() {
