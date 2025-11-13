@@ -77,7 +77,7 @@ impl CommandRunner for cli::TxCmd {
                 let txid = wallet
                     .send_tx(vec![output], *fee_rate, passphrase)
                     .context("sending tx")?;
-                log::info!("✅ Sent raw OP_RETURN output, txid: {}", txid);
+                log::info!("✅ Sent raw output, txid: {}", txid);
                 Ok(())
             }
         }
