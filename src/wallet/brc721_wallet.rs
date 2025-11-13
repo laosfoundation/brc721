@@ -99,14 +99,14 @@ impl Brc721Wallet {
     /// - `amount`: Amount to send.
     /// - `fee_rate`: Optional sats/vB feerate.
     ///
-    /// Returns Ok(()) if broadcast succeeded, otherwise error.
-    pub fn send_amount(
+    /// Returns the finalized transaction (not broadcast).
+    pub fn build_payment_tx(
         &self,
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
         passphrase: String,
-    ) -> Result<()> {
+    ) -> Result<bitcoin::Transaction> {
         let mut psbt: Psbt =
             self.remote
                 .create_psbt_for_payment(target_address, amount, fee_rate)?;
@@ -125,17 +125,15 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        self.remote.broadcast(&tx)?;
-
-        Ok(())
+        Ok(tx)
     }
 
-    pub fn send_tx(
+    pub fn build_tx(
         &self,
         outputs: Vec<bitcoin::TxOut>,
         fee_rate: Option<f64>,
         passphrase: String,
-    ) -> Result<bitcoin::Txid> {
+    ) -> Result<bitcoin::Transaction> {
         let mut psbt = self
             .remote
             .create_psbt_from_txouts(outputs, fee_rate)
@@ -155,8 +153,11 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        let txid = self.remote.broadcast(&tx)?;
-        Ok(txid)
+        Ok(tx)
+    }
+
+    pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
+        self.remote.broadcast(tx)
     }
 }
 
@@ -164,6 +165,7 @@ impl Brc721Wallet {
 mod tests {
     use super::*;
     use bdk_wallet::bip39::Language;
+    use bitcoincore_rpc::RpcApi;
     use tempfile::TempDir;
 
     #[test]
@@ -534,5 +536,46 @@ mod tests {
             result.is_err(),
             "Expected an error when re-creating the wallet"
         );
+    }
+
+    #[test]
+    fn test_build_tx_creates_signed_tx_with_custom_output() {
+        let data_dir = TempDir::new().expect("temp dir");
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
+        let mut wallet = Brc721Wallet::create(
+            &data_dir,
+            Network::Regtest,
+            None,
+            "passphrase".to_string(),
+            &node_url,
+            auth.clone(),
+        )
+        .expect("wallet");
+        wallet.setup_watch_only().expect("setup watch only");
+        let address = wallet
+            .reveal_next_payment_address()
+            .expect("address")
+            .address;
+        let client = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
+        client.generate_to_address(101, &address).expect("mint");
+        let payload = b"unit-test";
+        let output = crate::types::brc721_output(payload);
+        assert_eq!(
+            output.script_pubkey.to_string(),
+            "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_9 756e69742d74657374"
+        );
+        let tx = wallet
+            .build_tx(vec![output], Some(1.5), "passphrase".to_string())
+            .expect("build tx");
+        assert!(!tx.input.is_empty(), "built tx must have inputs");
+        assert!(!tx.output.is_empty(), "built tx must have outputs");
+        assert_eq!(
+            tx.output[0].script_pubkey.to_string(),
+            "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_9 756e69742d74657374"
+        );
+        let txid = wallet.broadcast(&tx).expect("broadcast");
+        assert_ne!(txid.to_string(), String::new());
     }
 }

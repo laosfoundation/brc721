@@ -29,9 +29,10 @@ impl CommandRunner for cli::TxCmd {
                         .expect("prompt")
                         .unwrap_or_default()
                 });
-                let txid = wallet
-                    .send_tx(vec![output], *fee_rate, passphrase)
-                    .context("sending tx")?;
+                let tx = wallet
+                    .build_tx(vec![output], *fee_rate, passphrase)
+                    .context("build tx")?;
+                let txid = wallet.broadcast(&tx)?;
 
                 log::info!(
                     "✅ Registered collection {:#x}, rebaseable: {}, txid: {}",
@@ -56,8 +57,11 @@ impl CommandRunner for cli::TxCmd {
                         .expect("prompt")
                         .unwrap_or_default()
                 });
-                wallet.send_amount(&address, amount, *fee_rate, passphrase)?;
-                log::info!("✅ Sent {} sat to {}", amount_sat, to);
+                let tx = wallet
+                    .build_payment_tx(&address, amount, *fee_rate, passphrase)
+                    .context("build payment tx")?;
+                let txid = wallet.broadcast(&tx)?;
+                log::info!("✅ Sent {} sat to {} (txid: {})", amount_sat, to, txid);
                 Ok(())
             }
             cli::TxCmd::RawOutput {
@@ -74,9 +78,10 @@ impl CommandRunner for cli::TxCmd {
                         .expect("prompt")
                         .unwrap_or_default()
                 });
-                let txid = wallet
-                    .send_tx(vec![output], *fee_rate, passphrase)
-                    .context("sending tx")?;
+                let tx = wallet
+                    .build_tx(vec![output], *fee_rate, passphrase)
+                    .context("build tx")?;
+                let txid = wallet.broadcast(&tx)?;
                 log::info!("✅ Sent raw OP_RETURN output, txid: {}", txid);
                 Ok(())
             }
