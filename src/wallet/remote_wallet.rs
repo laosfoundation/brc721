@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use bitcoin::{Amount, Psbt};
 use bitcoin::{Address, Transaction, TxOut};
+use bitcoin::{Amount, Psbt};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
 use url::Url;
 
@@ -12,12 +12,18 @@ pub struct RemoteWallet {
 
 impl RemoteWallet {
     pub fn new(watch_name: String, rpc_url: &Url, auth: Auth) -> Self {
-        Self { watch_name, rpc_url: rpc_url.clone(), auth }
+        Self {
+            watch_name,
+            rpc_url: rpc_url.clone(),
+            auth,
+        }
     }
 
     pub fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
         let client = Client::new(rpc_url.as_ref(), auth.clone()).context("create root client")?;
-        let info = client.get_blockchain_info().context("get_blockchain_info")?;
+        let info = client
+            .get_blockchain_info()
+            .context("get_blockchain_info")?;
         Ok(info.chain)
     }
 
@@ -48,16 +54,13 @@ impl RemoteWallet {
         let mut params = Vec::new();
         let start_block = 0;
         params.push(serde_json::json!(start_block));
-        let _ans: serde_json::Value =
-            client.call::<serde_json::Value>("rescanblockchain", &params).context("rescanblockchain")?;
+        let _ans: serde_json::Value = client
+            .call::<serde_json::Value>("rescanblockchain", &params)
+            .context("rescanblockchain")?;
         Ok(())
     }
 
-    pub fn setup(
-        &self,
-        external_desc: String,
-        internal_desc: String,
-    ) -> Result<()> {
+    pub fn setup(&self, external_desc: String, internal_desc: String) -> Result<()> {
         let root = self.root_client()?;
         let existing_wallets: Vec<String> = root.list_wallets().context("list wallets")?;
         if existing_wallets.contains(&self.watch_name) {
@@ -70,7 +73,7 @@ impl RemoteWallet {
                     serde_json::json!(self.watch_name), // Wallet name
                     serde_json::json!(true),            // Disable private keys
                     serde_json::json!(true),            // Blank wallet
-                    serde_json::json!(""),             // Passphrase
+                    serde_json::json!(""),              // Passphrase
                     serde_json::json!(false),           // avoid_reuse
                     serde_json::json!(true),            // Descriptors enabled
                 ],
@@ -152,8 +155,6 @@ impl RemoteWallet {
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
         let client = self.watch_client()?;
-        // Build a raw tx with the exact outputs provided; inputs will be added by Core
-        // Build a minimally valid tx: a single dummy input; Core will replace/add inputs
         let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
@@ -166,26 +167,23 @@ impl RemoteWallet {
             output: outputs,
         };
         let raw_hex = hex::encode(bitcoin::consensus::serialize(&tx));
-
-        // Fund the raw transaction so inputs and change are added, preserving provided outputs
-        let mut options = serde_json::json!({ "add_inputs": true });
-        if let Some(fr_sat_vb) = fee_rate {
-            // fundrawtransaction expects BTC/kvB
-            let fee_rate_btc_kvb = fr_sat_vb * 1e-5f64;
-            options["feeRate"] = serde_json::json!(fee_rate_btc_kvb);
+        let mut options = serde_json::json!({});
+        if let Some(fr) = fee_rate {
+            options["fee_rate"] = serde_json::json!(fr);
         }
         let funded: serde_json::Value = client
             .call(
-                "fundrawtransaction",
-                &[serde_json::json!(raw_hex), options],
+                "walletcreatefundedpsbt",
+                &[
+                    serde_json::json!([]),
+                    serde_json::json!([{"data": raw_hex}]),
+                    serde_json::json!(0),
+                    options,
+                    serde_json::json!(true),
+                ],
             )
-            .context("fundrawtransaction")?;
-        let funded_hex = funded["hex"].as_str().context("funded hex")?;
-
-        // Convert funded raw tx to PSBT for signing
-        let psbt_b64: String = client
-            .call("converttopsbt", &[serde_json::json!(funded_hex), serde_json::json!(false)])
-            .context("converttopsbt")?;
+            .context("walletcreatefundedpsbt from raw tx data")?;
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
         let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
         Ok(psbt)
     }
