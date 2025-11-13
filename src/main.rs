@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bitcoincore_rpc::Client;
 use std::path::Path;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     log::info!("🌐 Network: {}", ctx.network);
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 
-    init_data_dir(&ctx);
+    init_data_dir(&ctx).context("initializing data dir")?;
 
     if let Some(cmd) = &cli.cmd {
         cmd.run(&ctx)?;
@@ -80,9 +80,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_data_dir(ctx: &context::Context) {
+fn init_data_dir(ctx: &context::Context) -> Result<()> {
     let data_dir = std::path::PathBuf::from(&ctx.data_dir);
-    let _ = std::fs::create_dir_all(&data_dir);
+    std::fs::create_dir_all(&data_dir)?;
+    Ok(())
 }
 
 fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Sync> {
