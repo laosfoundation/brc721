@@ -15,6 +15,7 @@ pub struct Cli {
     #[arg(
         short = 's',
         long = "start",
+        env = "BRC721_START_BLOCK",
         default_value_t = 877186u64,
         value_name = "HEIGHT",
         help = "Initial block height to start scanning from when no prior state exists"
@@ -89,6 +90,14 @@ pub struct Cli {
     )]
     pub log_file: Option<String>,
 
+    #[arg(
+        long = "api-listen",
+        env = "BRC721_API_LISTEN",
+        value_name = "ADDR",
+        default_value = "127.0.0.1:8083",
+        help = "REST API listen address (host:port)"
+    )]
+    pub api_listen: std::net::SocketAddr,
 
     #[command(subcommand)]
     pub cmd: Option<Command>,

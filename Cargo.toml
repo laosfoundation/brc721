@@ -26,6 +26,9 @@ sha2 = "0.10.9"
 url = "2.5.7"
 age = "0.11"
 rpassword = "7"
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 
 [dev-dependencies]
 bdk_bitcoind_rpc = "0.22.0"

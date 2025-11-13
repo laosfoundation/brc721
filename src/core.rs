@@ -22,8 +22,12 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
         }
     }
 
-    pub fn run(mut self) -> ! {
+    pub fn run(&mut self, shutdown: tokio_util::sync::CancellationToken) {
         loop {
+            if shutdown.is_cancelled() {
+                log::info!("🛑 Core shutdown requested");
+                break;
+            }
             match self.scanner.next_blocks() {
                 Ok(blocks) => {
                     for (height, block) in blocks {
@@ -55,5 +59,6 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
                 }
             }
         }
+        log::info!("👋 Core loop exited");
     }
 }
