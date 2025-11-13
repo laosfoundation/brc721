@@ -53,14 +53,27 @@ async fn main() -> Result<()> {
     let api_addr = cli.api_listen;
     let rest_storage = storage.clone();
     let shutdown = tokio_util::sync::CancellationToken::new();
-    tokio::spawn(async move {
-        if let Err(e) = rest::serve(api_addr, rest_storage, shutdown.clone()).await {
-            log::error!("REST server error: {}", e);
+
+    let rest_handle = tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            if let Err(e) = rest::serve(api_addr, rest_storage, shutdown).await {
+                log::error!("REST server error: {}", e);
+            }
         }
     });
 
     let core = core::Core::new(storage.clone(), scanner, parser);
-    core.run();
+    let core_handle = tokio::spawn(core.run(shutdown.clone()));
+
+    tokio::signal::ctrl_c().await?;
+    log::info!("🧨 Ctrl-C received, shutting down");
+    shutdown.cancel();
+
+    let _ = core_handle.await;
+    let _ = rest_handle.await;
+    log::info!("✅ Shutdown complete");
+    Ok(())
 }
 
 fn init_data_dir(ctx: &context::Context) {
