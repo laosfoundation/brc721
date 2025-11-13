@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     let rest_storage = storage.clone();
     let shutdown = tokio_util::sync::CancellationToken::new();
 
-    let rest_handle = tokio::spawn({
+    let mut rest_handle = tokio::spawn({
         let shutdown = shutdown.clone();
         async move {
             if let Err(e) = rest::serve(api_addr, rest_storage, shutdown).await {
@@ -65,17 +65,25 @@ async fn main() -> Result<()> {
 
     let core = core::Core::new(storage.clone(), scanner, parser);
     let shutdown_core = shutdown.clone();
-    let core_handle = tokio::task::spawn_blocking(move || {
+    let mut core_handle = tokio::task::spawn_blocking(move || {
         let mut core = core;
         core.run(shutdown_core);
     });
 
-    tokio::signal::ctrl_c().await?;
-    log::info!("🧨 Ctrl-C received, shutting down");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            log::info!("🧨 Ctrl-C received, shutting down");
+        }
+        _ = &mut rest_handle => {},
+        _ = &mut core_handle => {},
+
+    }
     shutdown.cancel();
 
-    let _ = core_handle.await;
+    // Aspetta che finiscano davvero
     let _ = rest_handle.await;
+    let _ = core_handle.await;
+
     log::info!("✅ Shutdown complete");
     Ok(())
 }
