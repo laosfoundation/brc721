@@ -152,6 +152,8 @@ impl RemoteWallet {
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
         let client = self.watch_client()?;
+        // Build a raw tx with the exact outputs provided; inputs will be added by Core
+        // Build a minimally valid tx: a single dummy input; Core will replace/add inputs
         let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
@@ -164,23 +166,26 @@ impl RemoteWallet {
             output: outputs,
         };
         let raw_hex = hex::encode(bitcoin::consensus::serialize(&tx));
-        let mut options = serde_json::json!({});
-        if let Some(fr) = fee_rate {
-            options["fee_rate"] = serde_json::json!(fr);
+
+        // Fund the raw transaction so inputs and change are added, preserving provided outputs
+        let mut options = serde_json::json!({ "add_inputs": true });
+        if let Some(fr_sat_vb) = fee_rate {
+            // fundrawtransaction expects BTC/kvB
+            let fee_rate_btc_kvb = fr_sat_vb * 1e-5f64;
+            options["feeRate"] = serde_json::json!(fee_rate_btc_kvb);
         }
         let funded: serde_json::Value = client
             .call(
-                "walletcreatefundedpsbt",
-                &[
-                    serde_json::json!([]),
-                    serde_json::json!([{"data": raw_hex}]),
-                    serde_json::json!(0),
-                    options,
-                    serde_json::json!(true),
-                ],
+                "fundrawtransaction",
+                &[serde_json::json!(raw_hex), options],
             )
-            .context("walletcreatefundedpsbt from raw tx data")?;
-        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+            .context("fundrawtransaction")?;
+        let funded_hex = funded["hex"].as_str().context("funded hex")?;
+
+        // Convert funded raw tx to PSBT for signing
+        let psbt_b64: String = client
+            .call("converttopsbt", &[serde_json::json!(funded_hex), serde_json::json!(false)])
+            .context("converttopsbt")?;
         let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
         Ok(psbt)
     }

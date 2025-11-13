@@ -26,3 +26,20 @@ pub fn brc721_output(payload: &[u8]) -> TxOut {
         script_pubkey: script,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_brc721_output_creates_correct_txout() {
+        let payload = [0xaa, 0xbb, 0xcc];
+        let txout = brc721_output(&payload);
+        // Value should be zero
+        assert_eq!(txout.value, Amount::from_sat(0));
+        assert_eq!(
+            txout.script_pubkey.to_string(),
+            "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_3 aabbcc"
+        );
+    }
+}
