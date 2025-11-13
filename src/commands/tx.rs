@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use super::CommandRunner;
 use crate::types::{brc721_output, RegisterCollectionMessage};
-use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use crate::wallet::passphrase::prompt_passphrase_once;
+use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
 
@@ -22,14 +22,15 @@ impl CommandRunner for cli::TxCmd {
                 };
                 let output = brc721_output(&msg.encode());
 
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
-                let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
+                let wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| {
+                    prompt_passphrase_once()
+                        .expect("prompt")
+                        .unwrap_or_default()
+                });
                 let txid = wallet
-                    .send_tx(
-                        vec![output],
-                        *fee_rate,
-                        passphrase,
-                    )
+                    .send_tx(vec![output], *fee_rate, passphrase)
                     .context("sending tx")?;
 
                 log::info!(
@@ -46,17 +47,37 @@ impl CommandRunner for cli::TxCmd {
                 fee_rate,
                 passphrase,
             } => {
-                let wallet = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
+                let wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
                 let amount = Amount::from_sat(*amount_sat);
                 let address = Address::from_str(to)?.require_network(ctx.network)?;
-                let passphrase = passphrase.clone().unwrap_or_else(|| prompt_passphrase_once().expect("prompt").unwrap_or_default());
-                wallet.send_amount(
-                    &address,
-                    amount,
-                    *fee_rate,
-                    passphrase,
-                )?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| {
+                    prompt_passphrase_once()
+                        .expect("prompt")
+                        .unwrap_or_default()
+                });
+                wallet.send_amount(&address, amount, *fee_rate, passphrase)?;
                 log::info!("✅ Sent {} sat to {}", amount_sat, to);
+                Ok(())
+            }
+            cli::TxCmd::RawOutput {
+                hex,
+                fee_rate,
+                passphrase,
+            } => {
+                let payload = hex::decode(hex)?;
+                let output = brc721_output(&payload);
+                let wallet =
+                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
+                let passphrase = passphrase.clone().unwrap_or_else(|| {
+                    prompt_passphrase_once()
+                        .expect("prompt")
+                        .unwrap_or_default()
+                });
+                let txid = wallet
+                    .send_tx(vec![output], *fee_rate, passphrase)
+                    .context("sending tx")?;
+                log::info!("✅ Sent raw OP_RETURN output, txid: {}", txid);
                 Ok(())
             }
         }
