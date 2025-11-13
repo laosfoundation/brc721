@@ -64,7 +64,11 @@ async fn main() -> Result<()> {
     });
 
     let core = core::Core::new(storage.clone(), scanner, parser);
-    let core_handle = tokio::spawn(core.run(shutdown.clone()));
+    let shutdown_core = shutdown.clone();
+    let core_handle = tokio::task::spawn_blocking(move || {
+        let mut core = core;
+        core.run(shutdown_core);
+    });
 
     tokio::signal::ctrl_c().await?;
     log::info!("🧨 Ctrl-C received, shutting down");
