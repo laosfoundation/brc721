@@ -165,7 +165,6 @@ impl Brc721Wallet {
 mod tests {
     use super::*;
     use bdk_wallet::bip39::Language;
-    use bitcoincore_rpc::RpcApi;
     use tempfile::TempDir;
 
     #[test]
