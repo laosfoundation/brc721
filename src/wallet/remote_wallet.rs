@@ -155,46 +155,46 @@ impl RemoteWallet {
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
         let client = self.watch_client()?;
+        let network = Self::detect_network(&self.rpc_url, &self.auth)?;
 
-        // 1. Build a raw transaction with placeholder input(s) and your exact outputs
-        //    Inputs are empty: walletprocesspsbt will add them.
-        let tx = Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![], // no fake input, no null input hacks
-            output: outputs,
-        };
-        let raw_hex = hex::encode(bitcoin::consensus::serialize(&tx));
+        let outs: Vec<serde_json::Value> = outputs
+            .into_iter()
+            .map(|o| {
+                if let Ok(addr) = Address::from_script(&o.script_pubkey, network) {
+                    serde_json::json!({ addr.to_string(): o.value.to_btc() })
+                } else {
+                    serde_json::json!({
+                        "script": hex::encode(o.script_pubkey.as_bytes()),
+                        "amount": o.value.to_btc()
+                    })
+                }
+            })
+            .collect();
 
-        // 2. Convert raw tx into PSBT (this preserves the scriptPubKeys as-is)
-        let psbt_hex: String = client
+        let raw_hex: String = client
             .call(
-                "converttopsbt",
-                &[serde_json::json!(raw_hex), serde_json::json!(true)],
+                "createrawtransaction",
+                &[serde_json::json!([]), serde_json::json!(outs)],
             )
-            .context("converttopsbt")?;
+            .context("createrawtransaction")?;
 
-        // 3. Let the wallet FUND the PSBT (do not sign)
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
             options["feeRate"] = serde_json::json!(fr);
         }
 
         let funded: serde_json::Value = client
-            .call(
-                "walletprocesspsbt",
-                &[
-                    serde_json::json!(psbt_hex),
-                    serde_json::json!(false), // do NOT sign
-                    serde_json::json!(true),  // DO fund (add inputs + change)
-                    options,
-                ],
-            )
-            .context("walletprocesspsbt")?;
+            .call("fundrawtransaction", &[serde_json::json!(raw_hex), options])
+            .context("fundrawtransaction")?;
 
-        let psbt_b64 = funded["psbt"]
-            .as_str()
-            .context("walletprocesspsbt did not return psbt")?;
+        let funded_hex = funded["hex"].as_str().context("funded hex")?;
+
+        let psbt_b64: String = client
+            .call(
+                "converttopsbt",
+                &[serde_json::json!(funded_hex), serde_json::json!(true)],
+            )
+            .context("converttopsbt")?;
 
         let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
         Ok(psbt)
@@ -246,7 +246,7 @@ mod tests {
         let node_url = url::Url::parse(&node.rpc_url()).unwrap();
 
         let mut wallet = create_wallet();
-        let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth);
+        let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth.clone());
 
         let external = wallet.public_descriptor(KeychainKind::External).to_string();
         let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
@@ -255,6 +255,10 @@ mod tests {
             .expect("remove wallet setup");
 
         let addr = wallet.reveal_next_address(KeychainKind::External);
+
+        // fund wallet: mine 101 blocks to the wallet address
+        let root = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
+        root.generate_to_address(101, &addr.address).expect("mint");
 
         let output = TxOut {
             value: Amount::from_sat(1000),
