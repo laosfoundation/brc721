@@ -16,7 +16,7 @@ pub struct Cli {
         short = 's',
         long = "start",
         env = "BRC721_START_BLOCK",
-        default_value_t = 877186u64,
+        default_value_t = 923580u64,
         value_name = "HEIGHT",
         help = "Initial block height to start scanning from when no prior state exists"
     )]
@@ -253,7 +253,6 @@ pub enum TxCmd {
         )]
         passphrase: Option<String>,
     },
-
 }
 
 pub fn parse() -> Cli {
