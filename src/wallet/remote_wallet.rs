@@ -179,7 +179,8 @@ impl RemoteWallet {
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
         psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
-        Ok(move_opreturn_first(psbt))
+        psbt = move_opreturn_first(psbt);
+        Ok(psbt)
     }
 
     pub fn broadcast(&self, tx: &Transaction) -> Result<bitcoin::Txid> {
