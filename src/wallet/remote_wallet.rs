@@ -292,7 +292,7 @@ mod tests {
         let pb = PushBytesBuf::try_from(payload.to_vec()).unwrap();
         let script = Builder::new()
             .push_opcode(opcodes::all::OP_RETURN)
-            .push_opcode(opcodes::all::OP_PUSHBYTES_15)
+            .push_opcode(opcodes::all::OP_PUSHNUM_15)
             .push_slice(pb)
             .into_script();
         let output = TxOut {
