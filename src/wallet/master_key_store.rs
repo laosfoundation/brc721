@@ -1,13 +1,12 @@
-use std::fs::{self, File};
-use std::io::Read;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-
 use age::secrecy::SecretString;
 use age::Encryptor;
 use age::{scrypt, Decryptor};
 use anyhow::{bail, Context, Result};
 use bitcoin::bip32::Xpriv;
+use std::fs::{self, File};
+use std::io::Read;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 /// Stores and retrieves a master private key (Xpriv) encrypted with the age crate.
