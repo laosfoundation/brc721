@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bitcoin::{opcodes, Address, ScriptBuf, Transaction, TxOut};
+use bitcoin::{Address, ScriptBuf, Transaction, TxOut};
 use bitcoin::{Amount, Psbt};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
 use url::Url;
@@ -342,7 +342,7 @@ mod tests {
         let root = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
         root.generate_to_address(101, &addr.address).expect("mint");
 
-        let payload = vec![0x0a];
+        let payload = [0x0a];
         let pb = PushBytesBuf::try_from(payload.to_vec()).unwrap();
         let script = Builder::new()
             .push_opcode(opcodes::all::OP_RETURN)
