@@ -1,9 +1,8 @@
+use anyhow::{Context as AnyhowContext, Result};
 use bitcoin::Network;
-use bitcoincore_rpc::Auth;
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use std::path::PathBuf;
 use url::Url;
-
-use crate::wallet::remote_wallet::RemoteWallet;
 
 pub struct Context {
     pub network: Network,
@@ -24,8 +23,7 @@ impl Context {
             _ => Auth::None,
         };
         let rpc_url = Url::parse(&cli.rpc_url).expect("rpc url");
-        let network =
-            RemoteWallet::detect_network(&rpc_url, &auth).expect("detect network from node");
+        let network = detect_network(&rpc_url, &auth).expect("detect network from node");
         let mut data_dir = PathBuf::from(&cli.data_dir);
         let network_dir = network.to_string();
         data_dir.push(network_dir);
@@ -41,4 +39,12 @@ impl Context {
             reset: cli.reset,
         }
     }
+}
+
+fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
+    let client = Client::new(rpc_url.as_ref(), auth.clone()).context("create root client")?;
+    let info = client
+        .get_blockchain_info()
+        .context("get_blockchain_info")?;
+    Ok(info.chain)
 }

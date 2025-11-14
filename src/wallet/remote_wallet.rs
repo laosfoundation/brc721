@@ -19,31 +19,6 @@ impl RemoteWallet {
         }
     }
 
-    pub fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
-        let client = Client::new(rpc_url.as_ref(), auth.clone()).context("create root client")?;
-        let info = client
-            .get_blockchain_info()
-            .context("get_blockchain_info")?;
-        Ok(info.chain)
-    }
-
-    fn watch_url(&self) -> String {
-        format!(
-            "{}/wallet/{}",
-            self.rpc_url.to_string().trim_end_matches('/'),
-            self.watch_name
-        )
-    }
-
-    fn watch_client(&self) -> Result<Client> {
-        let url = self.watch_url();
-        Client::new(&url, self.auth.clone()).context("create Core wallet client")
-    }
-
-    fn root_client(&self) -> Result<Client> {
-        Client::new(self.rpc_url.as_ref(), self.auth.clone()).context("create root client")
-    }
-
     pub fn balances(&self) -> Result<json::GetBalancesResult> {
         let client = self.watch_client()?;
         client.get_balances().context("get balance")
@@ -188,9 +163,22 @@ impl RemoteWallet {
         let txid = root.send_raw_transaction(tx).context("broadcast tx")?;
         Ok(txid)
     }
+
+    fn watch_client(&self) -> Result<Client> {
+        let url = format!(
+            "{}/wallet/{}",
+            self.rpc_url.to_string().trim_end_matches('/'),
+            self.watch_name
+        );
+        Client::new(&url, self.auth.clone()).context("create Core wallet client")
+    }
+
+    fn root_client(&self) -> Result<Client> {
+        Client::new(self.rpc_url.as_ref(), self.auth.clone()).context("create root client")
+    }
 }
 
-pub fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
+fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
     // Trova l'indice del primo output con OP_RETURN
     let opret_index_opt = psbt
         .unsigned_tx
@@ -237,7 +225,7 @@ pub fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
 
 /// Substitute the script of the first OP_RETURN output in a PSBT while keeping the amount unchanged.
 /// If no OP_RETURN output exists, the PSBT is returned unchanged.
-pub fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
+fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
     // Trova l'indice del primo OP_RETURN
     let idx_opt = psbt
         .unsigned_tx
@@ -363,8 +351,8 @@ mod tests {
 
         assert_eq!(psbt.unsigned_tx.output.len(), 2);
         assert_eq!(
-            psbt.unsigned_tx.output[0].clone().script_pubkey.len(),
-            output.script_pubkey.len()
+            psbt.unsigned_tx.output[0].clone().script_pubkey,
+            output.script_pubkey
         );
     }
 }
