@@ -124,14 +124,9 @@ impl RemoteWallet {
         Ok(psbt)
     }
 
-    pub fn create_psbt_from_txouts(
-        &self,
-        outputs: Vec<TxOut>,
-        fee_rate: Option<f64>,
-    ) -> Result<Psbt> {
+    pub fn create_psbt_from_txout(&self, output: TxOut, fee_rate: Option<f64>) -> Result<Psbt> {
         let client = self.watch_client()?;
 
-        let output = outputs[0].clone();
         let script = output.script_pubkey;
         let dummy = bitcoin::script::ScriptBuf::from(vec![0u8; script.len() - 2]);
         let mut options = serde_json::json!({});
@@ -310,7 +305,7 @@ mod tests {
         };
 
         remote_wallet
-            .create_psbt_from_txouts(vec![output], None)
+            .create_psbt_from_txout(output, None)
             .expect("psbt");
     }
 
@@ -346,7 +341,7 @@ mod tests {
         assert_eq!(output.script_pubkey.len(), 4);
 
         let psbt = remote_wallet
-            .create_psbt_from_txouts(vec![output.clone()], None)
+            .create_psbt_from_txout(output.clone(), None)
             .expect("psbt");
 
         assert_eq!(psbt.unsigned_tx.output.len(), 2);

@@ -130,13 +130,13 @@ impl Brc721Wallet {
 
     pub fn build_tx(
         &self,
-        outputs: Vec<bitcoin::TxOut>,
+        output: bitcoin::TxOut,
         fee_rate: Option<f64>,
         passphrase: String,
     ) -> Result<bitcoin::Transaction> {
         let mut psbt = self
             .remote
-            .create_psbt_from_txouts(outputs, fee_rate)
+            .create_psbt_from_txout(output, fee_rate)
             .context("create psbt from outputs")?;
 
         let finalized = self

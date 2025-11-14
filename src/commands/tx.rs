@@ -30,7 +30,7 @@ impl CommandRunner for cli::TxCmd {
                         .unwrap_or_default()
                 });
                 let tx = wallet
-                    .build_tx(vec![output], *fee_rate, passphrase)
+                    .build_tx(output, *fee_rate, passphrase)
                     .context("build tx")?;
                 let txid = wallet.broadcast(&tx)?;
 

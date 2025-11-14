@@ -34,7 +34,7 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_3 0a0b0c"
     );
     let tx = wallet
-        .build_tx(vec![output], Some(1.5), "passphrase".to_string())
+        .build_tx(output, Some(1.5), "passphrase".to_string())
         .expect("build tx");
     assert!(!tx.input.is_empty(), "built tx must have inputs");
     assert!(!tx.output.is_empty(), "built tx must have outputs");
