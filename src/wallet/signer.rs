@@ -1,10 +1,10 @@
+use crate::wallet::master_key_store::MasterKeyStore;
 use age::secrecy::SecretString;
 use anyhow::Result;
 use bdk_wallet::{template::Bip86, KeychainKind, Wallet};
-use bitcoin::{Network, Psbt};
 use bitcoin::bip32::Xpriv;
-
-use crate::wallet::master_key_store::MasterKeyStore;
+use bitcoin::{Network, Psbt};
+use std::path::Path;
 
 /// Signer provides a builder-style API (with_*) to configure
 /// and produce signatures for PSBTs using the wallet's master key material.
@@ -14,21 +14,11 @@ pub struct Signer {
 }
 
 impl Signer {
-    pub fn new() -> Self {
+    pub fn new<P: AsRef<Path>>(data_dir: P, network: Network) -> Self {
         Self {
-            data_dir: std::path::PathBuf::new(),
-            network: Network::Regtest,
+            data_dir: data_dir.as_ref().to_path_buf(),
+            network,
         }
-    }
-
-    pub fn with_data_dir<P: AsRef<std::path::Path>>(mut self, data_dir: P) -> Self {
-        self.data_dir = data_dir.as_ref().to_path_buf();
-        self
-    }
-
-    pub fn with_network(mut self, network: Network) -> Self {
-        self.network = network;
-        self
     }
 
     /// Persist the provided master private key using MasterKeyStore with encryption.

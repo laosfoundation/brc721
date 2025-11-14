@@ -40,7 +40,7 @@ impl Brc721Wallet {
         let remote = RemoteWallet::new(local.id(), rpc_url, auth);
 
         let pass = age::secrecy::SecretString::from(passphrase);
-        let signer = Signer::new().with_data_dir(&data_dir).with_network(network);
+        let signer = Signer::new(&data_dir, network);
         signer.store_master_key(&master_xprv, &pass)?;
 
         Ok(Self {
@@ -61,7 +61,7 @@ impl Brc721Wallet {
         Ok(Self {
             local,
             remote,
-            signer: Signer::new().with_data_dir(&data_dir).with_network(network),
+            signer: Signer::new(&data_dir, network),
         })
     }
 
