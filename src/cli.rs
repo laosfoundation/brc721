@@ -226,33 +226,6 @@ pub enum TxCmd {
         )]
         passphrase: Option<String>,
     },
-    #[command(
-        about = "Send a raw OP_RETURN output",
-        long_about = "Build and broadcast a transaction containing a custom OP_RETURN output with arbitrary hex payload. Optionally set a custom fee rate (sat/vB)."
-    )]
-    RawOutput {
-        #[arg(
-            long = "hex",
-            value_name = "HEX",
-            help = "Hex-encoded payload for OP_RETURN",
-            required = true
-        )]
-        hex: String,
-        #[arg(
-            long = "fee-rate",
-            value_name = "SAT/VB",
-            required = false,
-            help = "Fee rate in sat/vB (optional)"
-        )]
-        fee_rate: Option<f64>,
-        #[arg(
-            long,
-            value_name = "PASSPHRASE",
-            help = "Passphrase for signing",
-            required = false
-        )]
-        passphrase: Option<String>,
-    },
 }
 
 pub fn parse() -> Cli {

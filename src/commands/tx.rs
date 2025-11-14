@@ -64,27 +64,6 @@ impl CommandRunner for cli::TxCmd {
                 log::info!("✅ Sent {} sat to {} (txid: {})", amount_sat, to, txid);
                 Ok(())
             }
-            cli::TxCmd::RawOutput {
-                hex,
-                fee_rate,
-                passphrase,
-            } => {
-                let payload = hex::decode(hex)?;
-                let output = brc721_output(&payload);
-                let wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
-                let passphrase = passphrase.clone().unwrap_or_else(|| {
-                    prompt_passphrase_once()
-                        .expect("prompt")
-                        .unwrap_or_default()
-                });
-                let tx = wallet
-                    .build_tx(vec![output], *fee_rate, passphrase)
-                    .context("build tx")?;
-                let txid = wallet.broadcast(&tx)?;
-                log::info!("✅ Sent raw OP_RETURN output, txid: {}", txid);
-                Ok(())
-            }
         }
     }
 }
