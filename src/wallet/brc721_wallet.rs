@@ -99,14 +99,14 @@ impl Brc721Wallet {
     /// - `amount`: Amount to send.
     /// - `fee_rate`: Optional sats/vB feerate.
     ///
-    /// Returns Ok(()) if broadcast succeeded, otherwise error.
-    pub fn send_amount(
+    /// Returns the finalized transaction (not broadcast).
+    pub fn build_payment_tx(
         &self,
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
         passphrase: String,
-    ) -> Result<()> {
+    ) -> Result<bitcoin::Transaction> {
         let mut psbt: Psbt =
             self.remote
                 .create_psbt_for_payment(target_address, amount, fee_rate)?;
@@ -125,17 +125,15 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        self.remote.broadcast(&tx)?;
-
-        Ok(())
+        Ok(tx)
     }
 
-    pub fn send_tx(
+    pub fn build_tx(
         &self,
         outputs: Vec<bitcoin::TxOut>,
         fee_rate: Option<f64>,
         passphrase: String,
-    ) -> Result<bitcoin::Txid> {
+    ) -> Result<bitcoin::Transaction> {
         let mut psbt = self
             .remote
             .create_psbt_from_txouts(outputs, fee_rate)
@@ -155,8 +153,11 @@ impl Brc721Wallet {
             .extract(&secp)
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
-        let txid = self.remote.broadcast(&tx)?;
-        Ok(txid)
+        Ok(tx)
+    }
+
+    pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
+        self.remote.broadcast(tx)
     }
 }
 

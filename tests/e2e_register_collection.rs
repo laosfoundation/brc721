@@ -1,6 +1,6 @@
+use bitcoincore_rpc::{Client, RpcApi};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
-use bitcoincore_rpc::{Client, RpcApi};
 
 mod common;
 
@@ -47,5 +47,7 @@ fn e2e_register_collection() {
     assert!(output.status.success(), "{:?}", output);
 
     // Mine a block to include it
-    root_client.generate_to_address(1, &addr).expect("mine confirm");
+    root_client
+        .generate_to_address(1, &addr)
+        .expect("mine confirm");
 }
