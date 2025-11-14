@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bitcoin::{Address, Transaction, TxOut};
+use bitcoin::{opcodes, Address, ScriptBuf, Transaction, TxOut};
 use bitcoin::{Amount, Psbt};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
 use url::Url;
@@ -155,49 +155,31 @@ impl RemoteWallet {
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
         let client = self.watch_client()?;
-        let network = Self::detect_network(&self.rpc_url, &self.auth)?;
 
-        let outs: Vec<serde_json::Value> = outputs
-            .into_iter()
-            .map(|o| {
-                if let Ok(addr) = Address::from_script(&o.script_pubkey, network) {
-                    serde_json::json!({ addr.to_string(): o.value.to_btc() })
-                } else {
-                    serde_json::json!({
-                        "script": hex::encode(o.script_pubkey.as_bytes()),
-                        "amount": o.value.to_btc()
-                    })
-                }
-            })
-            .collect();
-
-        let raw_hex: String = client
-            .call(
-                "createrawtransaction",
-                &[serde_json::json!([]), serde_json::json!(outs)],
-            )
-            .context("createrawtransaction")?;
-
+        let output = outputs[0].clone();
+        let script = output.script_pubkey;
+        let dummy = bitcoin::script::ScriptBuf::from(vec![0u8; script.len() - 2]);
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
-            options["feeRate"] = serde_json::json!(fr);
+            options["fee_rate"] = serde_json::json!(fr);
         }
-
         let funded: serde_json::Value = client
-            .call("fundrawtransaction", &[serde_json::json!(raw_hex), options])
-            .context("fundrawtransaction")?;
-
-        let funded_hex = funded["hex"].as_str().context("funded hex")?;
-
-        let psbt_b64: String = client
             .call(
-                "converttopsbt",
-                &[serde_json::json!(funded_hex), serde_json::json!(true)],
+                "walletcreatefundedpsbt",
+                &[
+                    serde_json::json!([]),
+                    serde_json::json!([{"data": dummy}]),
+                    serde_json::json!(0),
+                    options,
+                    serde_json::json!(true),
+                ],
             )
-            .context("converttopsbt")?;
+            .context("walletcreatefundedpsbt from raw tx data")?;
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
-        let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
-        Ok(psbt)
+        psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
+        Ok(move_opreturn_first(psbt))
     }
 
     pub fn broadcast(&self, tx: &Transaction) -> Result<bitcoin::Txid> {
@@ -205,6 +187,78 @@ impl RemoteWallet {
         let txid = root.send_raw_transaction(tx).context("broadcast tx")?;
         Ok(txid)
     }
+}
+
+pub fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
+    // Trova l'indice del primo output con OP_RETURN
+    let opret_index_opt = psbt
+        .unsigned_tx
+        .output
+        .iter()
+        .position(|txout| txout.script_pubkey.is_op_return());
+
+    let Some(opret_index) = opret_index_opt else {
+        // Nessun OP_RETURN: restituiamo il PSBT invariato
+        return psbt;
+    };
+
+    if opret_index == 0 {
+        // È già il primo output: niente da fare
+        return psbt;
+    }
+
+    // Reorder unsigned_tx.output
+    let mut new_tx_outputs = Vec::with_capacity(psbt.unsigned_tx.output.len());
+    let opret_txout = psbt.unsigned_tx.output[opret_index].clone();
+    new_tx_outputs.push(opret_txout);
+
+    for (i, txout) in psbt.unsigned_tx.output.iter().enumerate() {
+        if i != opret_index {
+            new_tx_outputs.push(txout.clone());
+        }
+    }
+    psbt.unsigned_tx.output = new_tx_outputs;
+
+    // Reorder PSBT outputs metadata in modo coerente
+    let mut new_psbt_outputs = Vec::with_capacity(psbt.outputs.len());
+    let opret_meta = psbt.outputs[opret_index].clone();
+    new_psbt_outputs.push(opret_meta);
+
+    for (i, out_meta) in psbt.outputs.iter().enumerate() {
+        if i != opret_index {
+            new_psbt_outputs.push(out_meta.clone());
+        }
+    }
+    psbt.outputs = new_psbt_outputs;
+
+    psbt
+}
+
+/// Substitute the script of the first OP_RETURN output in a PSBT while keeping the amount unchanged.
+/// If no OP_RETURN output exists, the PSBT is returned unchanged.
+pub fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
+    // Trova l'indice del primo OP_RETURN
+    let idx_opt = psbt
+        .unsigned_tx
+        .output
+        .iter()
+        .position(|txout| txout.script_pubkey.is_op_return());
+
+    let Some(idx) = idx_opt else {
+        // Nessun OP_RETURN → nessun cambiamento
+        return Ok(psbt);
+    };
+
+    // Sostituiamo solo lo script_pubkey, NON amount
+    let original_amount = psbt.unsigned_tx.output[idx].value;
+    psbt.unsigned_tx.output[idx].script_pubkey = new_script.clone();
+    psbt.unsigned_tx.output[idx].value = original_amount;
+
+    // Aggiornamento metadata PSBT (se vuoi aggiungere witness/redeem script lo fai qui)
+    // Per ora manteniamo invariato lo psbt.outputs[idx], perché non serve per OP_RETURN.
+    // Se usi metadata OP_RETURN custom puoi modificarlo tu.
+
+    Ok(psbt)
 }
 
 #[cfg(test)]
@@ -300,8 +354,16 @@ mod tests {
             script_pubkey: script,
         };
 
-        remote_wallet
-            .create_psbt_from_txouts(vec![output], None)
+        assert_eq!(output.script_pubkey.len(), 4);
+
+        let psbt = remote_wallet
+            .create_psbt_from_txouts(vec![output.clone()], None)
             .expect("psbt");
+
+        assert_eq!(psbt.unsigned_tx.output.len(), 2);
+        assert_eq!(
+            psbt.unsigned_tx.output[0].clone().script_pubkey.len(),
+            output.script_pubkey.len()
+        );
     }
 }
