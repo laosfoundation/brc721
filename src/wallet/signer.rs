@@ -43,3 +43,49 @@ impl Signer {
         Ok(finalized)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use age::secrecy::SecretString;
+    use bitcoin::bip32::Xpriv;
+    use bitcoin::transaction::Version;
+    use bitcoin::Network;
+    use tempfile::TempDir;
+
+    fn get_test_xpriv(network: Network) -> Xpriv {
+        // Use a random key for testing; replace with a constant seed for reproducibility
+        let seed = [0u8; 64];
+        Xpriv::new_master(network, &seed).expect("Xpriv::new_master failed")
+    }
+
+    #[test]
+    fn test_sign_psbt() {
+        let temp_dir = TempDir::new().unwrap();
+        let network = Network::Testnet;
+        let signer = Signer::new(temp_dir.path(), network);
+        let xpriv = get_test_xpriv(network);
+        let passphrase = SecretString::new(Box::<str>::from("test-passphrase"));
+        signer
+            .store_master_key(&xpriv, &passphrase)
+            .expect("store_master_key");
+
+        let mut psbt = Psbt {
+            version: 0,
+            xpub: Default::default(),
+            proprietary: Default::default(),
+            unknown: Default::default(),
+            inputs: vec![],
+            outputs: vec![],
+            unsigned_tx: bitcoin::Transaction {
+                version: Version(2),
+                lock_time: bitcoin::absolute::LockTime::ZERO,
+                input: vec![],
+                output: vec![],
+            },
+        };
+
+        let result = signer.sign(&mut psbt, &passphrase);
+        assert!(result.is_ok());
+    }
+}
