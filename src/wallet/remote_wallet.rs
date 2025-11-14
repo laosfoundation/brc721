@@ -155,35 +155,47 @@ impl RemoteWallet {
         fee_rate: Option<f64>,
     ) -> Result<Psbt> {
         let client = self.watch_client()?;
+
+        // 1. Build a raw transaction with placeholder input(s) and your exact outputs
+        //    Inputs are empty: walletprocesspsbt will add them.
         let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::null(),
-                script_sig: bitcoin::ScriptBuf::new(),
-                sequence: bitcoin::Sequence::MAX,
-                witness: bitcoin::Witness::new(),
-            }],
+            input: vec![], // no fake input, no null input hacks
             output: outputs,
         };
         let raw_hex = hex::encode(bitcoin::consensus::serialize(&tx));
+
+        // 2. Convert raw tx into PSBT (this preserves the scriptPubKeys as-is)
+        let psbt_hex: String = client
+            .call(
+                "converttopsbt",
+                &[serde_json::json!(raw_hex), serde_json::json!(true)],
+            )
+            .context("converttopsbt")?;
+
+        // 3. Let the wallet FUND the PSBT (do not sign)
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
-            options["fee_rate"] = serde_json::json!(fr);
+            options["feeRate"] = serde_json::json!(fr);
         }
+
         let funded: serde_json::Value = client
             .call(
-                "walletcreatefundedpsbt",
+                "walletprocesspsbt",
                 &[
-                    serde_json::json!([]),
-                    serde_json::json!([{"data": raw_hex}]),
-                    serde_json::json!(0),
+                    serde_json::json!(psbt_hex),
+                    serde_json::json!(false), // do NOT sign
+                    serde_json::json!(true),  // DO fund (add inputs + change)
                     options,
-                    serde_json::json!(true),
                 ],
             )
-            .context("walletcreatefundedpsbt from raw tx data")?;
-        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+            .context("walletprocesspsbt")?;
+
+        let psbt_b64 = funded["psbt"]
+            .as_str()
+            .context("walletprocesspsbt did not return psbt")?;
+
         let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
         Ok(psbt)
     }
@@ -192,5 +204,65 @@ impl RemoteWallet {
         let root = self.root_client()?;
         let txid = root.send_raw_transaction(tx).context("broadcast tx")?;
         Ok(txid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bdk_wallet::{
+        bip39::{Language, Mnemonic},
+        template::Bip86,
+        KeychainKind, Wallet,
+    };
+    use bitcoin::{bip32::Xpriv, Network};
+
+    fn create_wallet() -> Wallet {
+        // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
+        let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).unwrap();
+        let network = Network::Regtest;
+
+        // Derive BIP32 master private key from seed.
+        let seed = mnemonic.to_seed(String::new()); // empty password
+        let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
+
+        // Initialize the wallet using BIP86 descriptors for both keychains.
+        Wallet::create(
+            Bip86(master_xprv, KeychainKind::External),
+            Bip86(master_xprv, KeychainKind::Internal),
+        )
+        .network(network)
+        .create_wallet_no_persist()
+        .expect("wallet")
+    }
+
+    #[test]
+    fn check_psbt_by_outputs() {
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
+
+        let mut wallet = create_wallet();
+        let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth);
+
+        let external = wallet.public_descriptor(KeychainKind::External).to_string();
+        let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
+        remote_wallet
+            .setup(external, internal)
+            .expect("remove wallet setup");
+
+        let addr = wallet.reveal_next_address(KeychainKind::External);
+
+        let output = TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: addr.script_pubkey(),
+        };
+
+        remote_wallet
+            .create_psbt_from_txouts(vec![output], None)
+            .expect("psbt");
     }
 }
