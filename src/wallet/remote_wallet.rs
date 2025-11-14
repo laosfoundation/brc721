@@ -215,7 +215,12 @@ mod tests {
         template::Bip86,
         KeychainKind, Wallet,
     };
-    use bitcoin::{bip32::Xpriv, Network};
+    use bitcoin::{
+        bip32::Xpriv,
+        opcodes,
+        script::{Builder, PushBytesBuf},
+        Network,
+    };
 
     fn create_wallet() -> Wallet {
         // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
@@ -244,25 +249,55 @@ mod tests {
         let node = corepc_node::Node::from_downloaded().unwrap();
         let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
         let node_url = url::Url::parse(&node.rpc_url()).unwrap();
-
         let mut wallet = create_wallet();
         let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth.clone());
-
+        let addr = wallet.reveal_next_address(KeychainKind::External);
         let external = wallet.public_descriptor(KeychainKind::External).to_string();
         let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
         remote_wallet
             .setup(external, internal)
             .expect("remove wallet setup");
 
-        let addr = wallet.reveal_next_address(KeychainKind::External);
-
-        // fund wallet: mine 101 blocks to the wallet address
         let root = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
         root.generate_to_address(101, &addr.address).expect("mint");
 
         let output = TxOut {
             value: Amount::from_sat(1000),
             script_pubkey: addr.script_pubkey(),
+        };
+
+        remote_wallet
+            .create_psbt_from_txouts(vec![output], None)
+            .expect("psbt");
+    }
+
+    #[test]
+    fn check_psbt_by_output_using_op_return_script() {
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
+        let mut wallet = create_wallet();
+        let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth.clone());
+        let addr = wallet.reveal_next_address(KeychainKind::External);
+        let external = wallet.public_descriptor(KeychainKind::External).to_string();
+        let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
+        remote_wallet
+            .setup(external, internal)
+            .expect("remove wallet setup");
+
+        let root = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
+        root.generate_to_address(101, &addr.address).expect("mint");
+
+        let payload = vec![0x0a];
+        let pb = PushBytesBuf::try_from(payload.to_vec()).unwrap();
+        let script = Builder::new()
+            .push_opcode(opcodes::all::OP_RETURN)
+            .push_opcode(opcodes::all::OP_PUSHBYTES_15)
+            .push_slice(pb)
+            .into_script();
+        let output = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: script,
         };
 
         remote_wallet
