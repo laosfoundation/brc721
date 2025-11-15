@@ -79,7 +79,7 @@ impl Parser {
 
         let result = match command {
             Brc721Command::RegisterCollection => {
-                register_collection::digest(tx, &*self.storage, block_height, tx_index)
+                register_collection::digest(tx, self.storage.clone(), block_height, tx_index)
             }
         };
         Some(result)
