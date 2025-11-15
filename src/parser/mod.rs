@@ -35,7 +35,7 @@ pub struct Parser;
 
 impl Parser {
     pub fn parse_block(&self, block: &Block, storage: &dyn crate::storage::Storage) -> Result<(), Brc721Error> {
-        for tx in block.txdata.iter() {
+        for (tx_index, tx) in block.txdata.iter().enumerate() {
             let output = match get_first_output_if_op_return(tx) {
                 Some(output) => output,
                 None => continue,
@@ -46,7 +46,7 @@ impl Parser {
                 None => continue,
             };
 
-            if let Some(Err(ref e)) = digest(brc721_tx, storage) {
+            if let Some(Err(ref e)) = digest(brc721_tx, storage, block.header.time as u64, &tx.txid().to_string()) {
                 log::warn!("{:?}", e);
             }
         }
@@ -70,7 +70,7 @@ fn get_brc721_tx(output: &TxOut) -> Option<&Brc721Tx> {
     }
 }
 
-fn digest(tx: &Brc721Tx, storage: &dyn crate::storage::Storage) -> Option<Result<(), Brc721Error>> {
+fn digest(tx: &Brc721Tx, storage: &dyn crate::storage::Storage, block_height: u64, txid: &str) -> Option<Result<(), Brc721Error>> {
     if tx.is_empty() {
         return None;
     }
@@ -84,7 +84,7 @@ fn digest(tx: &Brc721Tx, storage: &dyn crate::storage::Storage) -> Option<Result
     };
 
     let result = match command {
-        Brc721Command::RegisterCollection => register_collection::digest(tx, storage),
+        Brc721Command::RegisterCollection => register_collection::digest(tx, storage, block_height, txid),
     };
     Some(result)
 }

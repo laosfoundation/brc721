@@ -50,9 +50,11 @@ impl SqliteStorage {
                 hash TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS collections (
-                id TEXT PRIMARY KEY,
+                block_height INTEGER NOT NULL,
+                txid TEXT NOT NULL,
                 owner TEXT NOT NULL,
-                params TEXT NOT NULL
+                params TEXT NOT NULL,
+                PRIMARY KEY (block_height, txid)
             );
             "#,
         )
