@@ -5,6 +5,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::ge
 use serde::Serialize;
 
 use crate::storage::Storage;
+use crate::storage::traits::CollectionKey;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +23,21 @@ struct HealthResponse {
 #[serde(rename_all = "camelCase")]
 struct ChainStateResponse {
     last: Option<LastBlock>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionResponse {
+    block_height: u64,
+    tx_index: u32,
+    owner: String,
+    params: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionsResponse {
+    collections: Vec<CollectionResponse>,
 }
 
 #[derive(Serialize)]
@@ -43,6 +59,7 @@ pub async fn serve(
     let app = Router::new()
         .route("/health", get(health))
         .route("/state", get(chain_state))
+        .route("/collections", get(list_collections))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -74,4 +91,20 @@ async fn chain_state(State(state): State<AppState>) -> impl IntoResponse {
         hash: b.hash,
     });
     Json(ChainStateResponse { last })
+}
+
+async fn list_collections(State(state): State<AppState>) -> impl IntoResponse {
+    let collections = state
+        .storage
+        .list_collections()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, owner, params)| CollectionResponse {
+            block_height: key.block_height,
+            tx_index: key.tx_index,
+            owner,
+            params,
+        })
+        .collect();
+    Json(CollectionsResponse { collections })
 }

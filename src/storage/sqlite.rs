@@ -52,10 +52,10 @@ impl SqliteStorage {
             );
             CREATE TABLE IF NOT EXISTS collections (
                 block_height INTEGER NOT NULL,
-                txid TEXT NOT NULL,
+                tx_index INTEGER NOT NULL,
                 owner TEXT NOT NULL,
                 params TEXT NOT NULL,
-                PRIMARY KEY (block_height, txid)
+                PRIMARY KEY (block_height, tx_index)
             );
             "#,
         )
@@ -97,13 +97,39 @@ impl Storage for SqliteStorage {
     fn save_collection(&self, key: CollectionKey, owner: String, params: String) -> anyhow::Result<()> {
         self.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO collections (block_height, txid, owner, params) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(block_height, txid) DO UPDATE SET owner=excluded.owner, params=excluded.params",
-                params![key.block_height as i64, key.txid, owner, params],
+                "INSERT INTO collections (block_height, tx_index, owner, params) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(block_height, tx_index) DO UPDATE SET owner=excluded.owner, params=excluded.params",
+                params![key.block_height as i64, key.tx_index as i64, owner, params],
             )?;
             Ok(())
         })?;
         Ok(())
+    }
+
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, String)>> {
+        let rows = self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT block_height, tx_index, owner, params FROM collections ORDER BY block_height, tx_index",
+            )?;
+            let mapped = stmt
+                .query_map([], |row| {
+                    let block_height: i64 = row.get(0)?;
+                    let tx_index: i64 = row.get(1)?;
+                    let owner: String = row.get(2)?;
+                    let params: String = row.get(3)?;
+                    Ok((
+                        CollectionKey {
+                            block_height: block_height as u64,
+                            tx_index: tx_index as u32,
+                        },
+                        owner,
+                        params,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(mapped)
+        })?;
+        Ok(rows)
     }
 }
 
