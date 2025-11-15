@@ -174,7 +174,6 @@ impl RemoteWallet {
 }
 
 fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
-    // Trova l'indice del primo output con OP_RETURN
     let opret_index_opt = psbt
         .unsigned_tx
         .output
@@ -182,12 +181,10 @@ fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
         .position(|txout| txout.script_pubkey.is_op_return());
 
     let Some(opret_index) = opret_index_opt else {
-        // Nessun OP_RETURN: restituiamo il PSBT invariato
         return psbt;
     };
 
     if opret_index == 0 {
-        // È già il primo output: niente da fare
         return psbt;
     }
 
@@ -221,7 +218,6 @@ fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
 /// Substitute the script of the first OP_RETURN output in a PSBT while keeping the amount unchanged.
 /// If no OP_RETURN output exists, the PSBT is returned unchanged.
 fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
-    // Trova l'indice del primo OP_RETURN
     let idx_opt = psbt
         .unsigned_tx
         .output
@@ -229,18 +225,12 @@ fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Re
         .position(|txout| txout.script_pubkey.is_op_return());
 
     let Some(idx) = idx_opt else {
-        // Nessun OP_RETURN → nessun cambiamento
         return Ok(psbt);
     };
 
-    // Sostituiamo solo lo script_pubkey, NON amount
     let original_amount = psbt.unsigned_tx.output[idx].value;
     psbt.unsigned_tx.output[idx].script_pubkey = new_script.clone();
     psbt.unsigned_tx.output[idx].value = original_amount;
-
-    // Aggiornamento metadata PSBT (se vuoi aggiungere witness/redeem script lo fai qui)
-    // Per ora manteniamo invariato lo psbt.outputs[idx], perché non serve per OP_RETURN.
-    // Se usi metadata OP_RETURN custom puoi modificarlo tu.
 
     Ok(psbt)
 }
