@@ -52,6 +52,8 @@ impl Parser {
                 None => continue,
             };
 
+            log::info!("📦 Found BRC-721 tx at block {}, tx {}", block_height, tx_index);
+
             if let Some(Err(ref e)) = self.digest(brc721_tx, block_height, tx_index as u32) {
                 log::warn!("{:?}", e);
             }
