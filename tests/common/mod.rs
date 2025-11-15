@@ -1,10 +1,10 @@
+use bitcoin::Address;
 use bitcoincore_rpc::Auth;
 use std::process::Command as ProcCommand;
+use std::str::FromStr;
 use tempfile::TempDir;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::{Container, ContainerRequest, GenericImage, ImageExt};
-use std::str::FromStr;
-use bitcoin::Address;
 
 pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
     GenericImage::new("bitcoin/bitcoin", "latest")
