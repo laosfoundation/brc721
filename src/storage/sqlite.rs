@@ -39,14 +39,6 @@ impl SqliteStorage {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
 
-        let current_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if current_version != 0 && current_version != 1 {
-            return Err(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-                Some("Unsupported database schema version; please resync with --reset".into()),
-            ));
-        }
-
         Self::migrate(&conn)?;
         f(&conn)
     }
@@ -54,18 +46,15 @@ impl SqliteStorage {
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             r#"
-            PRAGMA user_version = 1;
             CREATE TABLE IF NOT EXISTS chain_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 height INTEGER NOT NULL,
                 hash TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS collections (
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
+                id TEXT PRIMARY KEY,
                 owner TEXT NOT NULL,
-                params TEXT NOT NULL,
-                PRIMARY KEY (block_height, tx_index)
+                rebaseable INTEGER NOT NULL
             );
             "#,
         )
@@ -108,37 +97,33 @@ impl Storage for SqliteStorage {
         &self,
         key: CollectionKey,
         owner: String,
-        params: String,
+        rebaseable: bool,
     ) -> anyhow::Result<()> {
+        let id = key.id;
         self.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO collections (block_height, tx_index, owner, params) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(block_height, tx_index) DO UPDATE SET owner=excluded.owner, params=excluded.params",
-                params![key.block_height as i64, key.tx_index as i64, owner, params],
+                "INSERT INTO collections (id, owner, rebaseable) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET owner=excluded.owner, rebaseable=excluded.rebaseable",
+                params![id, owner, rebaseable as i64],
             )?;
             Ok(())
         })?;
         Ok(())
     }
 
-    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, String)>> {
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
         let rows = self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT block_height, tx_index, owner, params FROM collections ORDER BY block_height, tx_index",
-            )?;
+            let mut stmt = conn.prepare("SELECT id, owner, rebaseable FROM collections ORDER BY id")?;
             let mapped = stmt
                 .query_map([], |row| {
-                    let block_height: i64 = row.get(0)?;
-                    let tx_index: i64 = row.get(1)?;
-                    let owner: String = row.get(2)?;
-                    let params: String = row.get(3)?;
+                    let id: String = row.get(0)?;
+                    let owner: String = row.get(1)?;
+                    let rebaseable_int: i64 = row.get(2)?;
+                    let rebaseable = rebaseable_int != 0;
                     Ok((
-                        CollectionKey {
-                            block_height: block_height as u64,
-                            tx_index: tx_index as u32,
-                        },
+                        CollectionKey { id },
                         owner,
-                        params,
+                        rebaseable,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -200,11 +185,6 @@ mod tests {
             .optional()
             .unwrap();
         assert_eq!(chain_state.as_deref(), Some("chain_state"));
-
-        let version: i32 = conn
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, 1);
     }
 
     #[test]

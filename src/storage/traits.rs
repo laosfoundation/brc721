@@ -6,8 +6,7 @@ pub struct Block {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CollectionKey {
-    pub block_height: u64,
-    pub tx_index: u32,
+    pub id: String,
 }
 
 pub trait Storage {
@@ -17,7 +16,7 @@ pub trait Storage {
         &self,
         key: CollectionKey,
         owner: String,
-        params: String,
+        rebaseable: bool,
     ) -> anyhow::Result<()>;
-    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, String)>>;
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>>;
 }

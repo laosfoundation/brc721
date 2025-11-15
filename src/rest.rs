@@ -27,10 +27,9 @@ struct ChainStateResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CollectionResponse {
-    block_height: u64,
-    tx_index: u32,
+    id: String,
     owner: String,
-    params: String,
+    rebaseable: bool,
 }
 
 #[derive(Serialize)]
@@ -98,11 +97,10 @@ async fn list_collections(State(state): State<AppState>) -> impl IntoResponse {
         .list_collections()
         .unwrap_or_default()
         .into_iter()
-        .map(|(key, owner, params)| CollectionResponse {
-            block_height: key.block_height,
-            tx_index: key.tx_index,
+        .map(|(key, owner, rebaseable)| CollectionResponse {
+            id: key.id,
             owner,
-            params,
+            rebaseable,
         })
         .collect();
     Json(CollectionsResponse { collections })

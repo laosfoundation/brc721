@@ -12,13 +12,12 @@ pub fn digest(
 ) -> Result<(), Brc721Error> {
     let payload = RegisterCollectionMessage::decode(tx)?;
     let key = CollectionKey {
-        block_height,
-        tx_index,
+        id: format!("{}:{}", block_height, tx_index),
     };
     let owner = format!("0x{:x}", payload.collection_address);
-    let params = format!("rebaseable:{}", payload.rebaseable);
+    let rebaseable = payload.rebaseable;
     storage
-        .save_collection(key, owner, params)
+        .save_collection(key, owner, rebaseable)
         .map_err(|_| Brc721Error::ScriptTooShort)?;
     Ok(())
 }
