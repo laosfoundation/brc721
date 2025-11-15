@@ -87,19 +87,6 @@ impl Brc721Wallet {
         self.remote.setup(external, internal)
     }
 
-    /// Send `amount` to `target_address` using funds from this wallet.
-    ///
-    /// This creates a PSBT via the Core watch-only wallet, signs it with BDK private keys,
-    /// finalizes, and broadcasts it.
-    ///
-    /// Arguments:
-    /// - `rpc_url`: The node RPC url (usually http[s]://host:port).
-    /// - `auth`: Auth credentials for the node.
-    /// - `target_address`: Address to receive funds.
-    /// - `amount`: Amount to send.
-    /// - `fee_rate`: Optional sats/vB feerate.
-    ///
-    /// Returns the finalized transaction (not broadcast).
     pub fn build_payment_tx(
         &self,
         target_address: &Address,
@@ -107,25 +94,11 @@ impl Brc721Wallet {
         fee_rate: Option<f64>,
         passphrase: String,
     ) -> Result<bitcoin::Transaction> {
-        let mut psbt: Psbt =
-            self.remote
-                .create_psbt_for_payment(target_address, amount, fee_rate)?;
+        let psbt: Psbt = self
+            .remote
+            .create_psbt_for_payment(target_address, amount, fee_rate)?;
 
-        let finalized = self
-            .signer
-            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase))
-            .context("bdk sign")?;
-
-        let secp = bitcoin::secp256k1::Secp256k1::verification_only();
-        if !finalized {
-            psbt.finalize_mut(&secp)
-                .map_err(|errs| anyhow::anyhow!("finalize_mut: {:?}", errs))?;
-        }
-        let tx = psbt
-            .extract(&secp)
-            .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
-
-        Ok(tx)
+        self.sign(psbt, passphrase)
     }
 
     pub fn build_tx(
@@ -134,11 +107,19 @@ impl Brc721Wallet {
         fee_rate: Option<f64>,
         passphrase: String,
     ) -> Result<bitcoin::Transaction> {
-        let mut psbt = self
+        let psbt = self
             .remote
             .create_psbt_from_txout(output, fee_rate)
             .context("create psbt from outputs")?;
 
+        self.sign(psbt, passphrase)
+    }
+
+    pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
+        self.remote.broadcast(tx)
+    }
+
+    fn sign(&self, mut psbt: Psbt, passphrase: String) -> Result<bitcoin::Transaction> {
         let finalized = self
             .signer
             .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase))
@@ -154,10 +135,6 @@ impl Brc721Wallet {
             .map_err(|e| anyhow::anyhow!("extract_tx: {e}"))?;
 
         Ok(tx)
-    }
-
-    pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
-        self.remote.broadcast(tx)
     }
 }
 
