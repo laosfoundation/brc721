@@ -3,6 +3,7 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{Block, Storage};
+use crate::storage::traits::CollectionKey;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -87,6 +88,18 @@ impl Storage for SqliteStorage {
                 "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash",
                 params![height as i64, hash],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn save_collection(&self, key: CollectionKey, owner: String, params: String) -> anyhow::Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO collections (block_height, txid, owner, params) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(block_height, txid) DO UPDATE SET owner=excluded.owner, params=excluded.params",
+                params![key.block_height as i64, key.txid, owner, params],
             )?;
             Ok(())
         })?;

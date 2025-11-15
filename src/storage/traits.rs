@@ -13,4 +13,5 @@ pub struct CollectionKey {
 pub trait Storage {
     fn load_last(&self) -> anyhow::Result<Option<Block>>;
     fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()>;
+    fn save_collection(&self, key: CollectionKey, owner: String, params: String) -> anyhow::Result<()>;
 }
