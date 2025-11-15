@@ -35,7 +35,7 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
                 Ok(blocks) => {
                     for (height, block) in blocks {
                         log::info!("🧱 block={} 🧾 hash={}", height, block.block_hash());
-                        if let Err(e) = self.parser.parse_block(block, self.storage.as_ref()) {
+                        if let Err(e) = self.parser.parse_block(block, *height, self.storage.as_ref()) {
                             log::error!(
                                 "parsing error of block {} at height {}: {}",
                                 block.block_hash(),

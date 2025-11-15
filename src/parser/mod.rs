@@ -34,7 +34,12 @@ impl From<crate::types::MessageDecodeError> for Brc721Error {
 pub struct Parser;
 
 impl Parser {
-    pub fn parse_block(&self, block: &Block, storage: &dyn crate::storage::Storage) -> Result<(), Brc721Error> {
+    pub fn parse_block(
+        &self,
+        block: &Block,
+        block_height: u64,
+        storage: &dyn crate::storage::Storage,
+    ) -> Result<(), Brc721Error> {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let output = match get_first_output_if_op_return(tx) {
                 Some(output) => output,
@@ -46,7 +51,9 @@ impl Parser {
                 None => continue,
             };
 
-            if let Some(Err(ref e)) = digest(brc721_tx, storage, block.header.time as u64, tx_index as u32) {
+            if let Some(Err(ref e)) =
+                digest(brc721_tx, storage, block_height, tx_index as u32)
+            {
                 log::warn!("{:?}", e);
             }
         }
@@ -192,7 +199,7 @@ mod tests {
         };
         let parser = Parser;
         let storage = crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
-        let r = parser.parse_block(&block, &storage);
+        let r = parser.parse_block(&block, 0, &storage);
         assert!(r.is_ok());
     }
 }
