@@ -19,31 +19,6 @@ impl RemoteWallet {
         }
     }
 
-    pub fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
-        let client = Client::new(rpc_url.as_ref(), auth.clone()).context("create root client")?;
-        let info = client
-            .get_blockchain_info()
-            .context("get_blockchain_info")?;
-        Ok(info.chain)
-    }
-
-    fn watch_url(&self) -> String {
-        format!(
-            "{}/wallet/{}",
-            self.rpc_url.to_string().trim_end_matches('/'),
-            self.watch_name
-        )
-    }
-
-    fn watch_client(&self) -> Result<Client> {
-        let url = self.watch_url();
-        Client::new(&url, self.auth.clone()).context("create Core wallet client")
-    }
-
-    fn root_client(&self) -> Result<Client> {
-        Client::new(self.rpc_url.as_ref(), self.auth.clone()).context("create root client")
-    }
-
     pub fn balances(&self) -> Result<json::GetBalancesResult> {
         let client = self.watch_client()?;
         client.get_balances().context("get balance")
@@ -149,14 +124,9 @@ impl RemoteWallet {
         Ok(psbt)
     }
 
-    pub fn create_psbt_from_txouts(
-        &self,
-        outputs: Vec<TxOut>,
-        fee_rate: Option<f64>,
-    ) -> Result<Psbt> {
+    pub fn create_psbt_from_txout(&self, output: TxOut, fee_rate: Option<f64>) -> Result<Psbt> {
         let client = self.watch_client()?;
 
-        let output = outputs[0].clone();
         let script = output.script_pubkey;
         let dummy = bitcoin::script::ScriptBuf::from(vec![0u8; script.len() - 2]);
         let mut options = serde_json::json!({});
@@ -188,10 +158,22 @@ impl RemoteWallet {
         let txid = root.send_raw_transaction(tx).context("broadcast tx")?;
         Ok(txid)
     }
+
+    fn watch_client(&self) -> Result<Client> {
+        let url = format!(
+            "{}/wallet/{}",
+            self.rpc_url.to_string().trim_end_matches('/'),
+            self.watch_name
+        );
+        Client::new(&url, self.auth.clone()).context("create Core wallet client")
+    }
+
+    fn root_client(&self) -> Result<Client> {
+        Client::new(self.rpc_url.as_ref(), self.auth.clone()).context("create root client")
+    }
 }
 
-pub fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
-    // Trova l'indice del primo output con OP_RETURN
+fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
     let opret_index_opt = psbt
         .unsigned_tx
         .output
@@ -199,12 +181,10 @@ pub fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
         .position(|txout| txout.script_pubkey.is_op_return());
 
     let Some(opret_index) = opret_index_opt else {
-        // Nessun OP_RETURN: restituiamo il PSBT invariato
         return psbt;
     };
 
     if opret_index == 0 {
-        // È già il primo output: niente da fare
         return psbt;
     }
 
@@ -237,8 +217,7 @@ pub fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
 
 /// Substitute the script of the first OP_RETURN output in a PSBT while keeping the amount unchanged.
 /// If no OP_RETURN output exists, the PSBT is returned unchanged.
-pub fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
-    // Trova l'indice del primo OP_RETURN
+fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
     let idx_opt = psbt
         .unsigned_tx
         .output
@@ -246,18 +225,12 @@ pub fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -
         .position(|txout| txout.script_pubkey.is_op_return());
 
     let Some(idx) = idx_opt else {
-        // Nessun OP_RETURN → nessun cambiamento
         return Ok(psbt);
     };
 
-    // Sostituiamo solo lo script_pubkey, NON amount
     let original_amount = psbt.unsigned_tx.output[idx].value;
     psbt.unsigned_tx.output[idx].script_pubkey = new_script.clone();
     psbt.unsigned_tx.output[idx].value = original_amount;
-
-    // Aggiornamento metadata PSBT (se vuoi aggiungere witness/redeem script lo fai qui)
-    // Per ora manteniamo invariato lo psbt.outputs[idx], perché non serve per OP_RETURN.
-    // Se usi metadata OP_RETURN custom puoi modificarlo tu.
 
     Ok(psbt)
 }
@@ -322,7 +295,7 @@ mod tests {
         };
 
         remote_wallet
-            .create_psbt_from_txouts(vec![output], None)
+            .create_psbt_from_txout(output, None)
             .expect("psbt");
     }
 
@@ -358,13 +331,13 @@ mod tests {
         assert_eq!(output.script_pubkey.len(), 4);
 
         let psbt = remote_wallet
-            .create_psbt_from_txouts(vec![output.clone()], None)
+            .create_psbt_from_txout(output.clone(), None)
             .expect("psbt");
 
         assert_eq!(psbt.unsigned_tx.output.len(), 2);
         assert_eq!(
-            psbt.unsigned_tx.output[0].clone().script_pubkey.len(),
-            output.script_pubkey.len()
+            psbt.unsigned_tx.output[0].clone().script_pubkey,
+            output.script_pubkey
         );
     }
 }

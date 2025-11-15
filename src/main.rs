@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         log::info!("📝 Log file: {}", path.to_string_lossy());
     }
 
-    let storage = init_storage(&ctx);
+    let storage = init_storage(&ctx)?;
     let shutdown = tokio_util::sync::CancellationToken::new();
 
     let api_addr = cli.api_listen;
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
         .unwrap_or_default()
         .map(|last| last.height + 1)
         .unwrap_or(ctx.start);
-    let scanner = init_scanner(&ctx, starting_block);
+    let scanner = init_scanner(&ctx, starting_block)?;
     let parser = parser::Parser {};
     let core = core::Core::new(storage.clone(), scanner, parser);
     let shutdown_core = shutdown.clone();
@@ -92,7 +92,7 @@ fn init_data_dir(ctx: &context::Context) -> Result<()> {
     Ok(())
 }
 
-fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Sync> {
+fn init_storage(ctx: &context::Context) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
     let data_dir = std::path::PathBuf::from(&ctx.data_dir);
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -100,19 +100,19 @@ fn init_storage(ctx: &context::Context) -> Arc<dyn storage::Storage + Send + Syn
         .into_owned();
     let sqlite = storage::SqliteStorage::new(&db_path);
     if ctx.reset {
-        let _ = sqlite.reset_all();
+        sqlite.reset_all().context("resetting storage")?;
     }
-    let _ = sqlite.init();
-    Arc::new(sqlite)
+    sqlite.init().context("initializing storage")?;
+    Ok(Arc::new(sqlite))
 }
 
-fn init_scanner(ctx: &context::Context, start_block: u64) -> scanner::Scanner<Client> {
-    let client =
-        Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone()).expect("failed to create RPC client");
-    scanner::Scanner::new(client)
+fn init_scanner(ctx: &context::Context, start_block: u64) -> Result<scanner::Scanner<Client>> {
+    let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
+        .context("failed to create RPC client")?;
+    Ok(scanner::Scanner::new(client)
         .with_confirmations(ctx.confirmations)
         .with_capacity(ctx.batch_size)
-        .with_start_from(start_block)
+        .with_start_from(start_block))
 }
 
 #[cfg(test)]

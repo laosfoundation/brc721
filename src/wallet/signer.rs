@@ -1,10 +1,10 @@
+use crate::wallet::master_key_store::MasterKeyStore;
 use age::secrecy::SecretString;
 use anyhow::Result;
 use bdk_wallet::{template::Bip86, KeychainKind, Wallet};
-use bitcoin::{Network, Psbt};
 use bitcoin::bip32::Xpriv;
-
-use crate::wallet::master_key_store::MasterKeyStore;
+use bitcoin::{Network, Psbt};
+use std::path::Path;
 
 /// Signer provides a builder-style API (with_*) to configure
 /// and produce signatures for PSBTs using the wallet's master key material.
@@ -14,21 +14,11 @@ pub struct Signer {
 }
 
 impl Signer {
-    pub fn new() -> Self {
+    pub fn new<P: AsRef<Path>>(data_dir: P, network: Network) -> Self {
         Self {
-            data_dir: std::path::PathBuf::new(),
-            network: Network::Regtest,
+            data_dir: data_dir.as_ref().to_path_buf(),
+            network,
         }
-    }
-
-    pub fn with_data_dir<P: AsRef<std::path::Path>>(mut self, data_dir: P) -> Self {
-        self.data_dir = data_dir.as_ref().to_path_buf();
-        self
-    }
-
-    pub fn with_network(mut self, network: Network) -> Self {
-        self.network = network;
-        self
     }
 
     /// Persist the provided master private key using MasterKeyStore with encryption.
@@ -51,5 +41,51 @@ impl Signer {
 
         let finalized = wallet.sign(psbt, Default::default()).expect("sign");
         Ok(finalized)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use age::secrecy::SecretString;
+    use bitcoin::bip32::Xpriv;
+    use bitcoin::transaction::Version;
+    use bitcoin::Network;
+    use tempfile::TempDir;
+
+    fn get_test_xpriv(network: Network) -> Xpriv {
+        // Use a random key for testing; replace with a constant seed for reproducibility
+        let seed = [0u8; 64];
+        Xpriv::new_master(network, &seed).expect("Xpriv::new_master failed")
+    }
+
+    #[test]
+    fn test_sign_psbt() {
+        let temp_dir = TempDir::new().unwrap();
+        let network = Network::Testnet;
+        let signer = Signer::new(temp_dir.path(), network);
+        let xpriv = get_test_xpriv(network);
+        let passphrase = SecretString::new(Box::<str>::from("test-passphrase"));
+        signer
+            .store_master_key(&xpriv, &passphrase)
+            .expect("store_master_key");
+
+        let mut psbt = Psbt {
+            version: 0,
+            xpub: Default::default(),
+            proprietary: Default::default(),
+            unknown: Default::default(),
+            inputs: vec![],
+            outputs: vec![],
+            unsigned_tx: bitcoin::Transaction {
+                version: Version(2),
+                lock_time: bitcoin::absolute::LockTime::ZERO,
+                input: vec![],
+                output: vec![],
+            },
+        };
+
+        let result = signer.sign(&mut psbt, &passphrase);
+        assert!(result.is_ok());
     }
 }

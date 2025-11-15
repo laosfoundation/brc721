@@ -14,7 +14,7 @@ pub type CollectionAddress = H160;
 pub type Brc721Tx = [u8];
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
 
-pub fn brc721_output(payload: &[u8]) -> TxOut {
+pub fn build_brc721_output(payload: &[u8]) -> TxOut {
     let pb = PushBytesBuf::try_from(payload.to_vec()).unwrap();
     let script = Builder::new()
         .push_opcode(opcodes::all::OP_RETURN)
@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_brc721_output_creates_correct_txout() {
         let payload = [0xaa, 0xbb, 0xcc];
-        let txout = brc721_output(&payload);
+        let txout = build_brc721_output(&payload);
         // Value should be zero
         assert_eq!(txout.value, Amount::from_sat(0));
         assert_eq!(

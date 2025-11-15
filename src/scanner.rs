@@ -23,7 +23,7 @@ impl BitcoinRpc for Client {
     }
 }
 
-const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
+const DEFAULT_WAIT_TIMEOUT_MS: u64 = 1_000;
 
 pub struct Scanner<C: BitcoinRpc> {
     client: C,
@@ -57,7 +57,10 @@ impl<C: BitcoinRpc> Scanner<C> {
         self
     }
 
-    pub fn next_blocks(&mut self) -> Result<&[(u64, Block)], RpcError> {
+    pub fn next_blocks_with_shutdown(
+        &mut self,
+        shutdown: &tokio_util::sync::CancellationToken,
+    ) -> Result<&[(u64, Block)], RpcError> {
         if self.out.capacity() == 0 {
             self.out.clear();
             return Ok(self.out.as_slice());
@@ -65,6 +68,9 @@ impl<C: BitcoinRpc> Scanner<C> {
         loop {
             self.collect_ready_blocks()?;
             if !self.out.is_empty() {
+                return Ok(self.out.as_slice());
+            }
+            if shutdown.is_cancelled() {
                 return Ok(self.out.as_slice());
             }
             self.client.wait_for_new_block(DEFAULT_WAIT_TIMEOUT_MS)?;
@@ -196,7 +202,9 @@ mod tests {
             .with_capacity(2)
             .with_start_from(start);
 
-        let out = scanner.next_blocks().unwrap();
+        let shutdown = tokio_util::sync::CancellationToken::new();
+
+        let out = scanner.next_blocks_with_shutdown(&shutdown).unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].0, start);
         assert_eq!(out[1].0, start + 1);
