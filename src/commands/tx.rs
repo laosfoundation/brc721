@@ -4,6 +4,7 @@ use super::CommandRunner;
 use crate::types::{build_brc721_output, RegisterCollectionMessage};
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
+use age::secrecy::SecretString;
 use anyhow::{Context, Result};
 use bitcoin::{Address, Amount};
 
@@ -24,11 +25,12 @@ impl CommandRunner for cli::TxCmd {
 
                 let wallet =
                     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
-                let passphrase = passphrase.clone().unwrap_or_else(|| {
-                    prompt_passphrase_once()
-                        .expect("prompt")
-                        .unwrap_or_default()
-                });
+                let passphrase = passphrase
+                    .clone()
+                    .map(SecretString::from)
+                    .unwrap_or_else(|| SecretString::from(
+                        prompt_passphrase_once().expect("prompt").unwrap_or_default(),
+                    ));
                 let tx = wallet
                     .build_tx(output, *fee_rate, passphrase)
                     .context("build tx")?;
@@ -52,11 +54,12 @@ impl CommandRunner for cli::TxCmd {
                     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
                 let amount = Amount::from_sat(*amount_sat);
                 let address = Address::from_str(to)?.require_network(ctx.network)?;
-                let passphrase = passphrase.clone().unwrap_or_else(|| {
-                    prompt_passphrase_once()
-                        .expect("prompt")
-                        .unwrap_or_default()
-                });
+                let passphrase = passphrase
+                    .clone()
+                    .map(SecretString::from)
+                    .unwrap_or_else(|| SecretString::from(
+                        prompt_passphrase_once().expect("prompt").unwrap_or_default(),
+                    ));
                 let tx = wallet
                     .build_payment_tx(&address, amount, *fee_rate, passphrase)
                     .context("build payment tx")?;

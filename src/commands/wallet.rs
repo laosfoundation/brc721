@@ -1,6 +1,7 @@
 use super::CommandRunner;
 use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::wallet::passphrase::prompt_passphrase;
+use age::secrecy::SecretString;
 use crate::{cli, context};
 use anyhow::{Context, Result};
 use bdk_wallet::bip39::{Language, Mnemonic};
@@ -20,8 +21,8 @@ impl CommandRunner for cli::WalletCmd {
                 let wallet =
                     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
                         .or_else(|_| {
-                            let passphrase = passphrase.clone().unwrap_or_else(|| {
-                                prompt_passphrase().expect("prompt").unwrap_or_default()
+                            let passphrase = passphrase.clone().map(SecretString::from).unwrap_or_else(|| {
+                                SecretString::from(prompt_passphrase().expect("prompt").unwrap_or_default())
                             });
                             let w = Brc721Wallet::create(
                                 &ctx.data_dir,

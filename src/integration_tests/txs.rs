@@ -1,4 +1,5 @@
 use crate::wallet::brc721_wallet::Brc721Wallet;
+use age::secrecy::SecretString;
 use bitcoin::{Amount, Network};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use corepc_node::Node;
@@ -15,7 +16,7 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         &data_dir,
         Network::Regtest,
         None,
-        "passphrase".to_string(),
+        SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
     )
@@ -34,7 +35,11 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_3 0a0b0c"
     );
     let tx = wallet
-        .build_tx(output, Some(1.5), "passphrase".to_string())
+        .build_tx(
+            output,
+            Some(1.5),
+            SecretString::from("passphrase".to_string()),
+        )
         .expect("build tx");
     assert!(!tx.input.is_empty(), "built tx must have inputs");
     assert!(!tx.output.is_empty(), "built tx must have outputs");
@@ -60,7 +65,7 @@ fn test_send_amount_between_wallets_via_psbt() {
         data_dir0.path(),
         Network::Regtest,
         None,
-        "passphrase".to_string(),
+        SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
     )
@@ -88,7 +93,7 @@ fn test_send_amount_between_wallets_via_psbt() {
         data_dir1.path(),
         Network::Regtest,
         None,
-        passphrase.clone(),
+        SecretString::from(passphrase.clone()),
         &node_url,
         auth.clone(),
     )
@@ -103,7 +108,7 @@ fn test_send_amount_between_wallets_via_psbt() {
     let fee = 2.5;
     // Send from wallet0 to wallet1 via PSBT flow
     let tx = wallet0
-        .build_payment_tx(address1, amount, Some(fee), passphrase)
+        .build_payment_tx(address1, amount, Some(fee), SecretString::from(passphrase))
         .expect("build payment tx");
     wallet0.broadcast(&tx).expect("broadcast");
 

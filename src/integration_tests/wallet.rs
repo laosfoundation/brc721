@@ -1,11 +1,11 @@
+use crate::wallet::brc721_wallet::Brc721Wallet;
+use age::secrecy::SecretString;
 use bdk_wallet::bip39::{Language, Mnemonic};
 use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use corepc_node::Node;
 use tempfile::TempDir;
 use url::Url;
-
-use crate::wallet::brc721_wallet::Brc721Wallet;
 
 #[test]
 fn test_wallet_creation() {
@@ -23,7 +23,7 @@ fn test_wallet_creation() {
         data_dir.path(),
         Network::Regtest,
         Some(mnemonic),
-        "passphrase".to_string(),
+        SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
     )
@@ -60,7 +60,7 @@ fn test_setup_watch_only_idempotent() {
         data_dir.path(),
         Network::Regtest,
         Some(mnemonic),
-        "passphrase".to_string(),
+        SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
     )

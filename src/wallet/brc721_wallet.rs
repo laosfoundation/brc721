@@ -1,14 +1,13 @@
-use bitcoincore_rpc::Auth;
-use std::path::Path;
-use url::Url;
-
-use anyhow::{Context, Ok, Result};
+use crate::wallet::{local_wallet::LocalWallet, remote_wallet::RemoteWallet, signer::Signer};
+use age::secrecy::SecretString;
+use anyhow::{Context, Result};
 use bdk_wallet::{bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind};
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::json;
+use bitcoincore_rpc::Auth;
 use rand::{rngs::OsRng, RngCore};
-
-use crate::wallet::{local_wallet::LocalWallet, remote_wallet::RemoteWallet, signer::Signer};
+use std::path::Path;
+use url::Url;
 
 pub struct Brc721Wallet {
     local: LocalWallet,
@@ -21,7 +20,7 @@ impl Brc721Wallet {
         data_dir: P,
         network: Network,
         mnemonic: Option<Mnemonic>,
-        passphrase: String,
+        passphrase: SecretString,
         rpc_url: &Url,
         auth: Auth,
     ) -> Result<Brc721Wallet> {
@@ -39,9 +38,8 @@ impl Brc721Wallet {
         let local = LocalWallet::create(&data_dir, network, &master_xprv)?;
         let remote = RemoteWallet::new(local.id(), rpc_url, auth);
 
-        let pass = age::secrecy::SecretString::from(passphrase);
         let signer = Signer::new(&data_dir, network);
-        signer.store_master_key(&master_xprv, &pass)?;
+        signer.store_master_key(&master_xprv, &passphrase)?;
 
         Ok(Self {
             local,
@@ -92,37 +90,37 @@ impl Brc721Wallet {
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
-        passphrase: String,
+        passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
         let psbt: Psbt = self
             .remote
             .create_psbt_for_payment(target_address, amount, fee_rate)?;
 
-        self.sign(psbt, passphrase)
+        self.sign(psbt, &passphrase)
     }
 
     pub fn build_tx(
         &self,
         output: bitcoin::TxOut,
         fee_rate: Option<f64>,
-        passphrase: String,
+        passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
         let psbt = self
             .remote
             .create_psbt_from_txout(output, fee_rate)
             .context("create psbt from outputs")?;
 
-        self.sign(psbt, passphrase)
+        self.sign(psbt, &passphrase)
     }
 
     pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
         self.remote.broadcast(tx)
     }
 
-    fn sign(&self, mut psbt: Psbt, passphrase: String) -> Result<bitcoin::Transaction> {
+    fn sign(&self, mut psbt: Psbt, passphrase: &SecretString) -> Result<bitcoin::Transaction> {
         let finalized = self
             .signer
-            .sign(&mut psbt, &age::secrecy::SecretString::from(passphrase))
+            .sign(&mut psbt, passphrase)
             .context("bdk sign")?;
 
         let secp = bitcoin::secp256k1::Secp256k1::verification_only();
@@ -158,7 +156,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -190,7 +188,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic.clone()),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -232,7 +230,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -260,7 +258,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -305,7 +303,7 @@ mod tests {
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
         )
@@ -314,7 +312,7 @@ mod tests {
             &data_dir1,
             Network::Bitcoin,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -342,7 +340,7 @@ mod tests {
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
         )
@@ -353,7 +351,7 @@ mod tests {
             &data_dir1,
             Network::Regtest,
             Some(mnemonic.clone()),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -381,7 +379,7 @@ mod tests {
             &data_dir0,
             Network::Regtest,
             Some(mnemonic.clone()),
-            "passphrase1".to_string(),
+            SecretString::from("passphrase1".to_string()),
             &node_url,
             auth.clone(),
         )
@@ -392,7 +390,7 @@ mod tests {
             &data_dir1,
             Network::Regtest,
             Some(mnemonic.clone()),
-            "passphrase1".to_string(),
+            SecretString::from("passphrase1".to_string()),
             &node_url,
             auth,
         )
@@ -421,7 +419,7 @@ mod tests {
             &data_dir,
             network,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
         )
@@ -445,7 +443,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -469,7 +467,7 @@ mod tests {
             &data_dir,
             Network::Bitcoin,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
         )
@@ -494,7 +492,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic.clone()),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
         )
@@ -504,7 +502,7 @@ mod tests {
             &data_dir,
             Network::Regtest,
             Some(mnemonic),
-            "passphrase".to_string(),
+            SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
         );
