@@ -32,10 +32,14 @@ impl From<crate::types::MessageDecodeError> for Brc721Error {
 }
 
 pub struct Parser {
-    pub storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
+    storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
 }
 
 impl Parser {
+    pub fn new(storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>) -> Self {
+        Self { storage }
+    }
+
     pub fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let output = match get_first_output_if_op_return(tx) {
