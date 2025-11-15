@@ -49,6 +49,11 @@ impl SqliteStorage {
                 height INTEGER NOT NULL,
                 hash TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS collections (
+                id TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                params TEXT NOT NULL
+            );
             "#,
         )
     }

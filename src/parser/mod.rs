@@ -34,7 +34,7 @@ impl From<crate::types::MessageDecodeError> for Brc721Error {
 pub struct Parser;
 
 impl Parser {
-    pub fn parse_block(&self, block: &Block) -> Result<(), Brc721Error> {
+    pub fn parse_block(&self, block: &Block, storage: &dyn crate::storage::Storage) -> Result<(), Brc721Error> {
         for tx in block.txdata.iter() {
             let output = match get_first_output_if_op_return(tx) {
                 Some(output) => output,
@@ -46,7 +46,7 @@ impl Parser {
                 None => continue,
             };
 
-            if let Some(Err(ref e)) = digest(brc721_tx) {
+            if let Some(Err(ref e)) = digest(brc721_tx, storage) {
                 log::warn!("{:?}", e);
             }
         }
@@ -70,7 +70,7 @@ fn get_brc721_tx(output: &TxOut) -> Option<&Brc721Tx> {
     }
 }
 
-fn digest(tx: &Brc721Tx) -> Option<Result<(), Brc721Error>> {
+fn digest(tx: &Brc721Tx, storage: &dyn crate::storage::Storage) -> Option<Result<(), Brc721Error>> {
     if tx.is_empty() {
         return None;
     }
@@ -84,7 +84,7 @@ fn digest(tx: &Brc721Tx) -> Option<Result<(), Brc721Error>> {
     };
 
     let result = match command {
-        Brc721Command::RegisterCollection => register_collection::digest(tx),
+        Brc721Command::RegisterCollection => register_collection::digest(tx, storage),
     };
     Some(result)
 }
@@ -191,7 +191,8 @@ mod tests {
             txdata: vec![tx],
         };
         let parser = Parser;
-        let r = parser.parse_block(&block);
+        let storage = crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
+        let r = parser.parse_block(&block, &storage);
         assert!(r.is_ok());
     }
 }
