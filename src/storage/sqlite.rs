@@ -38,6 +38,15 @@ impl SqliteStorage {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
+
+        let current_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if current_version != 0 && current_version != 1 {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some("Unsupported database schema version; please resync with --reset".into()),
+            ));
+        }
+
         Self::migrate(&conn)?;
         f(&conn)
     }
@@ -45,6 +54,7 @@ impl SqliteStorage {
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             r#"
+            PRAGMA user_version = 1;
             CREATE TABLE IF NOT EXISTS chain_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 height INTEGER NOT NULL,
@@ -94,7 +104,12 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    fn save_collection(&self, key: CollectionKey, owner: String, params: String) -> anyhow::Result<()> {
+    fn save_collection(
+        &self,
+        key: CollectionKey,
+        owner: String,
+        params: String,
+    ) -> anyhow::Result<()> {
         self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO collections (block_height, tx_index, owner, params) VALUES (?1, ?2, ?3, ?4)
@@ -185,6 +200,11 @@ mod tests {
             .optional()
             .unwrap();
         assert_eq!(chain_state.as_deref(), Some("chain_state"));
+
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
     }
 
     #[test]
