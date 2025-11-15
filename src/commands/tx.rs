@@ -28,9 +28,13 @@ impl CommandRunner for cli::TxCmd {
                 let passphrase = passphrase
                     .clone()
                     .map(SecretString::from)
-                    .unwrap_or_else(|| SecretString::from(
-                        prompt_passphrase_once().expect("prompt").unwrap_or_default(),
-                    ));
+                    .unwrap_or_else(|| {
+                        SecretString::from(
+                            prompt_passphrase_once()
+                                .expect("prompt")
+                                .unwrap_or_default(),
+                        )
+                    });
                 let tx = wallet
                     .build_tx(output, *fee_rate, passphrase)
                     .context("build tx")?;
@@ -57,9 +61,13 @@ impl CommandRunner for cli::TxCmd {
                 let passphrase = passphrase
                     .clone()
                     .map(SecretString::from)
-                    .unwrap_or_else(|| SecretString::from(
-                        prompt_passphrase_once().expect("prompt").unwrap_or_default(),
-                    ));
+                    .unwrap_or_else(|| {
+                        SecretString::from(
+                            prompt_passphrase_once()
+                                .expect("prompt")
+                                .unwrap_or_default(),
+                        )
+                    });
                 let tx = wallet
                     .build_payment_tx(&address, amount, *fee_rate, passphrase)
                     .context("build payment tx")?;

@@ -28,10 +28,7 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
                 log::info!("🛑 Core shutdown requested");
                 break;
             }
-            match self
-                .scanner
-                .next_blocks_with_shutdown(&shutdown)
-            {
+            match self.scanner.next_blocks_with_shutdown(&shutdown) {
                 Ok(blocks) => {
                     for (height, block) in blocks {
                         log::info!("🧱 block={} 🧾 hash={}", height, block.block_hash());
