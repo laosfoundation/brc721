@@ -5,7 +5,6 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::ge
 use serde::Serialize;
 
 use crate::storage::Storage;
-use crate::storage::traits::CollectionKey;
 
 #[derive(Clone)]
 pub struct AppState {
