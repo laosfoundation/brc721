@@ -3,6 +3,7 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{Block, Storage};
+use crate::storage::traits::CollectionKey;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -37,6 +38,7 @@ impl SqliteStorage {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
+
         Self::migrate(&conn)?;
         f(&conn)
     }
@@ -48,6 +50,11 @@ impl SqliteStorage {
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 height INTEGER NOT NULL,
                 hash TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS collections (
+                id TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                rebaseable INTEGER NOT NULL
             );
             "#,
         )
@@ -84,6 +91,45 @@ impl Storage for SqliteStorage {
             Ok(())
         })?;
         Ok(())
+    }
+
+    fn save_collection(
+        &self,
+        key: CollectionKey,
+        owner: String,
+        rebaseable: bool,
+    ) -> anyhow::Result<()> {
+        let id = key.id;
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO collections (id, owner, rebaseable) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET owner=excluded.owner, rebaseable=excluded.rebaseable",
+                params![id, owner, rebaseable as i64],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+        let rows = self.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, owner, rebaseable FROM collections ORDER BY id")?;
+            let mapped = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    let owner: String = row.get(1)?;
+                    let rebaseable_int: i64 = row.get(2)?;
+                    let rebaseable = rebaseable_int != 0;
+                    Ok((
+                        CollectionKey { id },
+                        owner,
+                        rebaseable,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(mapped)
+        })?;
+        Ok(rows)
     }
 }
 

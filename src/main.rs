@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
         .map(|last| last.height + 1)
         .unwrap_or(ctx.start);
     let scanner = init_scanner(&ctx, starting_block)?;
-    let parser = parser::Parser {};
+    let parser = parser::Parser::new(storage.clone());
     let core = core::Core::new(storage.clone(), scanner, parser);
     let shutdown_core = shutdown.clone();
     let mut core_handle = tokio::task::spawn_blocking(move || {
