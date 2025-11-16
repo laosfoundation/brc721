@@ -5,6 +5,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::{Block, Storage};
 use crate::storage::traits::CollectionKey;
 
+const DB_SCHEMA_VERSION: i64 = 1;
+
 #[derive(Clone)]
 pub struct SqliteStorage {
     pub path: String,
@@ -58,6 +60,23 @@ impl SqliteStorage {
             );
             "#,
         )?;
+
+        let mut stmt = conn.prepare("PRAGMA user_version")?;
+        let current_version: i64 = stmt.query_row([], |row| row.get(0))?;
+        if current_version != 0 && current_version != DB_SCHEMA_VERSION {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Integer,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "database schema version mismatch (found {}, expected {}); please reset storage with --reset",
+                        current_version, DB_SCHEMA_VERSION
+                    ),
+                )),
+            ));
+        }
+        conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
 
         let mut stmt = conn.prepare("PRAGMA table_info(collections)")?;
         let columns = stmt
@@ -153,6 +172,7 @@ impl Storage for SqliteStorage {
 mod tests {
     use super::*;
     use rusqlite::{Connection, OptionalExtension};
+    use crate::storage::sqlite::DB_SCHEMA_VERSION;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_file(prefix: &str, ext: &str) -> std::path::PathBuf {
@@ -201,6 +221,40 @@ mod tests {
             .optional()
             .unwrap();
         assert_eq!(chain_state.as_deref(), Some("chain_state"));
+
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, DB_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn sqlite_fails_on_mismatched_schema_version() {
+        let path = unique_temp_file("brc721_bad_version", "db");
+        let repo = SqliteStorage::new(&path);
+
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS chain_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                height INTEGER NOT NULL,
+                hash TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS collections (
+                id TEXT PRIMARY KEY,
+                evm_collection_address TEXT NOT NULL,
+                rebaseable INTEGER NOT NULL
+            );
+            PRAGMA user_version = 999;
+            "#,
+        )
+        .unwrap();
+
+        let err = repo.init().expect_err("init should fail on version mismatch");
+        let msg = format!("{err}");
+        assert!(msg.contains("database schema version mismatch"));
+        assert!(msg.contains("--reset"));
     }
 
     #[test]
