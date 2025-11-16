@@ -171,8 +171,8 @@ impl Storage for SqliteStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::{Connection, OptionalExtension};
     use crate::storage::sqlite::DB_SCHEMA_VERSION;
+    use rusqlite::{Connection, OptionalExtension};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_file(prefix: &str, ext: &str) -> std::path::PathBuf {
@@ -251,7 +251,9 @@ mod tests {
         )
         .unwrap();
 
-        let err = repo.init().expect_err("init should fail on version mismatch");
+        let err = repo
+            .init()
+            .expect_err("init should fail on version mismatch");
         let msg = format!("{err}");
         assert!(msg.contains("database schema version mismatch"));
         assert!(msg.contains("--reset"));
