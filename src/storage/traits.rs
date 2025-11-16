@@ -15,7 +15,7 @@ pub trait Storage {
     fn save_collection(
         &self,
         key: CollectionKey,
-        owner: String,
+        evm_collection_address: String,
         rebaseable: bool,
     ) -> anyhow::Result<()>;
     fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>>;

@@ -28,7 +28,7 @@ struct ChainStateResponse {
 #[serde(rename_all = "camelCase")]
 struct CollectionResponse {
     id: String,
-    owner: String,
+    evm_collection_address: String,
     rebaseable: bool,
 }
 
@@ -97,11 +97,13 @@ async fn list_collections(State(state): State<AppState>) -> impl IntoResponse {
         .list_collections()
         .unwrap_or_default()
         .into_iter()
-        .map(|(key, owner, rebaseable)| CollectionResponse {
-            id: key.id,
-            owner,
-            rebaseable,
-        })
+        .map(
+            |(key, evm_collection_address, rebaseable)| CollectionResponse {
+                id: key.id,
+                evm_collection_address,
+                rebaseable,
+            },
+        )
         .collect();
     Json(CollectionsResponse { collections })
 }
