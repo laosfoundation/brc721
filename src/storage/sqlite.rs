@@ -113,18 +113,15 @@ impl Storage for SqliteStorage {
 
     fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
         let rows = self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT id, owner, rebaseable FROM collections ORDER BY id")?;
+            let mut stmt =
+                conn.prepare("SELECT id, owner, rebaseable FROM collections ORDER BY id")?;
             let mapped = stmt
                 .query_map([], |row| {
                     let id: String = row.get(0)?;
                     let owner: String = row.get(1)?;
                     let rebaseable_int: i64 = row.get(2)?;
                     let rebaseable = rebaseable_int != 0;
-                    Ok((
-                        CollectionKey { id },
-                        owner,
-                        rebaseable,
-                    ))
+                    Ok((CollectionKey { id }, owner, rebaseable))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(mapped)
