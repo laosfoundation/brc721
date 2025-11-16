@@ -3,6 +3,7 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{Block, Storage};
+use crate::storage::traits::CollectionKey;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -37,6 +38,7 @@ impl SqliteStorage {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
+
         Self::migrate(&conn)?;
         f(&conn)
     }
@@ -49,8 +51,31 @@ impl SqliteStorage {
                 height INTEGER NOT NULL,
                 hash TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS collections (
+                id TEXT PRIMARY KEY,
+                evm_collection_address TEXT NOT NULL,
+                rebaseable INTEGER NOT NULL
+            );
             "#,
-        )
+        )?;
+
+        let mut stmt = conn.prepare("PRAGMA table_info(collections)")?;
+        let columns = stmt
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                Ok(name)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let has_owner = columns.iter().any(|c| c == "owner");
+        let has_evm_collection_address = columns.iter().any(|c| c == "evm_collection_address");
+        if has_owner && !has_evm_collection_address {
+            conn.execute(
+                "ALTER TABLE collections RENAME COLUMN owner TO evm_collection_address",
+                [],
+            )?;
+        }
+
+        Ok(())
     }
 }
 
@@ -84,6 +109,43 @@ impl Storage for SqliteStorage {
             Ok(())
         })?;
         Ok(())
+    }
+
+    fn save_collection(
+        &self,
+        key: CollectionKey,
+        evm_collection_address: String,
+        rebaseable: bool,
+    ) -> anyhow::Result<()> {
+        let id = key.id;
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
+                params![id, evm_collection_address, rebaseable as i64],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+        let rows = self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
+            )?;
+            let mapped = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    let evm_collection_address: String = row.get(1)?;
+                    let rebaseable_int: i64 = row.get(2)?;
+                    let rebaseable = rebaseable_int != 0;
+                    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(mapped)
+        })?;
+        Ok(rows)
     }
 }
 

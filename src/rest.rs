@@ -25,6 +25,20 @@ struct ChainStateResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionResponse {
+    id: String,
+    evm_collection_address: String,
+    rebaseable: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionsResponse {
+    collections: Vec<CollectionResponse>,
+}
+
+#[derive(Serialize)]
 struct LastBlock {
     height: u64,
     hash: String,
@@ -43,6 +57,7 @@ pub async fn serve(
     let app = Router::new()
         .route("/health", get(health))
         .route("/state", get(chain_state))
+        .route("/collections", get(list_collections))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -74,4 +89,21 @@ async fn chain_state(State(state): State<AppState>) -> impl IntoResponse {
         hash: b.hash,
     });
     Json(ChainStateResponse { last })
+}
+
+async fn list_collections(State(state): State<AppState>) -> impl IntoResponse {
+    let collections = state
+        .storage
+        .list_collections()
+        .unwrap_or_default()
+        .into_iter()
+        .map(
+            |(key, evm_collection_address, rebaseable)| CollectionResponse {
+                id: key.id,
+                evm_collection_address,
+                rebaseable,
+            },
+        )
+        .collect();
+    Json(CollectionsResponse { collections })
 }

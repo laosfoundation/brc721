@@ -31,11 +31,17 @@ impl From<crate::types::MessageDecodeError> for Brc721Error {
     }
 }
 
-pub struct Parser;
+pub struct Parser {
+    storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
+}
 
 impl Parser {
-    pub fn parse_block(&self, block: &Block) -> Result<(), Brc721Error> {
-        for tx in block.txdata.iter() {
+    pub fn new(storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>) -> Self {
+        Self { storage }
+    }
+
+    pub fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
+        for (tx_index, tx) in block.txdata.iter().enumerate() {
             let output = match get_first_output_if_op_return(tx) {
                 Some(output) => output,
                 None => continue,
@@ -46,11 +52,43 @@ impl Parser {
                 None => continue,
             };
 
-            if let Some(Err(ref e)) = digest(brc721_tx) {
+            log::info!(
+                "📦 Found BRC-721 tx at block {}, tx {}",
+                block_height,
+                tx_index
+            );
+
+            if let Some(Err(ref e)) = self.digest(brc721_tx, block_height, tx_index as u32) {
                 log::warn!("{:?}", e);
             }
         }
         Ok(())
+    }
+
+    fn digest(
+        &self,
+        tx: &Brc721Tx,
+        block_height: u64,
+        tx_index: u32,
+    ) -> Option<Result<(), Brc721Error>> {
+        if tx.is_empty() {
+            return None;
+        }
+
+        let command = match Brc721Command::try_from(tx[0]) {
+            Ok(cmd) => cmd,
+            Err(_) => {
+                log::warn!("Failed to parse Brc721Command from byte {}", tx[0]);
+                return Some(Err(Brc721Error::WrongCommand(tx[0])));
+            }
+        };
+
+        let result = match command {
+            Brc721Command::RegisterCollection => {
+                register_collection::digest(tx, self.storage.clone(), block_height, tx_index)
+            }
+        };
+        Some(result)
     }
 }
 
@@ -68,25 +106,6 @@ fn get_brc721_tx(output: &TxOut) -> Option<&Brc721Tx> {
         Ok(Instruction::PushBytes(payload)) => Some(payload.as_bytes()),
         _ => None,
     }
-}
-
-fn digest(tx: &Brc721Tx) -> Option<Result<(), Brc721Error>> {
-    if tx.is_empty() {
-        return None;
-    }
-
-    let command = match Brc721Command::try_from(tx[0]) {
-        Ok(cmd) => cmd,
-        Err(_) => {
-            log::warn!("Failed to parse Brc721Command from byte {}", tx[0]);
-            return Some(Err(Brc721Error::WrongCommand(tx[0])));
-        }
-    };
-
-    let result = match command {
-        Brc721Command::RegisterCollection => register_collection::digest(tx),
-    };
-    Some(result)
 }
 
 fn get_first_output_if_op_return(tx: &Transaction) -> Option<&TxOut> {
@@ -190,8 +209,12 @@ mod tests {
             header,
             txdata: vec![tx],
         };
-        let parser = Parser;
-        let r = parser.parse_block(&block);
+        let storage =
+            crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
+        let parser = Parser {
+            storage: std::sync::Arc::new(storage),
+        };
+        let r = parser.parse_block(&block, 0);
         assert!(r.is_ok());
     }
 }
