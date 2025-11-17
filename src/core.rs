@@ -22,13 +22,17 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
         }
     }
 
-    pub fn run(mut self) -> ! {
+    pub fn run(&mut self, shutdown: tokio_util::sync::CancellationToken) {
         loop {
-            match self.scanner.next_blocks() {
+            if shutdown.is_cancelled() {
+                log::info!("🛑 Core shutdown requested");
+                break;
+            }
+            match self.scanner.next_blocks_with_shutdown(&shutdown) {
                 Ok(blocks) => {
                     for (height, block) in blocks {
                         log::info!("🧱 block={} 🧾 hash={}", height, block.block_hash());
-                        if let Err(e) = self.parser.parse_block(block) {
+                        if let Err(e) = self.parser.parse_block(block, *height) {
                             log::error!(
                                 "parsing error of block {} at height {}: {}",
                                 block.block_hash(),
@@ -55,5 +59,6 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
                 }
             }
         }
+        log::info!("👋 Core loop exited");
     }
 }

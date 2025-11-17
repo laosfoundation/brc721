@@ -3,6 +3,9 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{Block, Storage};
+use crate::storage::traits::CollectionKey;
+
+const DB_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -16,16 +19,17 @@ impl SqliteStorage {
         }
     }
 
-    pub fn reset_all(&self) -> std::io::Result<()> {
+    pub fn reset_all(&self) -> anyhow::Result<()> {
         if !std::path::Path::new(&self.path).exists() {
             return Ok(());
         }
-        std::fs::remove_file(&self.path)
+        std::fs::remove_file(&self.path)?;
+        Ok(())
     }
 
-    pub fn init(&self) -> std::io::Result<()> {
-        self.with_conn(|_conn| Ok(()))
-            .map_err(|e| std::io::Error::other(e.to_string()))
+    pub fn init(&self) -> anyhow::Result<()> {
+        self.with_conn(|_conn| Ok(()))?;
+        Ok(())
     }
 
     fn with_conn<F, T>(&self, f: F) -> rusqlite::Result<T>
@@ -36,26 +40,47 @@ impl SqliteStorage {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
+
         Self::migrate(&conn)?;
         f(&conn)
     }
 
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS chain_state (
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        if version == DB_SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        if version == 0 {
+            conn.execute_batch(
+                r#"
+            CREATE TABLE chain_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 height INTEGER NOT NULL,
                 hash TEXT NOT NULL
             );
-            "#,
-        )
+            CREATE TABLE collections (
+                id TEXT PRIMARY KEY,
+                evm_collection_address TEXT NOT NULL,
+                rebaseable INTEGER NOT NULL
+            );
+        "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            return Ok(());
+        }
+
+        Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::ErrorCode::SchemaChanged as i32),
+            Some("database schema version mismatch; please run with --reset option".to_string()),
+        ))
     }
 }
 
 impl Storage for SqliteStorage {
-    fn load_last(&self) -> std::io::Result<Option<Block>> {
-        let r = self.with_conn(|conn| {
+    fn load_last(&self) -> anyhow::Result<Option<Block>> {
+        let opt = self.with_conn(|conn| {
             conn.query_row(
                 "SELECT height, hash FROM chain_state WHERE id = 1",
                 [],
@@ -69,32 +94,64 @@ impl Storage for SqliteStorage {
                 },
             )
             .optional()
-        });
-        match r {
-            Ok(opt) => Ok(opt),
-            Err(e) => Err(std::io::Error::other(e.to_string())),
-        }
+        })?;
+        Ok(opt)
     }
 
-    fn save_last(&self, height: u64, hash: &str) -> std::io::Result<()> {
-        let r = self.with_conn(|conn| {
+    fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
+        self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash",
                 params![height as i64, hash],
             )?;
             Ok(())
-        });
-        match r {
-            Ok(()) => Ok(()),
-            Err(e) => Err(std::io::Error::other(e.to_string())),
-        }
+        })?;
+        Ok(())
+    }
+
+    fn save_collection(
+        &self,
+        key: CollectionKey,
+        evm_collection_address: String,
+        rebaseable: bool,
+    ) -> anyhow::Result<()> {
+        let id = key.id;
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
+                params![id, evm_collection_address, rebaseable as i64],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+        let rows = self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
+            )?;
+            let mapped = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    let evm_collection_address: String = row.get(1)?;
+                    let rebaseable_int: i64 = row.get(2)?;
+                    let rebaseable = rebaseable_int != 0;
+                    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(mapped)
+        })?;
+        Ok(rows)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::sqlite::DB_SCHEMA_VERSION;
     use rusqlite::{Connection, OptionalExtension};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -145,7 +202,47 @@ mod tests {
             .unwrap();
         assert_eq!(chain_state.as_deref(), Some("chain_state"));
 
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, DB_SCHEMA_VERSION);
+    }
 
+    #[test]
+    fn sqlite_init_installs_schema_on_existing_vanilla_db() {
+        let path = unique_temp_file("brc721_init_existing", "db");
+        std::fs::File::create(&path).unwrap();
+        assert!(path.exists());
+
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, DB_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn sqlite_fails_on_mismatched_schema_version() {
+        let path = unique_temp_file("brc721_bad_version", "db");
+        let repo = SqliteStorage::new(&path);
+
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA user_version = 999;
+            "#,
+        )
+        .unwrap();
+
+        let err = repo
+            .init()
+            .expect_err("init should fail on version mismatch");
+        let msg = format!("{err}");
+        assert!(msg.contains("database schema version mismatch"));
+        assert!(msg.contains("--reset"));
     }
 
     #[test]
@@ -168,11 +265,7 @@ mod tests {
 
         let conn = Connection::open(&path).unwrap();
         let row_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM chain_state",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM chain_state", [], |row| row.get(0))
             .unwrap();
         assert_eq!(row_count, 1);
     }

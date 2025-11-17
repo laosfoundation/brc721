@@ -22,6 +22,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
 anyhow = "1.0.100"
+sha2 = "0.10.9"
+url = "2.5.7"
+age = "0.11"
+rpassword = "7"
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 
 [dev-dependencies]
-hex = "0.4"
+bdk_bitcoind_rpc = "0.22.0"
+corepc-node = { version = "0.8.0", features = ["26_2", "download"] }
+tempfile = "3.10"
+testcontainers = { version = "0.22", features = ["blocking"] }

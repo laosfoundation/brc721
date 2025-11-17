@@ -23,7 +23,7 @@ impl BitcoinRpc for Client {
     }
 }
 
-const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
+const DEFAULT_WAIT_TIMEOUT_MS: u64 = 1_000;
 
 pub struct Scanner<C: BitcoinRpc> {
     client: C,
@@ -57,7 +57,10 @@ impl<C: BitcoinRpc> Scanner<C> {
         self
     }
 
-    pub fn next_blocks(&mut self) -> Result<&[(u64, Block)], RpcError> {
+    pub fn next_blocks_with_shutdown(
+        &mut self,
+        shutdown: &tokio_util::sync::CancellationToken,
+    ) -> Result<&[(u64, Block)], RpcError> {
         if self.out.capacity() == 0 {
             self.out.clear();
             return Ok(self.out.as_slice());
@@ -65,6 +68,9 @@ impl<C: BitcoinRpc> Scanner<C> {
         loop {
             self.collect_ready_blocks()?;
             if !self.out.is_empty() {
+                return Ok(self.out.as_slice());
+            }
+            if shutdown.is_cancelled() {
                 return Ok(self.out.as_slice());
             }
             self.client.wait_for_new_block(DEFAULT_WAIT_TIMEOUT_MS)?;
@@ -104,8 +110,12 @@ impl<C: BitcoinRpc> Scanner<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{block::Header, block::Version, absolute::LockTime, transaction::Version as TxVersion, TxMerkleNode, CompactTarget, Transaction, TxIn, TxOut, Amount, Sequence, OutPoint, ScriptBuf};
     use bitcoin::hashes::Hash;
+    use bitcoin::{
+        absolute::LockTime, block::Header, block::Version, transaction::Version as TxVersion,
+        Amount, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxMerkleNode,
+        TxOut,
+    };
     use bitcoincore_rpc::Error as RpcError;
 
     struct MockRpc {
@@ -115,7 +125,10 @@ mod tests {
 
     impl MockRpc {
         fn new(tip: u64) -> Self {
-            Self { tip, blocks: std::collections::HashMap::new() }
+            Self {
+                tip,
+                blocks: std::collections::HashMap::new(),
+            }
         }
         fn with_block(mut self, height: u64, hash: BlockHash, block: Block) -> Self {
             self.blocks.insert(height, (hash, block));
@@ -124,21 +137,50 @@ mod tests {
     }
 
     impl BitcoinRpc for MockRpc {
-        fn get_block_count(&self) -> Result<u64, RpcError> { Ok(self.tip) }
-        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> { Ok(self.blocks.get(&height).unwrap().0) }
+        fn get_block_count(&self) -> Result<u64, RpcError> {
+            Ok(self.tip)
+        }
+        fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
+            Ok(self.blocks.get(&height).unwrap().0)
+        }
         fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
             let (_h, b) = self.blocks.values().find(|(hh, _)| hh == hash).unwrap();
             Ok(b.clone())
         }
-        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> { Ok(()) }
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            Ok(())
+        }
     }
 
     fn dummy_block(prev: BlockHash) -> Block {
-        let header = Header { version: Version::TWO, prev_blockhash: prev, merkle_root: TxMerkleNode::all_zeros(), time: 0, bits: CompactTarget::from_consensus(0), nonce: 0 };
-        let txin = TxIn { previous_output: OutPoint::null(), script_sig: ScriptBuf::new(), sequence: Sequence::MAX, witness: bitcoin::Witness::default() };
-        let txout = TxOut { value: Amount::from_sat(0), script_pubkey: ScriptBuf::new() };
-        let tx = Transaction { version: TxVersion::TWO, lock_time: LockTime::ZERO, input: vec![txin], output: vec![txout] };
-        Block { header, txdata: vec![tx] }
+        let header = Header {
+            version: Version::TWO,
+            prev_blockhash: prev,
+            merkle_root: TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: CompactTarget::from_consensus(0),
+            nonce: 0,
+        };
+        let txin = TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        };
+        let txout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: ScriptBuf::new(),
+        };
+        let tx = Transaction {
+            version: TxVersion::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![txin],
+            output: vec![txout],
+        };
+        Block {
+            header,
+            txdata: vec![tx],
+        }
     }
 
     #[test]
@@ -160,7 +202,9 @@ mod tests {
             .with_capacity(2)
             .with_start_from(start);
 
-        let out = scanner.next_blocks().unwrap();
+        let shutdown = tokio_util::sync::CancellationToken::new();
+
+        let out = scanner.next_blocks_with_shutdown(&shutdown).unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].0, start);
         assert_eq!(out[1].0, start + 1);
