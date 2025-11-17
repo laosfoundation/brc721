@@ -12,13 +12,13 @@ impl CommandRunner for cli::TxCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
         match self {
             cli::TxCmd::RegisterCollection {
-                collection_address,
+                evm_collection_address,
                 rebaseable,
                 fee_rate,
                 passphrase,
             } => {
                 let msg = RegisterCollectionMessage {
-                    collection_address: *collection_address,
+                    evm_collection_address: *evm_collection_address,
                     rebaseable: *rebaseable,
                 };
                 let output = build_brc721_output(&msg.encode());
@@ -42,7 +42,7 @@ impl CommandRunner for cli::TxCmd {
 
                 log::info!(
                     "✅ Registered collection {:#x}, rebaseable: {}, txid: {}",
-                    collection_address,
+                    evm_collection_address,
                     rebaseable,
                     txid
                 );

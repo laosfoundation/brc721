@@ -38,7 +38,7 @@ fn e2e_register_collection() {
     let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("tx")
         .arg("register-collection")
-        .arg("--collection-address")
+        .arg("--evm-collection-address")
         .arg("0xffff0123ffffffffffffffffffffffff3210ffff")
         .arg("--passphrase")
         .arg("passphrase")
