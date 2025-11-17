@@ -24,7 +24,7 @@ CLI
   - wallet-init --name <wallet>
   - wallet-newaddress --name <wallet>
   - wallet-balance --name <wallet>
-  - collection-create --name <wallet> --laos-hex <20-byte-hex> [--rebaseable] [--fee-rate <sat/vB>]
+  - collection-create --name <wallet> --evm-collection-address <H160> [--rebaseable] [--fee-rate <sat/vB>]
   - serve [--bind <addr:port>]  Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
 
 HTTP API
@@ -65,7 +65,7 @@ Endpoints:
 - POST /collections
 
   Request body:
-  {"wallet":"default","laos_hex":"<40-hex>","rebaseable":false,"fee_rate":1.0}
+  {"wallet":"default","evm_collection_address":"<0x...40-hex>","rebaseable":false,"fee_rate":1.0}
 
   Response:
   {"txid":"<txid>"}
