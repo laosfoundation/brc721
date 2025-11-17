@@ -46,6 +46,34 @@ impl SqliteStorage {
     }
 
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+        let mut stmt = conn.prepare("PRAGMA user_version")?;
+        let current_version: i64 = stmt.query_row([], |row| row.get(0))?;
+
+        let mut has_schema_stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('chain_state', 'collections')",
+        )?;
+        let has_existing_schema = has_schema_stmt
+            .query_row([], |row| row.get::<_, String>(0))
+            .optional()?
+            .is_some();
+
+        if has_existing_schema {
+            if current_version != DB_SCHEMA_VERSION {
+                return Err(rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Integer,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!(
+                            "database schema version mismatch (found {}, expected {}); please reset storage with --reset",
+                            current_version, DB_SCHEMA_VERSION
+                        ),
+                    )),
+                ));
+            }
+            return Ok(());
+        }
+
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS chain_state (
@@ -60,39 +88,7 @@ impl SqliteStorage {
             );
             "#,
         )?;
-
-        let mut stmt = conn.prepare("PRAGMA user_version")?;
-        let current_version: i64 = stmt.query_row([], |row| row.get(0))?;
-        if current_version != 0 && current_version != DB_SCHEMA_VERSION {
-            return Err(rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Integer,
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!(
-                        "database schema version mismatch (found {}, expected {}); please reset storage with --reset",
-                        current_version, DB_SCHEMA_VERSION
-                    ),
-                )),
-            ));
-        }
         conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
-
-        let mut stmt = conn.prepare("PRAGMA table_info(collections)")?;
-        let columns = stmt
-            .query_map([], |row| {
-                let name: String = row.get(1)?;
-                Ok(name)
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let has_owner = columns.iter().any(|c| c == "owner");
-        let has_evm_collection_address = columns.iter().any(|c| c == "evm_collection_address");
-        if has_owner && !has_evm_collection_address {
-            conn.execute(
-                "ALTER TABLE collections RENAME COLUMN owner TO evm_collection_address",
-                [],
-            )?;
-        }
 
         Ok(())
     }
