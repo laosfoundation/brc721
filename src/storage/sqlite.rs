@@ -209,6 +209,22 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_init_installs_schema_on_existing_vanilla_db() {
+        let path = unique_temp_file("brc721_init_existing", "db");
+        std::fs::File::create(&path).unwrap();
+        assert!(path.exists());
+
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, DB_SCHEMA_VERSION);
+    }
+
+    #[test]
     fn sqlite_fails_on_mismatched_schema_version() {
         let path = unique_temp_file("brc721_bad_version", "db");
         let repo = SqliteStorage::new(&path);
@@ -216,16 +232,6 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             r#"
-            CREATE TABLE IF NOT EXISTS chain_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                height INTEGER NOT NULL,
-                hash TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS collections (
-                id TEXT PRIMARY KEY,
-                evm_collection_address TEXT NOT NULL,
-                rebaseable INTEGER NOT NULL
-            );
             PRAGMA user_version = 999;
             "#,
         )
