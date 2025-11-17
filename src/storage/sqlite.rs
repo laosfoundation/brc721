@@ -46,51 +46,35 @@ impl SqliteStorage {
     }
 
     fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-        let mut stmt = conn.prepare("PRAGMA user_version")?;
-        let current_version: i64 = stmt.query_row([], |row| row.get(0))?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
-        let mut has_schema_stmt = conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('chain_state', 'collections')",
-        )?;
-        let has_existing_schema = has_schema_stmt
-            .query_row([], |row| row.get::<_, String>(0))
-            .optional()?
-            .is_some();
-
-        if has_existing_schema {
-            if current_version != DB_SCHEMA_VERSION {
-                return Err(rusqlite::Error::FromSqlConversionFailure(
-                    0,
-                    rusqlite::types::Type::Integer,
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!(
-                            "database schema version mismatch (found {}, expected {}); please reset storage with --reset",
-                            current_version, DB_SCHEMA_VERSION
-                        ),
-                    )),
-                ));
-            }
+        if version == DB_SCHEMA_VERSION {
             return Ok(());
         }
 
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS chain_state (
+        if version == 0 {
+            conn.execute_batch(
+                r#"
+            CREATE TABLE chain_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 height INTEGER NOT NULL,
                 hash TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS collections (
+            CREATE TABLE collections (
                 id TEXT PRIMARY KEY,
                 evm_collection_address TEXT NOT NULL,
                 rebaseable INTEGER NOT NULL
             );
-            "#,
-        )?;
-        conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+        "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            return Ok(());
+        }
 
-        Ok(())
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::ErrorCode::SchemaChanged as i32),
+            Some("database schema version mismatch; please run with --reset option".to_string()),
+        ));
     }
 }
 
