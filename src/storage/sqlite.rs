@@ -269,4 +269,37 @@ mod tests {
             .unwrap();
         assert_eq!(row_count, 1);
     }
+
+    #[test]
+    fn sqlite_save_and_list_collections_persists_data() {
+        let path = unique_temp_file("brc721_save_collection", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        repo.save_collection(
+            CollectionKey {
+                id: "123:0".to_string(),
+            },
+            "0xaaaa".to_string(),
+            true,
+        )
+        .unwrap();
+        repo.save_collection(
+            CollectionKey {
+                id: "124:1".to_string(),
+            },
+            "0xbbbb".to_string(),
+            false,
+        )
+        .unwrap();
+
+        let collections = repo.list_collections().unwrap();
+        assert_eq!(collections.len(), 2);
+        assert_eq!(collections[0].0.id, "123:0");
+        assert_eq!(collections[0].1, "0xaaaa");
+        assert!(collections[0].2);
+        assert_eq!(collections[1].0.id, "124:1");
+        assert_eq!(collections[1].1, "0xbbbb");
+        assert!(!collections[1].2);
+    }
 }
