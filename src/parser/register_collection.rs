@@ -14,7 +14,7 @@ pub fn digest(
     let key = CollectionKey {
         id: format!("{}:{}", block_height, tx_index),
     };
-    let evm_collection_address = format!("0x{:x}", payload.evm_collection_address);
+    let evm_collection_address = payload.evm_collection_address;
 
     let rebaseable = payload.rebaseable;
     storage
