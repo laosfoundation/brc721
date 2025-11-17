@@ -71,10 +71,10 @@ impl SqliteStorage {
             return Ok(());
         }
 
-        return Err(rusqlite::Error::SqliteFailure(
+        Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::ErrorCode::SchemaChanged as i32),
             Some("database schema version mismatch; please run with --reset option".to_string()),
-        ));
+        ))
     }
 }
 
