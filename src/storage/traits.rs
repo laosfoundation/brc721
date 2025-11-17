@@ -1,3 +1,5 @@
+use ethereum_types::H160;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     pub height: u64,
@@ -15,7 +17,7 @@ pub trait Storage {
     fn save_collection(
         &self,
         key: CollectionKey,
-        evm_collection_address: String,
+        evm_collection_address: H160,
         rebaseable: bool,
     ) -> anyhow::Result<()>;
     fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>>;

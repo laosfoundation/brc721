@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use ethereum_types::H160;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{Block, Storage};
@@ -113,7 +114,7 @@ impl Storage for SqliteStorage {
     fn save_collection(
         &self,
         key: CollectionKey,
-        evm_collection_address: String,
+        evm_collection_address: H160,
         rebaseable: bool,
     ) -> anyhow::Result<()> {
         let id = key.id;
@@ -121,7 +122,7 @@ impl Storage for SqliteStorage {
             conn.execute(
                 "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
                  ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
-                params![id, evm_collection_address, rebaseable as i64],
+                params![id, format!("0x{:x}", evm_collection_address), rebaseable as i64],
             )?;
             Ok(())
         })?;
@@ -153,7 +154,10 @@ mod tests {
     use super::*;
     use crate::storage::sqlite::DB_SCHEMA_VERSION;
     use rusqlite::{Connection, OptionalExtension};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        str::FromStr,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn unique_temp_file(prefix: &str, ext: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
@@ -280,7 +284,7 @@ mod tests {
             CollectionKey {
                 id: "123:0".to_string(),
             },
-            "0xaaaa".to_string(),
+            H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap(),
             true,
         )
         .unwrap();
@@ -288,7 +292,7 @@ mod tests {
             CollectionKey {
                 id: "124:1".to_string(),
             },
-            "0xbbbb".to_string(),
+            H160::from_str("0xbbbb000000000000000000000000000000000000").unwrap(),
             false,
         )
         .unwrap();
@@ -296,10 +300,16 @@ mod tests {
         let collections = repo.list_collections().unwrap();
         assert_eq!(collections.len(), 2);
         assert_eq!(collections[0].0.id, "123:0");
-        assert_eq!(collections[0].1, "0xaaaa");
+        assert_eq!(
+            collections[0].1,
+            "0xaaaa000000000000000000000000000000000000"
+        );
         assert!(collections[0].2);
         assert_eq!(collections[1].0.id, "124:1");
-        assert_eq!(collections[1].1, "0xbbbb");
+        assert_eq!(
+            collections[1].1,
+            "0xbbbb000000000000000000000000000000000000"
+        );
         assert!(!collections[1].2);
     }
 }
