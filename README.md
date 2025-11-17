@@ -35,13 +35,15 @@ CLI
 - --batch-size SIZE: batch processing size (default 100)
 - --reset: delete DB before start
 - Subcommands:
-  - wallet-init --name <wallet>
-  - wallet-newaddress --name <wallet>
-  - wallet-balance --name <wallet>
-  - collection-create --name <wallet> --laos-hex <20-byte-hex> [--rebaseable] [--fee-rate <sat/vB>]
-  - serve [--bind <addr:port>]  Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
+  - wallet init                             Initialize wallet (creates local and Core watch-only)
+  - wallet address                          Derive and print a new receive address
+  - wallet balance                          Show wallet balances via Core
+  - wallet rescan                           Trigger Core rescan for the watch-only wallet
+  - tx register-collection --collection-address 0x<20-byte-hex> [--rebaseable] [--fee-rate <sat/vB>] [--passphrase <pass>]
+  - tx send-amount --to <addr> --amount-sat <sats> [--fee-rate <sat/vB>] [--passphrase <pass>]
+  - serve [--bind <addr:port>]              Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
 
-HTTP API
+HTTP API (server endpoints)
 
 Start the server (scanner runs concurrently, persisting to SQLite):
 
@@ -58,31 +60,20 @@ export BRC721_API_TOKEN=secret123
 
 Endpoints:
 
-- POST /wallet/init
-
-  Request body:
-  {"name":"default"}
+- GET /health
 
   Response:
-  {"ok":true,"name":"default"}
+  {"status":"ok","uptimeSecs":<number>}
 
-- GET /wallet/{name}/address
-
-  Response:
-  {"address":"bcrt1..."}
-
-- GET /wallet/{name}/balance
+- GET /state
 
   Response:
-  {"balance_btc": 12.345}
+  {"last":{"height":<u64>,"hash":"<hex>"}} or {"last":null}
 
-- POST /collections
-
-  Request body:
-  {"wallet":"default","laos_hex":"<40-hex>","rebaseable":false,"fee_rate":1.0}
+- GET /collections
 
   Response:
-  {"txid":"<txid>"}
+  {"collections":[{"id":"<height:txIndex>","evmCollectionAddress":"0x<20-byte-hex>","rebaseable":true|false}]}
 
 If BRC721_API_TOKEN is set, include either header:
 - x-api-key: <token>
