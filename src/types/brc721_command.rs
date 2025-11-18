@@ -16,3 +16,38 @@ impl std::convert::TryFrom<u8> for Brc721Command {
         }
     }
 }
+
+impl From<Brc721Command> for u8 {
+    fn from(cmd: Brc721Command) -> Self {
+        cmd as u8
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_try_from_valid_command() {
+        let value = 0x00u8;
+        let cmd = Brc721Command::try_from(value);
+        assert_eq!(cmd, Ok(Brc721Command::RegisterCollection));
+    }
+
+    #[test]
+    fn test_try_from_invalid_command() {
+        let value = 0x01u8;
+        let cmd = Brc721Command::try_from(value);
+        match cmd {
+            Err(Brc721Error::UnknownCommand(x)) => assert_eq!(x, 0x01),
+            _ => panic!("Expected UnknownCommand error."),
+        }
+    }
+
+    #[test]
+    fn test_into_u8() {
+        let cmd = Brc721Command::RegisterCollection;
+        let value: u8 = cmd.into();
+        assert_eq!(value, 0x00);
+    }
+}
