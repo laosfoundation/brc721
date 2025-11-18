@@ -1,93 +1,14 @@
+mod brc721_error;
+mod parser;
 mod register_collection;
 
-use crate::types::{Brc721Command, Brc721Output};
-use bitcoin::Block;
-use thiserror::Error;
-
-#[derive(Debug, Error, PartialEq)]
-pub enum Brc721Error {
-    #[error("script too short")]
-    ScriptTooShort,
-    #[error("wrong command: got {0}")]
-    WrongCommand(u8),
-    #[error("invalid rebase flag: {0}")]
-    InvalidRebaseFlag(u8),
-}
-
-impl From<crate::types::MessageDecodeError> for Brc721Error {
-    fn from(value: crate::types::MessageDecodeError) -> Self {
-        match value {
-            crate::types::MessageDecodeError::ScriptTooShort => Brc721Error::ScriptTooShort,
-            crate::types::MessageDecodeError::WrongCommand(b) => Brc721Error::WrongCommand(b),
-            crate::types::MessageDecodeError::InvalidRebaseFlag(b) => {
-                Brc721Error::InvalidRebaseFlag(b)
-            }
-        }
-    }
-}
-
-pub struct Parser {
-    storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
-}
-
-impl Parser {
-    pub fn new(storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>) -> Self {
-        Self { storage }
-    }
-
-    pub fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
-        for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let Some(first_output) = tx.output.first() else {
-                continue;
-            };
-            let brc721_output = match Brc721Output::from_output(first_output) {
-                Some(output) => output,
-                None => continue,
-            };
-
-            log::info!(
-                "📦 Found BRC-721 tx at block {}, tx {}",
-                block_height,
-                tx_index
-            );
-
-            if let Some(Err(ref e)) = self.digest(&brc721_output, block_height, tx_index as u32) {
-                log::warn!("{:?}", e);
-            }
-        }
-        Ok(())
-    }
-
-    fn digest(
-        &self,
-        output: &Brc721Output,
-        block_height: u64,
-        tx_index: u32,
-    ) -> Option<Result<(), Brc721Error>> {
-        let command = match output.command() {
-            Some(cmd) => cmd,
-            None => return Some(Err(Brc721Error::ScriptTooShort)),
-        };
-        let payload = match output.payload() {
-            Some(payload) => payload,
-            None => return Some(Err(Brc721Error::ScriptTooShort)),
-        };
-
-        let result = match command {
-            Brc721Command::RegisterCollection => register_collection::digest(
-                payload.as_slice(),
-                self.storage.clone(),
-                block_height,
-                tx_index,
-            ),
-        };
-        Some(result)
-    }
-}
+use brc721_error::Brc721Error;
+pub use parser::Parser;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Brc721Command;
     use crate::types::BRC721_CODE;
     use bitcoin::hashes::Hash;
     use bitcoin::opcodes::all::OP_RETURN;
@@ -157,9 +78,7 @@ mod tests {
         };
         let storage =
             crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
-        let parser = Parser {
-            storage: std::sync::Arc::new(storage),
-        };
+        let parser = Parser::new(std::sync::Arc::new(storage));
         let r = parser.parse_block(&block, 0);
         assert!(r.is_ok());
     }
