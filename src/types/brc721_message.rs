@@ -1,1 +1,1 @@
-pub type Brc721Message = [u8];
+pub type Brc721Message = Vec<u8>;

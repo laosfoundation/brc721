@@ -29,7 +29,7 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
     let client = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
     client.generate_to_address(101, &address).expect("mint");
     let payload = [0x0a, 0x0b, 0x0c];
-    let output = Brc721Output::from_slice(&payload).into_txout();
+    let output = Brc721Output::from_slice(payload.to_vec()).into_txout();
     assert_eq!(
         output.script_pubkey.to_string(),
         "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_3 0a0b0c"
