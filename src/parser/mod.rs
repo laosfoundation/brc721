@@ -1,8 +1,7 @@
-mod brc721_error;
 mod parser;
 mod register_collection;
 
-use brc721_error::Brc721Error;
+use crate::types::Brc721Error;
 pub use parser::Parser;
 
 #[cfg(test)]

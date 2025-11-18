@@ -1,10 +1,12 @@
 pub mod brc721_command;
+mod brc721_error;
 pub mod brc721_output;
 pub mod register_collection;
 
 use bitcoin::opcodes;
 use bitcoin::TxOut;
 pub use brc721_command::Brc721Command;
+pub use brc721_error::Brc721Error;
 pub use brc721_output::Brc721Output;
 pub use register_collection::{
     MessageDecodeError, RegisterCollectionMessage, RegisterCollectionTx,
