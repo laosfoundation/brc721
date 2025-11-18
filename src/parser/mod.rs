@@ -1,4 +1,4 @@
-use crate::types::{Brc721Command, Brc721Tx, BRC721_CODE};
+use crate::types::{Brc721Command, Brc721Output};
 use bitcoin::blockdata::opcodes::all as opcodes;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::Block;
@@ -47,8 +47,8 @@ impl Parser {
                 None => continue,
             };
 
-            let brc721_tx = match get_brc721_tx(output) {
-                Some(tx) => tx,
+            let brc721_output = match get_brc721_output(output) {
+                Some(output) => output,
                 None => continue,
             };
 
@@ -58,7 +58,7 @@ impl Parser {
                 tx_index
             );
 
-            if let Some(Err(ref e)) = self.digest(brc721_tx, block_height, tx_index as u32) {
+            if let Some(Err(ref e)) = self.digest(&brc721_output, block_height, tx_index as u32) {
                 log::warn!("{:?}", e);
             }
         }
@@ -67,45 +67,33 @@ impl Parser {
 
     fn digest(
         &self,
-        tx: &Brc721Tx,
+        output: &Brc721Output,
         block_height: u64,
         tx_index: u32,
     ) -> Option<Result<(), Brc721Error>> {
-        if tx.is_empty() {
-            return None;
-        }
-
-        let command = match Brc721Command::try_from(tx[0]) {
-            Ok(cmd) => cmd,
-            Err(_) => {
-                log::warn!("Failed to parse Brc721Command from byte {}", tx[0]);
-                return Some(Err(Brc721Error::WrongCommand(tx[0])));
-            }
+        let command = match output.command() {
+            Some(cmd) => cmd,
+            None => return Some(Err(Brc721Error::ScriptTooShort)),
+        };
+        let payload = match output.payload() {
+            Some(payload) => payload,
+            None => return Some(Err(Brc721Error::ScriptTooShort)),
         };
 
         let result = match command {
-            Brc721Command::RegisterCollection => {
-                register_collection::digest(tx, self.storage.clone(), block_height, tx_index)
-            }
+            Brc721Command::RegisterCollection => register_collection::digest(
+                payload.as_slice(),
+                self.storage.clone(),
+                block_height,
+                tx_index,
+            ),
         };
         Some(result)
     }
 }
 
-fn get_brc721_tx(output: &TxOut) -> Option<&Brc721Tx> {
-    let mut it = output.script_pubkey.instructions();
-    match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_RETURN)) => {}
-        _ => return None,
-    }
-    match it.next()? {
-        Ok(Instruction::Op(BRC721_CODE)) => {}
-        _ => return None,
-    }
-    match it.next()? {
-        Ok(Instruction::PushBytes(payload)) => Some(payload.as_bytes()),
-        _ => None,
-    }
+fn get_brc721_output(output: &TxOut) -> Option<Brc721Output> {
+    Brc721Output::from_output(output)
 }
 
 fn get_first_output_if_op_return(tx: &Transaction) -> Option<&TxOut> {
@@ -120,6 +108,7 @@ fn get_first_output_if_op_return(tx: &Transaction) -> Option<&TxOut> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::BRC721_CODE;
     use bitcoin::hashes::Hash;
     use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
     use hex::FromHex;
@@ -161,8 +150,8 @@ mod tests {
             }],
         };
         let out0 = get_first_output_if_op_return(&tx).expect("must be op_return");
-        let extracted = get_brc721_tx(out0).expect("must extract payload");
-        assert_eq!(extracted, payload.as_slice());
+        let extracted = get_brc721_output(out0).expect("must extract payload");
+        assert_eq!(extracted.payload().unwrap(), payload);
     }
 
     #[test]

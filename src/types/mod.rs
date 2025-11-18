@@ -10,11 +10,10 @@ pub use register_collection::{
     MessageDecodeError, RegisterCollectionMessage, RegisterCollectionTx,
 };
 
-pub type Brc721Tx = [u8];
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
 
 pub fn build_brc721_output(payload: &[u8]) -> TxOut {
-    Brc721Output::new(payload).into_txout()
+    Brc721Output::from_slice(payload).into_txout()
 }
 
 #[cfg(test)]

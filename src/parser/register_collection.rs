@@ -1,11 +1,11 @@
 use crate::storage::traits::CollectionKey;
 use crate::storage::Storage;
-use crate::types::{Brc721Tx, RegisterCollectionMessage};
+use crate::types::RegisterCollectionMessage;
 
 use super::Brc721Error;
 
 pub fn digest(
-    tx: &Brc721Tx,
+    tx: &[u8],
     storage: std::sync::Arc<dyn Storage + Send + Sync>,
     block_height: u64,
     tx_index: u32,
