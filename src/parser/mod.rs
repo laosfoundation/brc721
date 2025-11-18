@@ -1,12 +1,7 @@
-use crate::types::{Brc721Command, Brc721Output};
-use bitcoin::blockdata::opcodes::all as opcodes;
-use bitcoin::blockdata::script::Instruction;
-use bitcoin::Block;
-use bitcoin::Transaction;
-use bitcoin::TxOut;
-
 mod register_collection;
 
+use crate::types::{Brc721Command, Brc721Output};
+use bitcoin::Block;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -42,12 +37,10 @@ impl Parser {
 
     pub fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let output = match get_first_output_if_op_return(tx) {
-                Some(output) => output,
-                None => continue,
+            let Some(first_output) = tx.output.first() else {
+                continue;
             };
-
-            let brc721_output = match get_brc721_output(output) {
+            let brc721_output = match Brc721Output::from_output(first_output) {
                 Some(output) => output,
                 None => continue,
             };
@@ -92,24 +85,12 @@ impl Parser {
     }
 }
 
-fn get_brc721_output(output: &TxOut) -> Option<Brc721Output> {
-    Brc721Output::from_output(output)
-}
-
-fn get_first_output_if_op_return(tx: &Transaction) -> Option<&TxOut> {
-    let out0 = tx.output.first()?;
-    let mut it = out0.script_pubkey.instructions();
-    match it.next()? {
-        Ok(Instruction::Op(opcodes::OP_RETURN)) => Some(out0),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::BRC721_CODE;
     use bitcoin::hashes::Hash;
+    use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
     use hex::FromHex;
 
@@ -124,34 +105,10 @@ mod tests {
     fn script_for_payload(payload: &[u8]) -> ScriptBuf {
         use bitcoin::script::Builder;
         Builder::new()
-            .push_opcode(opcodes::OP_RETURN)
+            .push_opcode(OP_RETURN)
             .push_opcode(BRC721_CODE)
             .push_slice(bitcoin::script::PushBytesBuf::try_from(payload.to_vec()).unwrap())
             .into_script()
-    }
-
-    #[test]
-    fn test_get_brc721_tx_extracts_payload() {
-        let addr = [0x11u8; 20];
-        let payload = build_payload(addr, 1);
-        let script = script_for_payload(&payload);
-        let tx = Transaction {
-            version: bitcoin::transaction::Version(2),
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::null(),
-                script_sig: ScriptBuf::new(),
-                sequence: bitcoin::Sequence(0xffffffff),
-                witness: bitcoin::Witness::default(),
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(0),
-                script_pubkey: script,
-            }],
-        };
-        let out0 = get_first_output_if_op_return(&tx).expect("must be op_return");
-        let extracted = get_brc721_output(out0).expect("must extract payload");
-        assert_eq!(extracted.payload().unwrap(), payload);
     }
 
     #[test]

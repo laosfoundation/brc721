@@ -52,7 +52,7 @@ impl Brc721Output {
     pub fn into_txout(self) -> TxOut {
         TxOut {
             value: self.value,
-            script_pubkey: self.script_pubkey.into(),
+            script_pubkey: self.script_pubkey,
         }
     }
 }
