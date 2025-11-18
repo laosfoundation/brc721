@@ -163,8 +163,7 @@ mod tests {
     #[test]
     fn from_output_fails_on_invalid_message_payload() {
         // Header valido (OP_RETURN + BRC721_CODE) ma payload troppo corto
-        let mut bytes = Vec::new();
-        bytes.push(Brc721Command::RegisterCollection as u8); // solo il comando, senza dati
+        let bytes = vec![Brc721Command::RegisterCollection as u8]; // solo il comando, senza dati
         let script = build_brc721_script_from_bytes(bytes);
 
         let txout = TxOut {

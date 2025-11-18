@@ -57,7 +57,7 @@ mod tests {
 
         let parsed = RegisterCollectionData::try_from(bytes.as_slice()).unwrap();
         assert_eq!(parsed.evm_collection_address, addr);
-        assert_eq!(parsed.rebaseable, true);
+        assert!(parsed.rebaseable);
     }
 
     #[test]

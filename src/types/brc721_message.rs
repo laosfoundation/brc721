@@ -114,8 +114,7 @@ mod tests {
     #[test]
     fn from_bytes_propagates_invalid_payload_error() {
         // comando valido ma payload troppo corto per RegisterCollectionData
-        let mut bytes = Vec::new();
-        bytes.push(Brc721Command::RegisterCollection.into());
+        let bytes = vec![Brc721Command::RegisterCollection.into()];
         // niente payload, quindi `rest` sarà vuoto
 
         let res = Brc721Message::try_from(bytes.as_slice());
