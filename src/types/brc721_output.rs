@@ -1,13 +1,13 @@
+use super::{Brc721Command, Brc721Message, BRC721_CODE};
+use crate::types::Brc721Error;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::opcodes;
 use bitcoin::script::{Builder, PushBytesBuf};
 use bitcoin::{Amount, ScriptBuf, TxOut};
 
-use super::{Brc721Command, Brc721Message, BRC721_CODE};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Brc721Output {
-    pub value: Amount,
+    value: Amount,
     message: Brc721Message,
 }
 
@@ -19,12 +19,26 @@ impl Brc721Output {
         }
     }
 
-    pub fn from_output(output: &TxOut) -> Option<Self> {
-        let payload = extract_payload(&output.script_pubkey)?;
-        let message = Brc721Message::from_bytes(&payload).ok()?;
-        Some(Self {
+    pub fn from_output(output: &TxOut) -> Result<Self, Brc721Error> {
+        let payload = extract_payload(&output.script_pubkey).ok_or(Brc721Error::InvalidPayload)?;
+        let message = Brc721Message::from_bytes(&payload)?;
+        Ok(Self {
             value: output.value,
             message,
+        })
+    }
+
+    pub fn into_txout(self) -> Result<TxOut, Brc721Error> {
+        let bytes = self.message.to_bytes();
+        let pb = PushBytesBuf::try_from(bytes).map_err(|_| Brc721Error::InvalidPayload)?;
+        let script = Builder::new()
+            .push_opcode(opcodes::all::OP_RETURN)
+            .push_opcode(BRC721_CODE)
+            .push_slice(pb)
+            .into_script();
+        Ok(TxOut {
+            value: self.value,
+            script_pubkey: script,
         })
     }
 
@@ -35,23 +49,9 @@ impl Brc721Output {
     pub fn command(&self) -> Brc721Command {
         self.message.command()
     }
-
-    pub fn into_txout(self) -> TxOut {
-        let bytes = self.message.to_bytes();
-        let pb = PushBytesBuf::try_from(bytes).unwrap();
-        let script = Builder::new()
-            .push_opcode(opcodes::all::OP_RETURN)
-            .push_opcode(BRC721_CODE)
-            .push_slice(pb)
-            .into_script();
-        TxOut {
-            value: self.value,
-            script_pubkey: script,
-        }
-    }
 }
 
-fn extract_payload(script: &ScriptBuf) -> Option<&[u8]> {
+fn extract_payload(script: &ScriptBuf) -> Option<Vec<u8>> {
     let mut instructions = script.instructions();
     match instructions.next()? {
         Ok(Instruction::Op(opcodes::all::OP_RETURN)) => {}
@@ -62,7 +62,124 @@ fn extract_payload(script: &ScriptBuf) -> Option<&[u8]> {
         _ => return None,
     }
     match instructions.next()? {
-        Ok(Instruction::PushBytes(bytes)) => Some(bytes.as_bytes()),
+        Ok(Instruction::PushBytes(bytes)) => Some(bytes.as_bytes().to_vec()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::RegisterCollectionData;
+    use bitcoin::script::Builder;
+    use bitcoin::{Amount, ScriptBuf, TxOut};
+    use ethereum_types::H160;
+
+    fn build_register_collection_payload() -> Vec<u8> {
+        let addr = H160::from_low_u64_be(42);
+        let data = RegisterCollectionData {
+            evm_collection_address: addr,
+            rebaseable: true,
+        };
+        let mut payload = Vec::with_capacity(1 + RegisterCollectionData::LEN);
+        payload.push(Brc721Command::RegisterCollection as u8);
+        payload.extend_from_slice(&data.to_bytes());
+        payload
+    }
+
+    fn build_brc721_script_from_bytes(bytes: Vec<u8>) -> ScriptBuf {
+        let pb = PushBytesBuf::try_from(bytes).expect("valid pushbytes for test");
+        Builder::new()
+            .push_opcode(opcodes::all::OP_RETURN)
+            .push_opcode(BRC721_CODE)
+            .push_slice(pb)
+            .into_script()
+    }
+
+    #[test]
+    fn extract_payload_ok_for_valid_script() {
+        let payload = build_register_collection_payload();
+        let script = build_brc721_script_from_bytes(payload.clone());
+
+        let extracted = extract_payload(&script).expect("payload should be found");
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn extract_payload_rejects_non_op_return() {
+        let script = Builder::new()
+            .push_opcode(opcodes::all::OP_1SUB) // non OP_RETURN
+            .into_script();
+
+        assert!(extract_payload(&script).is_none());
+    }
+
+    #[test]
+    fn extract_payload_rejects_wrong_marker_opcode() {
+        let script = Builder::new()
+            .push_opcode(opcodes::all::OP_RETURN)
+            .push_opcode(opcodes::all::OP_1SUB) // non BRC721_CODE
+            .into_script();
+
+        assert!(extract_payload(&script).is_none());
+    }
+
+    #[test]
+    fn from_output_roundtrip_ok() {
+        // 1) Costruisco un payload valido
+        let payload = build_register_collection_payload();
+        let message = Brc721Message::from_bytes(&payload).expect("valid message");
+
+        // 2) Creo un Brc721Output e lo trasformo in TxOut
+        let output = Brc721Output::new(message.clone());
+        let txout = output.into_txout().expect("into_txout should succeed");
+
+        // 3) Re-parso dal TxOut
+        let parsed = Brc721Output::from_output(&txout).expect("from_output should succeed");
+
+        // 4) Controllo che il messaggio sia uguale
+        assert_eq!(parsed.message(), &message);
+
+        // 5) Controllo che il value sia 0 sat (per come è definito new())
+        assert_eq!(txout.value, Amount::from_sat(0));
+    }
+
+    #[test]
+    fn from_output_fails_on_invalid_script() {
+        // Script completamente sbagliato
+        let script = ScriptBuf::new();
+        let txout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: script,
+        };
+
+        let res = Brc721Output::from_output(&txout);
+        match res {
+            Err(Brc721Error::InvalidPayload) => {}
+            other => panic!("expected InvalidPayload, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn from_output_fails_on_invalid_message_payload() {
+        // Header valido (OP_RETURN + BRC721_CODE) ma payload troppo corto
+        let mut bytes = Vec::new();
+        bytes.push(Brc721Command::RegisterCollection as u8); // solo il comando, senza dati
+        let script = build_brc721_script_from_bytes(bytes);
+
+        let txout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: script,
+        };
+
+        let res = Brc721Output::from_output(&txout);
+
+        // Qui dipende da come hai modellato Brc721Error,
+        // ma l'idea è che propaghi l'errore di Brc721Message::from_bytes
+        match res {
+            Err(Brc721Error::InvalidLength(_, _)) => {}
+            Err(e) => panic!("expected InvalidLength(..), got {:?}", e),
+            Ok(_) => panic!("expected error, got Ok"),
+        }
     }
 }

@@ -36,7 +36,8 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         evm_collection_address: H160::default(),
         rebaseable: false,
     }))
-    .into_txout();
+    .into_txout()
+    .unwrap();
     assert_eq!(
         output.script_pubkey.to_string(),
         "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_22 00000000000000000000000000000000000000000000"

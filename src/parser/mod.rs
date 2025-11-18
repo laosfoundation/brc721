@@ -18,8 +18,8 @@ impl Parser {
                 continue;
             };
             let brc721_output = match Brc721Output::from_output(first_output) {
-                Some(output) => output,
-                None => continue,
+                Ok(output) => output,
+                Err(_) => continue,
             };
 
             log::info!(

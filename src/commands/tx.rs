@@ -22,7 +22,7 @@ impl CommandRunner for cli::TxCmd {
                     rebaseable: *rebaseable,
                 };
                 let msg = Brc721Message::RegisterCollection(msg);
-                let output = Brc721Output::new(msg).into_txout();
+                let output = Brc721Output::new(msg).into_txout().unwrap();
 
                 let wallet =
                     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;

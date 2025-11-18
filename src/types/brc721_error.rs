@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum Brc721Error {
     #[error("script too short")]
     ScriptTooShort,
+    #[error("invalid payload")]
+    InvalidPayload,
     #[error("invalid script length: expected {0} actual {1}")]
     InvalidLength(usize, usize),
     #[error("unknown command: got {0}")]
