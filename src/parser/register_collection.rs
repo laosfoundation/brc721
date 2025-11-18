@@ -6,18 +6,16 @@ use super::Brc721Error;
 
 pub fn digest(
     payload: &RegisterCollectionData,
-    storage: std::sync::Arc<dyn Storage + Send + Sync>,
+    storage: &dyn Storage,
     block_height: u64,
     tx_index: u32,
 ) -> Result<(), Brc721Error> {
     let key = CollectionKey {
         id: format!("{}:{}", block_height, tx_index),
     };
-    let evm_collection_address = payload.evm_collection_address;
 
-    let rebaseable = payload.rebaseable;
     storage
-        .save_collection(key, evm_collection_address, rebaseable)
-        .map_err(|_| Brc721Error::ScriptTooShort)?;
+        .save_collection(key, payload.evm_collection_address, payload.rebaseable)
+        .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
     Ok(())
 }

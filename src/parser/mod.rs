@@ -46,7 +46,7 @@ impl Parser {
     ) -> Result<(), Brc721Error> {
         match output.message() {
             Brc721Message::RegisterCollection(data) => {
-                register_collection::digest(data, self.storage.clone(), block_height, tx_index)
+                register_collection::digest(data, self.storage.as_ref(), block_height, tx_index)
             }
         }
     }

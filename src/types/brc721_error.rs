@@ -12,4 +12,6 @@ pub enum Brc721Error {
     UnknownCommand(u8),
     #[error("invalid rebase flag: {0}")]
     InvalidRebaseFlag(u8),
+    #[error("Storage error: {0}")]
+    StorageError(String),
 }
