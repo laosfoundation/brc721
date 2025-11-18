@@ -4,7 +4,7 @@ use crate::types::Brc721Error;
 
 use super::Brc721Command;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RegisterCollectionData {
     pub evm_collection_address: H160,
     pub rebaseable: bool,

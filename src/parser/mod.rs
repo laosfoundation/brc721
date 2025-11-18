@@ -1,6 +1,6 @@
 mod register_collection;
 
-use crate::types::{Brc721Command, Brc721Error, Brc721Message, Brc721Output};
+use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
 
 pub struct Parser {

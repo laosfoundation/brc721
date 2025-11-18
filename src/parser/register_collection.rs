@@ -1,6 +1,6 @@
 use crate::storage::traits::CollectionKey;
 use crate::storage::Storage;
-use crate::types::{Brc721Message, RegisterCollectionData};
+use crate::types::RegisterCollectionData;
 
 use super::Brc721Error;
 

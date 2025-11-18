@@ -1,4 +1,7 @@
-use crate::{types::Brc721Output, wallet::brc721_wallet::Brc721Wallet};
+use crate::{
+    types::{Brc721Message, Brc721Output, RegisterCollectionData},
+    wallet::brc721_wallet::Brc721Wallet,
+};
 use age::secrecy::SecretString;
 use bitcoin::{Amount, Network};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -28,11 +31,13 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         .address;
     let client = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
     client.generate_to_address(101, &address).expect("mint");
-    let payload = [0x0a, 0x0b, 0x0c];
-    let output = Brc721Output::new(payload.to_vec()).into_txout();
+    let output = Brc721Output::new(Brc721Message::RegisterCollection(
+        RegisterCollectionData::default(),
+    ))
+    .into_txout();
     assert_eq!(
         output.script_pubkey.to_string(),
-        "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_3 0a0b0c"
+        "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_22 00000000000000000000000000000000000000000000"
     );
     let tx = wallet
         .build_tx(
@@ -45,7 +50,7 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
     assert!(!tx.output.is_empty(), "built tx must have outputs");
     assert_eq!(
         tx.output[0].script_pubkey.to_string(),
-        "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_3 0a0b0c"
+        "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_22 00000000000000000000000000000000000000000000"
     );
     let txid = wallet.broadcast(&tx).expect("broadcast");
     assert_ne!(txid.to_string(), String::new());
