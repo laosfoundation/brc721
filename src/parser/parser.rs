@@ -46,14 +46,10 @@ impl Parser {
             Some(cmd) => cmd,
             None => return Some(Err(Brc721Error::ScriptTooShort)),
         };
-        let payload = match output.payload() {
-            Some(payload) => payload,
-            None => return Some(Err(Brc721Error::ScriptTooShort)),
-        };
 
         let result = match command {
             Brc721Command::RegisterCollection => register_collection::digest(
-                payload.as_slice(),
+                output.message().as_slice(),
                 self.storage.clone(),
                 block_height,
                 tx_index,

@@ -29,13 +29,12 @@ impl Brc721Output {
         })
     }
 
-    pub fn payload(&self) -> Option<Vec<u8>> {
-        Some(self.message.clone())
+    pub fn message(&self) -> &Brc721Message {
+        &self.message
     }
 
     pub fn command(&self) -> Option<Brc721Command> {
-        let payload = self.payload()?;
-        let byte = *payload.first()?;
+        let byte = *self.message.first()?;
         Brc721Command::try_from(byte).ok()
     }
 
@@ -130,7 +129,7 @@ mod tests {
     fn payload_returns_original_bytes() {
         let payload = vec![0x21u8, 0x22, 0x23];
         let output = Brc721Output::new(payload.clone());
-        assert_eq!(output.payload().unwrap(), payload);
+        assert_eq!(*output.message(), payload);
     }
 
     #[test]
