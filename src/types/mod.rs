@@ -1,7 +1,7 @@
-pub mod brc721_command;
+mod brc721_command;
 mod brc721_error;
-pub mod brc721_output;
-pub mod register_collection;
+mod brc721_output;
+mod register_collection;
 
 use bitcoin::opcodes;
 use bitcoin::TxOut;
