@@ -1,7 +1,7 @@
 use crate::types::Brc721Error;
 use ethereum_types::H160;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterCollectionData {
     pub evm_collection_address: H160,
     pub rebaseable: bool,

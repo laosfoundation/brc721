@@ -6,6 +6,7 @@ use age::secrecy::SecretString;
 use bitcoin::{Amount, Network};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use corepc_node::Node;
+use ethereum_types::H160;
 use tempfile::TempDir;
 use url::Url;
 
@@ -31,9 +32,10 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         .address;
     let client = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
     client.generate_to_address(101, &address).expect("mint");
-    let output = Brc721Output::new(Brc721Message::RegisterCollection(
-        RegisterCollectionData::default(),
-    ))
+    let output = Brc721Output::new(Brc721Message::RegisterCollection(RegisterCollectionData {
+        evm_collection_address: H160::default(),
+        rebaseable: false,
+    }))
     .into_txout();
     assert_eq!(
         output.script_pubkey.to_string(),
