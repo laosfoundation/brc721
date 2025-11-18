@@ -1,18 +1,13 @@
 use ethereum_types::H160;
 
+use crate::types::Brc721Error;
+
 use super::Brc721Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterCollectionMessage {
     pub evm_collection_address: H160,
     pub rebaseable: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MessageDecodeError {
-    ScriptTooShort,
-    WrongCommand(u8),
-    InvalidRebaseFlag(u8),
 }
 
 pub type RegisterCollectionTx = [u8; 22];
@@ -28,20 +23,20 @@ impl RegisterCollectionMessage {
         arr
     }
 
-    pub fn decode<T: AsRef<[u8]>>(tx: T) -> Result<Self, MessageDecodeError> {
+    pub fn decode<T: AsRef<[u8]>>(tx: T) -> Result<Self, Brc721Error> {
         let tx = tx.as_ref();
         if tx.len() < Self::LEN {
-            return Err(MessageDecodeError::ScriptTooShort);
+            return Err(Brc721Error::ScriptTooShort);
         }
         if tx[0] != Brc721Command::RegisterCollection as u8 {
-            return Err(MessageDecodeError::WrongCommand(tx[0]));
+            return Err(Brc721Error::UnknownCommand(tx[0]));
         }
         let evm_collection_address = H160::from_slice(&tx[1..21]);
         let rebase_flag = tx[21];
         let rebaseable = match rebase_flag {
             0 => false,
             1 => true,
-            other => return Err(MessageDecodeError::InvalidRebaseFlag(other)),
+            other => return Err(Brc721Error::InvalidRebaseFlag(other)),
         };
         Ok(RegisterCollectionMessage {
             evm_collection_address,
@@ -96,7 +91,7 @@ mod tests {
         arr[0] = 0xFF;
         let e = RegisterCollectionMessage::decode(arr).unwrap_err();
         match e {
-            MessageDecodeError::WrongCommand(b) => assert_eq!(b, 0xFF),
+            Brc721Error::UnknownCommand(b) => assert_eq!(b, 0xFF),
             _ => panic!(),
         }
     }
@@ -110,7 +105,7 @@ mod tests {
         .encode()[..RegisterCollectionMessage::LEN - 1];
         let e = RegisterCollectionMessage::decode(bytes).unwrap_err();
         match e {
-            MessageDecodeError::ScriptTooShort => {}
+            Brc721Error::ScriptTooShort => {}
             _ => panic!(),
         }
     }
@@ -125,7 +120,7 @@ mod tests {
         arr[21] = 2;
         let e = RegisterCollectionMessage::decode(arr).unwrap_err();
         match e {
-            MessageDecodeError::InvalidRebaseFlag(b) => assert_eq!(b, 2),
+            Brc721Error::InvalidRebaseFlag(b) => assert_eq!(b, 2),
             _ => panic!(),
         }
     }

@@ -1,3 +1,5 @@
+use super::Brc721Error;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Brc721Command {
@@ -5,12 +7,12 @@ pub enum Brc721Command {
 }
 
 impl std::convert::TryFrom<u8> for Brc721Command {
-    type Error = ();
+    type Error = Brc721Error;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x00 => Ok(Brc721Command::RegisterCollection),
-            _ => Err(()),
+            x => Err(Brc721Error::UnknownCommand(x)),
         }
     }
 }
