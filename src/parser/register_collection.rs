@@ -1,16 +1,15 @@
 use crate::storage::traits::CollectionKey;
 use crate::storage::Storage;
-use crate::types::{Brc721Message, RegisterCollectionMessage};
+use crate::types::{Brc721Message, RegisterCollectionData};
 
 use super::Brc721Error;
 
 pub fn digest(
-    tx: &Brc721Message,
+    payload: &RegisterCollectionData,
     storage: std::sync::Arc<dyn Storage + Send + Sync>,
     block_height: u64,
     tx_index: u32,
 ) -> Result<(), Brc721Error> {
-    let payload = RegisterCollectionMessage::decode(tx)?;
     let key = CollectionKey {
         id: format!("{}:{}", block_height, tx_index),
     };

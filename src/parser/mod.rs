@@ -1,6 +1,6 @@
 mod register_collection;
 
-use crate::types::{Brc721Command, Brc721Error, Brc721Output};
+use crate::types::{Brc721Command, Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
 
 pub struct Parser {
@@ -41,19 +41,12 @@ impl Parser {
         block_height: u64,
         tx_index: u32,
     ) -> Option<Result<(), Brc721Error>> {
-        let command = match output.command() {
-            Some(cmd) => cmd,
-            None => return Some(Err(Brc721Error::ScriptTooShort)),
+        let result = match output.message() {
+            Brc721Message::RegisterCollection(data) => {
+                register_collection::digest(data, self.storage.clone(), block_height, tx_index)
+            }
         };
 
-        let result = match command {
-            Brc721Command::RegisterCollection => register_collection::digest(
-                output.message(),
-                self.storage.clone(),
-                block_height,
-                tx_index,
-            ),
-        };
         Some(result)
     }
 }

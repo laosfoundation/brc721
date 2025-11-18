@@ -9,6 +9,6 @@ pub use brc721_command::Brc721Command;
 pub use brc721_error::Brc721Error;
 pub use brc721_message::Brc721Message;
 pub use brc721_output::Brc721Output;
-pub use register_collection::{RegisterCollectionMessage, RegisterCollectionTx};
+pub use register_collection::{RegisterCollectionData, RegisterCollectionTx};
 
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
