@@ -1,6 +1,7 @@
-use crate::wallet::{local_wallet::LocalWallet, remote_wallet::RemoteWallet, signer::Signer};
+use super::{local_wallet::LocalWallet, remote_wallet::RemoteWallet, signer::Signer};
 use age::secrecy::SecretString;
 use anyhow::{Context, Result};
+use bdk_wallet::template::Bip86;
 use bdk_wallet::{bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind};
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::json;
@@ -25,6 +26,7 @@ impl Brc721Wallet {
         auth: Auth,
     ) -> Result<Brc721Wallet> {
         let mnemonic = mnemonic.unwrap_or_else(|| {
+            // TODO: this has to die for security reasons
             let mut entropy = [0u8; 32];
             OsRng.fill_bytes(&mut entropy);
             let m = Mnemonic::from_entropy(&entropy).expect("mnemonic");
@@ -34,8 +36,10 @@ impl Brc721Wallet {
 
         let seed = mnemonic.to_seed(String::default());
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
+        let external = Bip86(master_xprv, KeychainKind::External);
+        let internal = Bip86(master_xprv, KeychainKind::Internal);
 
-        let local = LocalWallet::create(&data_dir, network, &master_xprv)?;
+        let local = LocalWallet::create(&data_dir, network, external, internal)?;
         let remote = RemoteWallet::new(local.id(), rpc_url, auth);
 
         let signer = Signer::new(&data_dir, network);
