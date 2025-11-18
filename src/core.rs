@@ -60,7 +60,7 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
                 height,
                 e
             );
-            // still try to save last, same behavior as your original code
+            return;
         }
 
         if let Err(e) = self.storage.save_last(height, &hash.to_string()) {
