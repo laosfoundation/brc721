@@ -29,7 +29,7 @@ pub struct Scanner<C: BitcoinRpc> {
     client: C,
     confirmations: u64,
     current_height: u64,
-    out: Vec<(u64, Block)>,
+    batch_size: usize,
 }
 
 impl<C: BitcoinRpc> Scanner<C> {
@@ -38,7 +38,7 @@ impl<C: BitcoinRpc> Scanner<C> {
             client,
             confirmations: 0,
             current_height: 0,
-            out: Vec::new(),
+            batch_size: 1,
         }
     }
 
@@ -48,7 +48,7 @@ impl<C: BitcoinRpc> Scanner<C> {
     }
 
     pub fn with_capacity(mut self, capacity: usize) -> Self {
-        self.out = Vec::with_capacity(capacity);
+        self.batch_size = capacity.max(1);
         self
     }
 
@@ -60,34 +60,28 @@ impl<C: BitcoinRpc> Scanner<C> {
     pub fn next_blocks_with_shutdown(
         &mut self,
         shutdown: &tokio_util::sync::CancellationToken,
-    ) -> Result<&[(u64, Block)], RpcError> {
-        if self.out.capacity() == 0 {
-            self.out.clear();
-            return Ok(self.out.as_slice());
+    ) -> Result<Vec<(u64, Block)>, RpcError> {
+        if self.batch_size == 0 {
+            return Ok(Vec::new());
         }
         loop {
-            self.collect_ready_blocks()?;
-            if !self.out.is_empty() {
-                return Ok(self.out.as_slice());
-            }
-            if shutdown.is_cancelled() {
-                return Ok(self.out.as_slice());
+            let blocks = self.collect_ready_blocks()?;
+            if !blocks.is_empty() || shutdown.is_cancelled() {
+                return Ok(blocks);
             }
             self.client.wait_for_new_block(DEFAULT_WAIT_TIMEOUT_MS)?;
         }
     }
 
-    fn collect_ready_blocks(&mut self) -> Result<&[(u64, Block)], RpcError> {
-        self.out.clear();
-        for _ in 0..self.out.capacity() {
+    fn collect_ready_blocks(&mut self) -> Result<Vec<(u64, Block)>, RpcError> {
+        let mut out = Vec::with_capacity(self.batch_size);
+        for _ in 0..self.batch_size {
             match self.next_ready_block()? {
-                Some((height, block)) => {
-                    self.out.push((height, block));
-                }
+                Some(pair) => out.push(pair),
                 None => break,
             }
         }
-        Ok(self.out.as_slice())
+        Ok(out)
     }
 
     fn next_ready_block(&mut self) -> Result<Option<(u64, Block)>, RpcError> {
