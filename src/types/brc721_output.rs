@@ -21,7 +21,7 @@ impl Brc721Output {
 
     pub fn from_output(output: &TxOut) -> Result<Self, Brc721Error> {
         let payload = extract_payload(&output.script_pubkey).ok_or(Brc721Error::InvalidPayload)?;
-        let message = Brc721Message::from_bytes(&payload)?;
+        let message = Brc721Message::try_from(payload.as_slice())?;
         Ok(Self {
             value: output.value,
             message,
@@ -128,7 +128,7 @@ mod tests {
     fn from_output_roundtrip_ok() {
         // 1) Costruisco un payload valido
         let payload = build_register_collection_payload();
-        let message = Brc721Message::from_bytes(&payload).expect("valid message");
+        let message = Brc721Message::try_from(payload.as_slice()).expect("valid message");
 
         // 2) Creo un Brc721Output e lo trasformo in TxOut
         let output = Brc721Output::new(message.clone());

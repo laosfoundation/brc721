@@ -13,7 +13,22 @@ impl Brc721Message {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Brc721Error> {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(self.command().into());
+
+        match self {
+            Brc721Message::RegisterCollection(data) => out.extend(data.to_bytes()),
+        };
+
+        out
+    }
+}
+
+impl TryFrom<&[u8]> for Brc721Message {
+    type Error = Brc721Error;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let (&first, rest) = bytes.split_first().ok_or(Brc721Error::ScriptTooShort)?;
 
         let cmd = Brc721Command::try_from(first)?;
@@ -25,17 +40,6 @@ impl Brc721Message {
         };
 
         Ok(msg)
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.push(self.command().into());
-
-        match self {
-            Brc721Message::RegisterCollection(data) => out.extend(data.to_bytes()),
-        };
-
-        out
     }
 }
 
@@ -78,7 +82,7 @@ mod tests {
         assert_eq!(cmd, Brc721Command::RegisterCollection);
 
         // roundtrip
-        let parsed = Brc721Message::from_bytes(&bytes).expect("parsing should succeed");
+        let parsed = Brc721Message::try_from(bytes.as_slice()).expect("parsing should succeed");
         assert_eq!(parsed, msg);
     }
 
@@ -86,7 +90,7 @@ mod tests {
     fn from_bytes_fails_on_empty_slice() {
         let bytes: [u8; 0] = [];
 
-        let res = Brc721Message::from_bytes(&bytes);
+        let res = Brc721Message::try_from(bytes.as_slice());
 
         match res {
             Err(Brc721Error::ScriptTooShort) => {}
@@ -99,7 +103,7 @@ mod tests {
         // primo byte = comando inesistente, resto dati random
         let bytes = vec![0xFF, 0x00, 0x01];
 
-        let res = Brc721Message::from_bytes(&bytes);
+        let res = Brc721Message::try_from(bytes.as_slice());
 
         match res {
             Err(Brc721Error::UnknownCommand(0xFF)) => {}
@@ -114,7 +118,7 @@ mod tests {
         bytes.push(Brc721Command::RegisterCollection.into());
         // niente payload, quindi `rest` sarà vuoto
 
-        let res = Brc721Message::from_bytes(&bytes);
+        let res = Brc721Message::try_from(bytes.as_slice());
 
         match res {
             Err(Brc721Error::InvalidLength(expected, actual)) => {
