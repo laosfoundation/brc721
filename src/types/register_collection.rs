@@ -1,8 +1,10 @@
-use super::{Brc721Command, CollectionAddress};
+use ethereum_types::H160;
+
+use super::Brc721Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterCollectionMessage {
-    pub collection_address: CollectionAddress,
+    pub evm_collection_address: H160,
     pub rebaseable: bool,
 }
 
@@ -21,7 +23,7 @@ impl RegisterCollectionMessage {
     pub fn encode(&self) -> RegisterCollectionTx {
         let mut arr = [0u8; Self::LEN];
         arr[0] = Brc721Command::RegisterCollection as u8;
-        arr[1..21].copy_from_slice(self.collection_address.as_bytes());
+        arr[1..21].copy_from_slice(self.evm_collection_address.as_bytes());
         arr[21] = if self.rebaseable { 1 } else { 0 };
         arr
     }
@@ -34,7 +36,7 @@ impl RegisterCollectionMessage {
         if tx[0] != Brc721Command::RegisterCollection as u8 {
             return Err(MessageDecodeError::WrongCommand(tx[0]));
         }
-        let collection_address = CollectionAddress::from_slice(&tx[1..21]);
+        let evm_collection_address = H160::from_slice(&tx[1..21]);
         let rebase_flag = tx[21];
         let rebaseable = match rebase_flag {
             0 => false,
@@ -42,7 +44,7 @@ impl RegisterCollectionMessage {
             other => return Err(MessageDecodeError::InvalidRebaseFlag(other)),
         };
         Ok(RegisterCollectionMessage {
-            collection_address,
+            evm_collection_address,
             rebaseable,
         })
     }
@@ -53,20 +55,20 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
-    fn addr() -> CollectionAddress {
-        CollectionAddress::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
+    fn addr() -> H160 {
+        H160::from_str("ffff0123ffffffffffffffffffffffff3210ffff").unwrap()
     }
 
     #[test]
     fn encode_decode_no_rebase() {
         let m = RegisterCollectionMessage {
-            collection_address: addr(),
+            evm_collection_address: addr(),
             rebaseable: false,
         };
         let arr = m.encode();
         assert_eq!(arr.len(), RegisterCollectionMessage::LEN);
         assert_eq!(arr[0], Brc721Command::RegisterCollection as u8);
-        assert_eq!(&arr[1..21], m.collection_address.as_bytes());
+        assert_eq!(&arr[1..21], m.evm_collection_address.as_bytes());
         assert_eq!(arr[21], 0);
         let dec = RegisterCollectionMessage::decode(arr).unwrap();
         assert_eq!(dec, m);
@@ -75,7 +77,7 @@ mod tests {
     #[test]
     fn encode_decode_rebase_true() {
         let m = RegisterCollectionMessage {
-            collection_address: addr(),
+            evm_collection_address: addr(),
             rebaseable: true,
         };
         let arr = m.encode();
@@ -87,7 +89,7 @@ mod tests {
     #[test]
     fn decode_wrong_command() {
         let mut arr = RegisterCollectionMessage {
-            collection_address: addr(),
+            evm_collection_address: addr(),
             rebaseable: true,
         }
         .encode();
@@ -102,7 +104,7 @@ mod tests {
     #[test]
     fn decode_script_too_short() {
         let bytes = &RegisterCollectionMessage {
-            collection_address: addr(),
+            evm_collection_address: addr(),
             rebaseable: false,
         }
         .encode()[..RegisterCollectionMessage::LEN - 1];
@@ -116,7 +118,7 @@ mod tests {
     #[test]
     fn decode_invalid_rebase_flag() {
         let mut arr = RegisterCollectionMessage {
-            collection_address: addr(),
+            evm_collection_address: addr(),
             rebaseable: true,
         }
         .encode();
@@ -131,10 +133,7 @@ mod tests {
     #[test]
     fn test_encode_array_bytes() {
         let msg = RegisterCollectionMessage {
-            collection_address: CollectionAddress::from_str(
-                "ffff0123ffffffffffffffffffffffff3210ffff",
-            )
-            .unwrap(),
+            evm_collection_address: addr(),
             rebaseable: true,
         };
         let bytes = msg.encode();

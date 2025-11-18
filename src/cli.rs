@@ -170,12 +170,12 @@ pub enum TxCmd {
     )]
     RegisterCollection {
         #[arg(
-            long = "collection-address",
+            long = "evm-collection-address",
             value_name = "H160",
             help = "20-byte EVM collection address (H160)",
             required = true
         )]
-        collection_address: H160,
+        evm_collection_address: H160,
         #[arg(
             long,
             default_value_t = false,
