@@ -21,7 +21,7 @@ impl CommandRunner for cli::TxCmd {
                     evm_collection_address: *evm_collection_address,
                     rebaseable: *rebaseable,
                 };
-                let output = Brc721Output::from_slice(msg.encode().to_vec()).into_txout();
+                let output = Brc721Output::new(msg.encode().to_vec()).into_txout();
 
                 let wallet =
                     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;

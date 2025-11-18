@@ -12,15 +12,11 @@ pub struct Brc721Output {
 }
 
 impl Brc721Output {
-    pub fn from_slice(message: Brc721Message) -> Self {
+    pub fn new(message: Brc721Message) -> Self {
         Self {
             value: Amount::from_sat(0),
             message,
         }
-    }
-
-    pub fn new(message: Brc721Message) -> Self {
-        Self::from_slice(message)
     }
 
     pub fn from_output(output: &TxOut) -> Option<Self> {
@@ -126,7 +122,7 @@ mod tests {
     #[test]
     fn from_output_rejects_invalid_command() {
         let payload = vec![0xFF, 0x01, 0x02];
-        let txout = Brc721Output::from_slice(payload).into_txout();
+        let txout = Brc721Output::new(payload).into_txout();
         assert!(Brc721Output::from_output(&txout).is_none());
     }
 
