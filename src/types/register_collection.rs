@@ -8,7 +8,8 @@ pub struct RegisterCollectionData {
 }
 
 impl RegisterCollectionData {
-    pub const LEN: usize = 20 + 1;
+    pub const ADDR_LEN: usize = 20;
+    pub const LEN: usize = Self::ADDR_LEN + 1;
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(Self::LEN);
@@ -25,8 +26,8 @@ impl TryFrom<&[u8]> for RegisterCollectionData {
         if bytes.len() != Self::LEN {
             return Err(Brc721Error::InvalidLength(Self::LEN, bytes.len()));
         }
-        let evm_collection_address = H160::from_slice(&bytes[0..20]);
-        let rebase_flag = bytes[20];
+        let evm_collection_address = H160::from_slice(&bytes[0..Self::ADDR_LEN]);
+        let rebase_flag = bytes[Self::ADDR_LEN];
         let rebaseable = match rebase_flag {
             0 => false,
             1 => true,
@@ -36,5 +37,48 @@ impl TryFrom<&[u8]> for RegisterCollectionData {
             evm_collection_address,
             rebaseable,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_register_collection_data() {
+        let addr = H160::from_low_u64_be(42);
+        let data = RegisterCollectionData {
+            evm_collection_address: addr,
+            rebaseable: true,
+        };
+
+        let bytes = data.to_bytes();
+        assert_eq!(bytes.len(), RegisterCollectionData::LEN);
+
+        let parsed = RegisterCollectionData::try_from(bytes.as_slice()).unwrap();
+        assert_eq!(parsed.evm_collection_address, addr);
+        assert_eq!(parsed.rebaseable, true);
+    }
+
+    #[test]
+    fn reject_invalid_length() {
+        let too_short = vec![0u8; RegisterCollectionData::LEN - 1];
+        assert!(RegisterCollectionData::try_from(too_short.as_slice()).is_err());
+
+        let too_long = vec![0u8; RegisterCollectionData::LEN + 1];
+        assert!(RegisterCollectionData::try_from(too_long.as_slice()).is_err());
+    }
+
+    #[test]
+    fn reject_invalid_rebase_flag() {
+        let addr = H160::from_low_u64_be(1);
+        let mut bytes = Vec::with_capacity(RegisterCollectionData::LEN);
+        bytes.extend_from_slice(addr.as_bytes());
+        bytes.push(2); // invalid flag
+
+        match RegisterCollectionData::try_from(bytes.as_slice()) {
+            Err(Brc721Error::InvalidRebaseFlag(2)) => {}
+            other => panic!("expected InvalidRebaseFlag(2), got {:?}", other),
+        }
     }
 }
