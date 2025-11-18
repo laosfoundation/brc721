@@ -126,27 +126,27 @@ mod tests {
 
     #[test]
     fn from_output_roundtrip_ok() {
-        // 1) Costruisco un payload valido
+        // 1) Build a valid payload
         let payload = build_register_collection_payload();
         let message = Brc721Message::try_from(payload.as_slice()).expect("valid message");
 
-        // 2) Creo un Brc721Output e lo trasformo in TxOut
+        // 2) Create a Brc721Output and convert it into a TxOut
         let output = Brc721Output::new(message.clone());
         let txout = output.into_txout().expect("into_txout should succeed");
 
-        // 3) Re-parso dal TxOut
+        // 3) Parse back from the TxOut
         let parsed = Brc721Output::from_output(&txout).expect("from_output should succeed");
 
-        // 4) Controllo che il messaggio sia uguale
+        // 4) Check that the message matches
         assert_eq!(parsed.message(), &message);
 
-        // 5) Controllo che il value sia 0 sat (per come è definito new())
+        // 5) Check that the value is 0 sat (as defined by new())
         assert_eq!(txout.value, Amount::from_sat(0));
     }
 
     #[test]
     fn from_output_fails_on_invalid_script() {
-        // Script completamente sbagliato
+        // Completely invalid script
         let script = ScriptBuf::new();
         let txout = TxOut {
             value: Amount::from_sat(0),
@@ -162,8 +162,8 @@ mod tests {
 
     #[test]
     fn from_output_fails_on_invalid_message_payload() {
-        // Header valido (OP_RETURN + BRC721_CODE) ma payload troppo corto
-        let bytes = vec![Brc721Command::RegisterCollection as u8]; // solo il comando, senza dati
+        // Valid header (OP_RETURN + BRC721_CODE) but payload too short
+        let bytes = vec![Brc721Command::RegisterCollection as u8]; // only the command, no data
         let script = build_brc721_script_from_bytes(bytes);
 
         let txout = TxOut {
@@ -173,8 +173,8 @@ mod tests {
 
         let res = Brc721Output::from_output(&txout);
 
-        // Qui dipende da come hai modellato Brc721Error,
-        // ma l'idea è che propaghi l'errore di Brc721Message::from_bytes
+        // This depends on how Brc721Error is modeled,
+        // but the idea is that it propagates the error from Brc721Message::from_bytes
         match res {
             Err(Brc721Error::InvalidLength(_, _)) => {}
             Err(e) => panic!("expected InvalidLength(..), got {:?}", e),

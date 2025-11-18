@@ -73,10 +73,10 @@ mod tests {
 
         let bytes = msg.to_bytes();
 
-        // 1 byte di comando + payload di RegisterCollectionData
+        // 1 command byte + RegisterCollectionData payload
         assert_eq!(bytes.len(), 1 + RegisterCollectionData::LEN);
 
-        // il primo byte deve essere il comando corretto
+        // the first byte must be the correct command
         let cmd_byte = bytes[0];
         let cmd = Brc721Command::try_from(cmd_byte).expect("valid command byte");
         assert_eq!(cmd, Brc721Command::RegisterCollection);
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn from_bytes_fails_on_unknown_command() {
-        // primo byte = comando inesistente, resto dati random
+        // first byte = non-existent command, remaining bytes are random data
         let bytes = vec![0xFF, 0x00, 0x01];
 
         let res = Brc721Message::try_from(bytes.as_slice());
@@ -113,9 +113,9 @@ mod tests {
 
     #[test]
     fn from_bytes_propagates_invalid_payload_error() {
-        // comando valido ma payload troppo corto per RegisterCollectionData
+        // valid command but payload too short for RegisterCollectionData
         let bytes = vec![Brc721Command::RegisterCollection.into()];
-        // niente payload, quindi `rest` sarà vuoto
+        // no payload, so `rest` will be empty
 
         let res = Brc721Message::try_from(bytes.as_slice());
 
