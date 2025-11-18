@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
-use crate::types::{build_brc721_output, RegisterCollectionMessage};
+use crate::types::{Brc721Output, RegisterCollectionMessage};
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use age::secrecy::SecretString;
@@ -21,7 +21,7 @@ impl CommandRunner for cli::TxCmd {
                     evm_collection_address: *evm_collection_address,
                     rebaseable: *rebaseable,
                 };
-                let output = build_brc721_output(&msg.encode());
+                let output = Brc721Output::from_slice(&msg.encode()).into_txout();
 
                 let wallet =
                     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())?;
