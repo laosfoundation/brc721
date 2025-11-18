@@ -19,7 +19,10 @@ impl Parser {
             };
             let brc721_output = match Brc721Output::from_output(first_output) {
                 Ok(output) => output,
-                Err(_) => continue,
+                Err(e) => {
+                    log::debug!("Skipping output: {:?}", e);
+                    continue;
+                }
             };
 
             log::info!(
@@ -28,7 +31,7 @@ impl Parser {
                 tx_index
             );
 
-            if let Some(Err(ref e)) = self.digest(&brc721_output, block_height, tx_index as u32) {
+            if let Err(ref e) = self.digest(&brc721_output, block_height, tx_index as u32) {
                 log::warn!("{:?}", e);
             }
         }
@@ -40,14 +43,12 @@ impl Parser {
         output: &Brc721Output,
         block_height: u64,
         tx_index: u32,
-    ) -> Option<Result<(), Brc721Error>> {
-        let result = match output.message() {
+    ) -> Result<(), Brc721Error> {
+        match output.message() {
             Brc721Message::RegisterCollection(data) => {
                 register_collection::digest(data, self.storage.clone(), block_height, tx_index)
             }
-        };
-
-        Some(result)
+        }
     }
 }
 
