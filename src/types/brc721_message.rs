@@ -23,7 +23,7 @@ impl Brc721Message {
 
         let msg = match cmd {
             Brc721Command::RegisterCollection => {
-                Brc721Message::RegisterCollection(RegisterCollectionData::from_bytes(rest)?)
+                Brc721Message::RegisterCollection(RegisterCollectionData::try_from(rest)?)
             }
         };
 
