@@ -3,7 +3,7 @@ use bitcoin::opcodes;
 use bitcoin::script::{Builder, PushBytesBuf};
 use bitcoin::{Amount, ScriptBuf, TxOut};
 
-use super::{Brc721Command, BRC721_CODE};
+use super::{Brc721Command, Brc721Message, BRC721_CODE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Brc721Output {
@@ -12,7 +12,7 @@ pub struct Brc721Output {
 }
 
 impl Brc721Output {
-    pub fn from_slice(payload: &[u8]) -> Self {
+    pub fn from_slice(payload: Brc721Message) -> Self {
         let pb = PushBytesBuf::try_from(payload.to_vec()).unwrap();
         let script = Builder::new()
             .push_opcode(opcodes::all::OP_RETURN)
