@@ -8,69 +8,90 @@ use bdk_wallet::bip39::{Language, Mnemonic};
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
-        let loaded = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone());
-
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
                 passphrase,
-            } => {
-                // get or generate mnemonic
-                let mnemonic = mnemonic
-                    .as_ref()
-                    .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
-
-                let wallet = loaded
-                    .or_else(|_| {
-                        let passphrase =
-                            passphrase
-                                .clone()
-                                .map(SecretString::from)
-                                .unwrap_or_else(|| {
-                                    SecretString::from(
-                                        prompt_passphrase().expect("prompt").unwrap_or_default(),
-                                    )
-                                });
-                        let w = Brc721Wallet::create(
-                            &ctx.data_dir,
-                            ctx.network,
-                            mnemonic,
-                            passphrase,
-                            &ctx.rpc_url,
-                            ctx.auth.clone(),
-                        );
-                        log::info!("🎉 New wallet created");
-                        w
-                    })
-                    .context("wallet initialization")?;
-
-                wallet.setup_watch_only().expect("setup watch only");
-
-                log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
-                Ok(())
-            }
-            cli::WalletCmd::Address => {
-                let mut wallet = loaded.context("loading wallet")?;
-                let addr = wallet
-                    .reveal_next_payment_address()
-                    .context("getting address")?;
-                log::info!("🏠 {}", addr.address);
-                Ok(())
-            }
-            cli::WalletCmd::Balance => {
-                let wallet = loaded.context("loading wallet")?;
-                let balances = wallet.balances()?;
-                log::info!("💰 {:?}", balances);
-                Ok(())
-            }
-            cli::WalletCmd::Rescan => {
-                let wallet = loaded.context("loading wallet")?;
-                wallet
-                    .rescan_watch_only()
-                    .context("rescan watch-only wallet")?;
-                log::info!("🔄 Rescan started for watch-only wallet '{}'", wallet.id());
-                Ok(())
-            }
+            } => run_init(ctx, mnemonic.clone(), passphrase.clone()),
+            cli::WalletCmd::Address => run_address(ctx),
+            cli::WalletCmd::Balance => run_balance(ctx),
+            cli::WalletCmd::Rescan => run_rescan(ctx),
         }
     }
+}
+
+fn run_init(
+    ctx: &context::Context,
+    mnemonic: Option<String>,
+    passphrase: Option<String>,
+) -> Result<()> {
+    // Check if wallet already exists
+    if let Ok(wallet) =
+        Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
+    {
+        wallet.setup_watch_only().context("setup watch only")?;
+        log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
+        return Ok(());
+    }
+
+    // Parse mnemonic if provided
+    let mnemonic = mnemonic
+        .as_ref()
+        .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
+
+    // Resolve passphrase
+    let passphrase = resolve_passphrase_init(passphrase);
+
+    // Create new wallet
+    let wallet = Brc721Wallet::create(
+        &ctx.data_dir,
+        ctx.network,
+        mnemonic,
+        passphrase,
+        &ctx.rpc_url,
+        ctx.auth.clone(),
+    )
+    .context("wallet initialization")?;
+
+    wallet.setup_watch_only().context("setup watch only")?;
+
+    log::info!("🎉 New wallet created");
+    log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
+    Ok(())
+}
+
+fn run_address(ctx: &context::Context) -> Result<()> {
+    let mut wallet = load_wallet(ctx)?;
+    let addr = wallet
+        .reveal_next_payment_address()
+        .context("getting address")?;
+    log::info!("🏠 {}", addr.address);
+    Ok(())
+}
+
+fn run_balance(ctx: &context::Context) -> Result<()> {
+    let wallet = load_wallet(ctx)?;
+    let balances = wallet.balances()?;
+    log::info!("💰 {:?}", balances);
+    Ok(())
+}
+
+fn run_rescan(ctx: &context::Context) -> Result<()> {
+    let wallet = load_wallet(ctx)?;
+    wallet
+        .rescan_watch_only()
+        .context("rescan watch-only wallet")?;
+    log::info!("🔄 Rescan started for watch-only wallet '{}'", wallet.id());
+    Ok(())
+}
+
+fn load_wallet(ctx: &context::Context) -> Result<Brc721Wallet> {
+    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
+        .context("loading wallet")
+}
+
+fn resolve_passphrase_init(passphrase: Option<String>) -> SecretString {
+    passphrase.map(SecretString::from).unwrap_or_else(|| {
+        SecretString::from(prompt_passphrase().expect("prompt").unwrap_or_default())
+    })
 }
