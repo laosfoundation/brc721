@@ -200,7 +200,7 @@ fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
     }
     psbt.unsigned_tx.output = new_tx_outputs;
 
-    // Reorder PSBT outputs metadata in modo coerente
+    // Reorder PSBT outputs metadata consistently
     let mut new_psbt_outputs = Vec::with_capacity(psbt.outputs.len());
     let opret_meta = psbt.outputs[opret_index].clone();
     new_psbt_outputs.push(opret_meta);

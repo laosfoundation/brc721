@@ -1,6 +1,6 @@
 pub mod brc721_wallet;
-pub mod local_wallet;
-pub mod master_key_store;
-pub(crate) mod passphrase;
-pub mod remote_wallet;
-pub mod signer;
+mod local_wallet;
+mod master_key_store;
+pub mod passphrase;
+mod remote_wallet;
+mod signer;

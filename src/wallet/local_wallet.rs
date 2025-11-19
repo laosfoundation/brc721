@@ -20,11 +20,9 @@ impl LocalWallet {
     pub fn create<P: AsRef<Path>>(
         data_dir: P,
         network: Network,
-        master_xprv: &Xpriv,
+        external: Bip86<Xpriv>,
+        internal: Bip86<Xpriv>,
     ) -> Result<LocalWallet> {
-        let external = Bip86(*master_xprv, KeychainKind::External);
-        let internal = Bip86(*master_xprv, KeychainKind::Internal);
-
         let db_path = wallet_db_path(&data_dir);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;

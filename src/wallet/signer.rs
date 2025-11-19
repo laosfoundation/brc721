@@ -1,3 +1,4 @@
+use crate::types::Brc721Error;
 use crate::wallet::master_key_store::MasterKeyStore;
 use age::secrecy::SecretString;
 use anyhow::Result;
@@ -22,22 +23,31 @@ impl Signer {
     }
 
     /// Persist the provided master private key using MasterKeyStore with encryption.
-    pub fn store_master_key(&self, xpriv: &Xpriv, passphrase: &SecretString) -> Result<()> {
+    pub fn store_master_key(
+        &self,
+        xpriv: &Xpriv,
+        passphrase: &SecretString,
+    ) -> Result<(), Brc721Error> {
         let store = MasterKeyStore::new(&self.data_dir);
-        store.store(xpriv, passphrase)
+        store
+            .store(xpriv, passphrase)
+            .map_err(|e| Brc721Error::StorageError(e.to_string()))
     }
 
     /// Sign the provided PSBT using the wallet's master private key stored in MasterKeyStore.
     /// The passphrase is provided at call time and is not stored by the Signer.
-    pub fn sign(&self, psbt: &mut Psbt, passphrase: &SecretString) -> Result<bool> {
+    pub fn sign(&self, psbt: &mut Psbt, passphrase: &SecretString) -> Result<bool, Brc721Error> {
         let store = MasterKeyStore::new(&self.data_dir);
-        let master_xprv = store.load(passphrase)?;
+        let master_xprv = store
+            .load(passphrase)
+            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         let external = Bip86(master_xprv, KeychainKind::External);
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 
         let wallet = Wallet::create(external, internal)
             .network(self.network)
-            .create_wallet_no_persist()?;
+            .create_wallet_no_persist()
+            .map_err(|e| Brc721Error::WalletError(e.to_string()))?;
 
         let finalized = wallet.sign(psbt, Default::default()).expect("sign");
         Ok(finalized)

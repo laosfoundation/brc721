@@ -8,6 +8,8 @@ use bdk_wallet::bip39::{Language, Mnemonic};
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
+        let loaded = Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone());
+
         match self {
             cli::WalletCmd::Init {
                 mnemonic,
@@ -18,10 +20,10 @@ impl CommandRunner for cli::WalletCmd {
                     .as_ref()
                     .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
 
-                let wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
-                        .or_else(|_| {
-                            let passphrase = passphrase
+                let wallet = loaded
+                    .or_else(|_| {
+                        let passphrase =
+                            passphrase
                                 .clone()
                                 .map(SecretString::from)
                                 .unwrap_or_else(|| {
@@ -29,18 +31,18 @@ impl CommandRunner for cli::WalletCmd {
                                         prompt_passphrase().expect("prompt").unwrap_or_default(),
                                     )
                                 });
-                            let w = Brc721Wallet::create(
-                                &ctx.data_dir,
-                                ctx.network,
-                                mnemonic,
-                                passphrase,
-                                &ctx.rpc_url,
-                                ctx.auth.clone(),
-                            );
-                            log::info!("🎉 New wallet created");
-                            w
-                        })
-                        .context("wallet initialization")?;
+                        let w = Brc721Wallet::create(
+                            &ctx.data_dir,
+                            ctx.network,
+                            mnemonic,
+                            passphrase,
+                            &ctx.rpc_url,
+                            ctx.auth.clone(),
+                        );
+                        log::info!("🎉 New wallet created");
+                        w
+                    })
+                    .context("wallet initialization")?;
 
                 wallet.setup_watch_only().expect("setup watch only");
 
@@ -48,31 +50,21 @@ impl CommandRunner for cli::WalletCmd {
                 Ok(())
             }
             cli::WalletCmd::Address => {
-                let mut wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
-                        .context("loading wallet")?;
-
+                let mut wallet = loaded.context("loading wallet")?;
                 let addr = wallet
                     .reveal_next_payment_address()
                     .context("getting address")?;
-
                 log::info!("🏠 {}", addr.address);
                 Ok(())
             }
             cli::WalletCmd::Balance => {
-                let wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
-                        .context("loading wallet")?;
-
+                let wallet = loaded.context("loading wallet")?;
                 let balances = wallet.balances()?;
                 log::info!("💰 {:?}", balances);
                 Ok(())
             }
             cli::WalletCmd::Rescan => {
-                let wallet =
-                    Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
-                        .context("loading wallet")?;
-
+                let wallet = loaded.context("loading wallet")?;
                 wallet
                     .rescan_watch_only()
                     .context("rescan watch-only wallet")?;
