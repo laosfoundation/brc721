@@ -43,8 +43,8 @@ impl App {
             log::info!("📝 Log file: {}", path.to_string_lossy());
         }
 
-        let mut rest_handle = self.spaw_rest_task()?;
-        let mut core_handle = self.spaw_core_task()?;
+        let mut rest_handle = self.spawn_rest_task()?;
+        let mut core_handle = self.spawn_core_task()?;
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 log::info!("🧨 Ctrl-C received, shutting down");
@@ -76,35 +76,35 @@ impl App {
         Ok(())
     }
 
-    fn spaw_core_task(&self) -> Result<tokio::task::JoinHandle<()>> {
+    fn spawn_core_task(&self) -> Result<tokio::task::JoinHandle<()>> {
         let starting_block = self.starting_block()?;
         let scanner = self.build_scanner(starting_block)?;
         let parser = self.build_parser();
         let core_shutdown = self.shutdown.clone();
         let storage = self.storage.clone();
 
-        let handler = tokio::task::spawn_blocking(move || {
+        let handle = tokio::task::spawn_blocking(move || {
             let mut core = core::Core::new(storage, scanner, parser);
             if let Err(e) = core.run(core_shutdown) {
                 log::error!("Core error: {}", e);
             }
         });
 
-        Ok(handler)
+        Ok(handle)
     }
 
-    fn spaw_rest_task(&self) -> Result<tokio::task::JoinHandle<()>> {
+    fn spawn_rest_task(&self) -> Result<tokio::task::JoinHandle<()>> {
         let api_addr = self.ctx.api_listen;
         let rest_storage = self.storage.clone();
         let rest_shutdown = self.shutdown.clone();
 
-        let handler = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             if let Err(e) = rest::serve(api_addr, rest_storage, rest_shutdown).await {
                 log::error!("REST server error: {}", e);
             }
         });
 
-        Ok(handler)
+        Ok(handle)
     }
 
     fn starting_block(&self) -> Result<u64> {
