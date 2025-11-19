@@ -1,6 +1,7 @@
-use crate::{cli, context, core, parser, rest, scanner, storage};
+mod wiring;
+
+use crate::{cli, context, core, rest, storage};
 use anyhow::{Context as AnyhowContext, Result};
-use bitcoincore_rpc::Client;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -22,8 +23,8 @@ impl App {
         log::info!("🌐 Network: {}", ctx.network);
         log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 
-        init_data_dir(&ctx).context("initializing data dir")?;
-        let storage = init_storage(&ctx)?;
+        wiring::init_data_dir(&ctx).context("initializing data dir")?;
+        let storage = wiring::init_storage(&ctx)?;
 
         Ok((Self { ctx, storage }, cli))
     }
@@ -39,39 +40,6 @@ impl App {
             None => self.ctx.start,
         })
     }
-
-    pub fn build_scanner(&self, start_block: u64) -> Result<scanner::Scanner<Client>> {
-        let client = Client::new(self.ctx.rpc_url.as_ref(), self.ctx.auth.clone())
-            .context("failed to create RPC client")?;
-        Ok(scanner::Scanner::new(client)
-            .with_confirmations(self.ctx.confirmations)
-            .with_capacity(self.ctx.batch_size)
-            .with_start_from(start_block))
-    }
-
-    pub fn build_parser(&self) -> parser::Brc721Parser {
-        parser::Brc721Parser::new(self.storage.clone())
-    }
-}
-
-fn init_data_dir(ctx: &context::Context) -> Result<()> {
-    let data_dir = std::path::PathBuf::from(&ctx.data_dir);
-    std::fs::create_dir_all(&data_dir)?;
-    Ok(())
-}
-
-fn init_storage(ctx: &context::Context) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
-    let data_dir = std::path::PathBuf::from(&ctx.data_dir);
-    let db_path = data_dir
-        .join("brc721.sqlite")
-        .to_string_lossy()
-        .into_owned();
-    let sqlite = storage::SqliteStorage::new(&db_path);
-    if ctx.reset {
-        sqlite.reset_all().context("resetting storage")?;
-    }
-    sqlite.init().context("initializing storage")?;
-    Ok(Arc::new(sqlite))
 }
 
 pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
@@ -97,8 +65,8 @@ pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
 
     // Core
     let starting_block = app.starting_block()?;
-    let scanner = app.build_scanner(starting_block)?;
-    let parser = app.build_parser();
+    let scanner = wiring::build_scanner(app.ctx, starting_block)?;
+    let parser = wiring::build_parser(app.storage.clone());
     let core_shutdown = shutdown.clone();
     let storage = app.storage.clone();
 
@@ -121,11 +89,19 @@ pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
     let rest_result = rest_handle.await;
     let core_result = core_handle.await;
 
+    let mut fatal_error: Option<anyhow::Error> = None;
+
     if let Err(e) = rest_result {
-        log::error!("REST task panicked/join error: {}", e);
+        log::error!("REST server error: {}", e);
+        fatal_error = Some(e.into());
     }
     if let Err(e) = core_result {
-        log::error!("Core task panicked/join error: {}", e);
+        log::error!("Core error: {}", e);
+        fatal_error.get_or_insert(e.into());
+    }
+
+    if let Some(e) = fatal_error {
+        return Err(e);
     }
 
     log::info!("✅ Shutdown complete");
