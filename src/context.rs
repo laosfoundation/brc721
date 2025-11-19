@@ -1,7 +1,7 @@
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 use url::Url;
 
 pub struct Context {
@@ -14,6 +14,7 @@ pub struct Context {
     pub start: u64,
     pub log_file: Option<PathBuf>,
     pub reset: bool,
+    pub api_listen: SocketAddr,
 }
 
 impl Context {
@@ -37,6 +38,7 @@ impl Context {
             start: cli.start,
             log_file: cli.log_file.as_deref().map(PathBuf::from),
             reset: cli.reset,
+            api_listen: cli.api_listen,
         }
     }
 }
