@@ -73,9 +73,9 @@ impl<C: crate::scanner::BitcoinRpc, P: BlockParser> Core<C, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::Brc721Parser;
     use crate::storage::traits::{Block as StorageBlock, CollectionKey};
     use crate::storage::Storage;
+    use crate::types::Brc721Error;
     use anyhow::anyhow;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::Network;
@@ -153,19 +153,37 @@ mod tests {
         genesis_block(Network::Regtest)
     }
 
-    fn make_core(fail_storage: bool) -> (Arc<DummyStorage>, Core<DummyRpc, Brc721Parser>) {
+    fn make_core_with_parser<P: BlockParser>(
+        fail_storage: bool,
+        parser: P,
+    ) -> (Arc<DummyStorage>, Core<DummyRpc, P>) {
         let inner = Arc::new(DummyStorage::new(fail_storage));
         let storage: Arc<dyn Storage + Send + Sync> = inner.clone();
-        let parser = Brc721Parser::new(storage.clone());
         let rpc = DummyRpc;
         let scanner = Scanner::new(rpc);
         let core = Core::new(storage, scanner, parser);
         (inner, core)
     }
 
+    struct NoopParser;
+
+    impl BlockParser for NoopParser {
+        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), Brc721Error> {
+            Ok(())
+        }
+    }
+
+    struct FailingParser;
+
+    impl BlockParser for FailingParser {
+        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), Brc721Error> {
+            Err(Brc721Error::InvalidPayload)
+        }
+    }
+
     #[test]
     fn process_block_success_saves_height_and_hash() {
-        let (inner, core) = make_core(false);
+        let (inner, core) = make_core_with_parser(false, NoopParser);
 
         let block = empty_block();
         let height = 42;
@@ -180,7 +198,7 @@ mod tests {
 
     #[test]
     fn process_block_storage_error_does_not_panic() {
-        let (inner, core) = make_core(true);
+        let (inner, core) = make_core_with_parser(true, NoopParser);
 
         let block = empty_block();
         let height = 1;
@@ -190,22 +208,9 @@ mod tests {
         assert_eq!(*inner.last_hash.lock().unwrap(), None);
     }
 
-    struct FailingParser;
-
-    impl BlockParser for FailingParser {
-        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), crate::types::Brc721Error> {
-            Err(crate::types::Brc721Error::InvalidPayload)
-        }
-    }
-
     #[test]
     fn process_block_parser_error_does_not_save_height_or_hash() {
-        let inner = Arc::new(DummyStorage::new(false));
-        let storage: Arc<dyn Storage + Send + Sync> = inner.clone();
-        let rpc = DummyRpc;
-        let scanner = Scanner::new(rpc);
-        let parser = FailingParser;
-        let core = Core::new(storage, scanner, parser);
+        let (inner, core) = make_core_with_parser(false, FailingParser);
 
         let block = empty_block();
         let height = 7;
