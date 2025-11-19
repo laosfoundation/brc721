@@ -58,7 +58,6 @@ impl App {
         let core_result = core_handle.await;
 
         let mut fatal_error: Option<anyhow::Error> = None;
-
         if let Err(e) = rest_result {
             log::error!("REST server error: {}", e);
             fatal_error = Some(e.into());
@@ -67,7 +66,6 @@ impl App {
             log::error!("Core error: {}", e);
             fatal_error.get_or_insert(e.into());
         }
-
         if let Some(e) = fatal_error {
             return Err(e);
         }
