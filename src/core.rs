@@ -73,6 +73,7 @@ impl<C: crate::scanner::BitcoinRpc, P: BlockParse> Core<C, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::Parser;
     use crate::storage::traits::{Block as StorageBlock, CollectionKey};
     use crate::storage::Storage;
     use anyhow::anyhow;
@@ -152,7 +153,7 @@ mod tests {
         genesis_block(Network::Regtest)
     }
 
-    fn make_core(fail_storage: bool) -> (Arc<DummyStorage>, Core<DummyRpc>) {
+    fn make_core(fail_storage: bool) -> (Arc<DummyStorage>, Core<DummyRpc, Parser>) {
         let inner = Arc::new(DummyStorage::new(fail_storage));
         let storage: Arc<dyn Storage + Send + Sync> = inner.clone();
         let parser = Parser::new(storage.clone());
