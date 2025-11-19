@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub struct App {
-    pub ctx: context::Context,
-    pub storage: Arc<dyn storage::Storage + Send + Sync>,
+    ctx: context::Context,
+    storage: Arc<dyn storage::Storage + Send + Sync>,
     shutdown: CancellationToken,
 }
 
