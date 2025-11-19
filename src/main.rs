@@ -66,7 +66,9 @@ async fn main() -> Result<()> {
     let shutdown_core = shutdown.clone();
     let mut core_handle = tokio::task::spawn_blocking(move || {
         let mut core = core;
-        core.run(shutdown_core);
+        if let Err(e) = core.run(shutdown_core) {
+            log::error!("Core error: {}", e);
+        }
     });
 
     tokio::select! {

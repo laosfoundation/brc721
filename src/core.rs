@@ -1,11 +1,9 @@
 use crate::parser::BlockParser;
 use crate::scanner::{BitcoinRpc, Scanner};
 use crate::storage::Storage;
+use anyhow::Result;
 use bitcoin::Block;
 use std::sync::Arc;
-use std::time::Duration;
-
-const SCANNER_BACKOFF: Duration = Duration::from_secs(1);
 
 pub struct Core<C: BitcoinRpc, P: BlockParser> {
     storage: Arc<dyn Storage + Send + Sync>,
@@ -23,29 +21,31 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
     }
 
     /// Main loop: keep stepping until shutdown is requested.
-    pub fn run(&mut self, shutdown: tokio_util::sync::CancellationToken) {
+    pub fn run(&mut self, shutdown: tokio_util::sync::CancellationToken) -> Result<()> {
         while !shutdown.is_cancelled() {
-            self.step(&shutdown);
+            self.step(&shutdown)?;
         }
         log::info!("👋 Core loop exited");
+        Ok(())
     }
 
     /// One iteration: ask the scanner for blocks, process them, or back off on error.
-    pub fn step(&mut self, shutdown: &tokio_util::sync::CancellationToken) {
+    pub fn step(&mut self, shutdown: &tokio_util::sync::CancellationToken) -> Result<()> {
         match self.scanner.next_blocks_with_shutdown(shutdown) {
             Ok(blocks) => {
                 for (height, block) in blocks {
-                    self.process_block(height, &block);
+                    self.process_block(height, &block)?;
                 }
             }
             Err(e) => {
                 log::error!("scanner error: {}", e);
-                std::thread::sleep(SCANNER_BACKOFF);
+                return Err(e.into());
             }
         }
+        Ok(())
     }
 
-    fn process_block(&self, height: u64, block: &Block) {
+    fn process_block(&self, height: u64, block: &Block) -> Result<()> {
         let hash = block.block_hash();
         log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
@@ -56,7 +56,7 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
                 height,
                 e
             );
-            return;
+            return Err(e.into());
         }
 
         if let Err(e) = self.storage.save_last(height, &hash.to_string()) {
@@ -66,7 +66,10 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
                 height,
                 e
             );
+            return Err(e);
         }
+
+        Ok(())
     }
 }
 
@@ -187,7 +190,7 @@ mod tests {
 
         let block = empty_block();
         let height = 42;
-        core.process_block(height, &block);
+        core.process_block(height, &block).unwrap();
 
         assert_eq!(*inner.last_height.lock().unwrap(), Some(height));
         assert_eq!(
@@ -197,24 +200,24 @@ mod tests {
     }
 
     #[test]
-    fn process_block_storage_error_does_not_panic() {
+    fn process_block_storage_error_returns_error_and_does_not_persist() {
         let (inner, core) = make_core_with_parser(true, NoopParser);
 
         let block = empty_block();
         let height = 1;
-        core.process_block(height, &block);
+        assert!(core.process_block(height, &block).is_err());
 
         assert_eq!(*inner.last_height.lock().unwrap(), None);
         assert_eq!(*inner.last_hash.lock().unwrap(), None);
     }
 
     #[test]
-    fn process_block_parser_error_does_not_save_height_or_hash() {
+    fn process_block_parser_error_returns_error_and_does_not_persist() {
         let (inner, core) = make_core_with_parser(false, FailingParser);
 
         let block = empty_block();
         let height = 7;
-        core.process_block(height, &block);
+        assert!(core.process_block(height, &block).is_err());
 
         assert_eq!(*inner.last_height.lock().unwrap(), None);
         assert_eq!(*inner.last_hash.lock().unwrap(), None);
