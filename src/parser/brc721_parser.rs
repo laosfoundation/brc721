@@ -1,7 +1,7 @@
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
 
-use crate::parser::BlockParse;
+use crate::parser::BlockParser;
 
 pub struct Brc721Parser {
     storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
@@ -29,7 +29,7 @@ impl Brc721Parser {
     }
 }
 
-impl BlockParse for Brc721Parser {
+impl BlockParser for Brc721Parser {
     fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let Some(first_output) = tx.output.first() else {

@@ -1,4 +1,4 @@
-use crate::parser::BlockParse;
+use crate::parser::BlockParser;
 use crate::scanner::Scanner;
 use crate::storage::Storage;
 use bitcoin::Block;
@@ -7,13 +7,13 @@ use std::time::Duration;
 
 const SCANNER_BACKOFF: Duration = Duration::from_secs(1);
 
-pub struct Core<C: crate::scanner::BitcoinRpc, P: BlockParse> {
+pub struct Core<C: crate::scanner::BitcoinRpc, P: BlockParser> {
     storage: Arc<dyn Storage + Send + Sync>,
     scanner: Scanner<C>,
     parser: P,
 }
 
-impl<C: crate::scanner::BitcoinRpc, P: BlockParse> Core<C, P> {
+impl<C: crate::scanner::BitcoinRpc, P: BlockParser> Core<C, P> {
     pub fn new(storage: Arc<dyn Storage + Send + Sync>, scanner: Scanner<C>, parser: P) -> Self {
         Self {
             storage,
