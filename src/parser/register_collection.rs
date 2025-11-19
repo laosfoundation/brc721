@@ -1,8 +1,6 @@
 use crate::storage::traits::CollectionKey;
 use crate::storage::Storage;
-use crate::types::RegisterCollectionData;
-
-use super::Brc721Error;
+use crate::types::{Brc721Error, RegisterCollectionData};
 
 pub fn digest(
     payload: &RegisterCollectionData,
