@@ -189,4 +189,29 @@ mod tests {
         assert_eq!(*inner.last_height.lock().unwrap(), None);
         assert_eq!(*inner.last_hash.lock().unwrap(), None);
     }
+
+    struct FailingParser;
+
+    impl BlockParser for FailingParser {
+        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), crate::types::Brc721Error> {
+            Err(crate::types::Brc721Error::InvalidPayload)
+        }
+    }
+
+    #[test]
+    fn process_block_parser_error_does_not_save_height_or_hash() {
+        let inner = Arc::new(DummyStorage::new(false));
+        let storage: Arc<dyn Storage + Send + Sync> = inner.clone();
+        let rpc = DummyRpc;
+        let scanner = Scanner::new(rpc);
+        let parser = FailingParser;
+        let core = Core::new(storage, scanner, parser);
+
+        let block = empty_block();
+        let height = 7;
+        core.process_block(height, &block);
+
+        assert_eq!(*inner.last_height.lock().unwrap(), None);
+        assert_eq!(*inner.last_hash.lock().unwrap(), None);
+    }
 }
