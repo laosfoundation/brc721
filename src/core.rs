@@ -50,27 +50,31 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
     }
 
     fn process_block(&self, height: u64, block: &Block) {
-        let hash = block.block_hash();
-        log::info!("🧱 block={} 🧾 hash={}", height, hash);
+        process_block_impl(&self.parser, self.storage.as_ref(), height, block);
+    }
+}
 
-        if let Err(e) = self.parser.parse_block(block, height) {
-            log::error!(
-                "parsing error of block {} at height {}: {}",
-                hash,
-                height,
-                e
-            );
-            return;
-        }
+fn process_block_impl(parser: &Parser, storage: &dyn Storage, height: u64, block: &Block) {
+    let hash = block.block_hash();
+    log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
-        if let Err(e) = self.storage.save_last(height, &hash.to_string()) {
-            log::error!(
-                "storage error saving block {} at height {}: {}",
-                hash,
-                height,
-                e
-            );
-        }
+    if let Err(e) = parser.parse_block(block, height) {
+        log::error!(
+            "parsing error of block {} at height {}: {}",
+            hash,
+            height,
+            e
+        );
+        return;
+    }
+
+    if let Err(e) = storage.save_last(height, &hash.to_string()) {
+        log::error!(
+            "storage error saving block {} at height {}: {}",
+            hash,
+            height,
+            e
+        );
     }
 }
 
