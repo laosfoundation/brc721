@@ -23,7 +23,7 @@ impl App {
         log::info!("🌐 Network: {}", ctx.network);
         log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 
-        let storage = init_storage(&ctx)?;
+        let storage = init_storage(&ctx.data_dir, ctx.reset)?;
 
         Ok((
             Self {
@@ -35,8 +35,7 @@ impl App {
         ))
     }
 
-    pub async fn run_daemon(&self, cli: cli::Cli) -> Result<()> {
-        log::info!("🌐 REST API: http://{}", cli.api_listen);
+    pub async fn run_daemon(&self) -> Result<()> {
         log::info!("🧮 Confirmations: {}", self.ctx.confirmations);
         log::info!("🧮 Batch size: {}", self.ctx.batch_size);
         if let Some(path) = self.ctx.log_file.as_deref() {
@@ -131,16 +130,18 @@ impl App {
     }
 }
 
-pub fn init_storage(ctx: &context::Context) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
-    let data_dir = std::path::PathBuf::from(&ctx.data_dir);
-    std::fs::create_dir_all(&data_dir)?;
+fn init_storage(
+    data_dir: &std::path::PathBuf,
+    reset: bool,
+) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
+    std::fs::create_dir_all(data_dir)?;
 
     let db_path = data_dir
         .join("brc721.sqlite")
         .to_string_lossy()
         .into_owned();
     let sqlite = storage::SqliteStorage::new(&db_path);
-    if ctx.reset {
+    if reset {
         sqlite.reset_all().context("resetting storage")?;
     }
     sqlite.init().context("initializing storage")?;
@@ -156,5 +157,5 @@ pub async fn run() -> Result<()> {
         return Ok(());
     }
 
-    app.run_daemon(cli).await
+    app.run_daemon().await
 }
