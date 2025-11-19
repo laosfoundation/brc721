@@ -1,4 +1,4 @@
-use crate::parser::{BlockParse, Parser};
+use crate::parser::BlockParse;
 use crate::scanner::Scanner;
 use crate::storage::Storage;
 use bitcoin::Block;
@@ -7,18 +7,14 @@ use std::time::Duration;
 
 const SCANNER_BACKOFF: Duration = Duration::from_secs(1);
 
-pub struct Core<C: crate::scanner::BitcoinRpc> {
+pub struct Core<C: crate::scanner::BitcoinRpc, P: BlockParse> {
     storage: Arc<dyn Storage + Send + Sync>,
     scanner: Scanner<C>,
-    parser: Parser,
+    parser: P,
 }
 
-impl<C: crate::scanner::BitcoinRpc> Core<C> {
-    pub fn new(
-        storage: Arc<dyn Storage + Send + Sync>,
-        scanner: Scanner<C>,
-        parser: Parser,
-    ) -> Self {
+impl<C: crate::scanner::BitcoinRpc, P: BlockParse> Core<C, P> {
+    pub fn new(storage: Arc<dyn Storage + Send + Sync>, scanner: Scanner<C>, parser: P) -> Self {
         Self {
             storage,
             scanner,
@@ -50,36 +46,27 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
     }
 
     fn process_block(&self, height: u64, block: &Block) {
-        process_block_impl(&self.parser, self.storage.as_ref(), height, block);
-    }
-}
+        let hash = block.block_hash();
+        log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
-fn process_block_impl<P: BlockParse>(
-    parser: &P,
-    storage: &dyn Storage,
-    height: u64,
-    block: &Block,
-) {
-    let hash = block.block_hash();
-    log::info!("🧱 block={} 🧾 hash={}", height, hash);
+        if let Err(e) = self.parser.parse_block(block, height) {
+            log::error!(
+                "parsing error of block {} at height {}: {}",
+                hash,
+                height,
+                e
+            );
+            return;
+        }
 
-    if let Err(e) = parser.parse_block(block, height) {
-        log::error!(
-            "parsing error of block {} at height {}: {}",
-            hash,
-            height,
-            e
-        );
-        return;
-    }
-
-    if let Err(e) = storage.save_last(height, &hash.to_string()) {
-        log::error!(
-            "storage error saving block {} at height {}: {}",
-            hash,
-            height,
-            e
-        );
+        if let Err(e) = self.storage.save_last(height, &hash.to_string()) {
+            log::error!(
+                "storage error saving block {} at height {}: {}",
+                hash,
+                height,
+                e
+            );
+        }
     }
 }
 
