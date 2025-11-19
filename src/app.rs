@@ -74,18 +74,6 @@ fn init_storage(ctx: &context::Context) -> Result<Arc<dyn storage::Storage + Sen
     Ok(Arc::new(sqlite))
 }
 
-pub async fn run() -> Result<()> {
-    let (app, cli) = App::from_cli()?;
-
-    if let Some(cmd) = &cli.cmd {
-        // one-shot command mode
-        cmd.run(&app.ctx)?;
-        return Ok(());
-    }
-
-    run_daemon(app, cli).await
-}
-
 pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
     log::info!("🌐 REST API: http://{}", cli.api_listen);
     log::info!("🧮 Confirmations: {}", app.ctx.confirmations);
@@ -136,4 +124,16 @@ pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
 
     log::info!("✅ Shutdown complete");
     Ok(())
+}
+
+pub async fn run() -> Result<()> {
+    let (app, cli) = App::from_cli()?;
+
+    if let Some(cmd) = &cli.cmd {
+        // one-shot command mode
+        cmd.run(&app.ctx)?;
+        return Ok(());
+    }
+
+    run_daemon(app, cli).await
 }
