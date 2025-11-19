@@ -28,16 +28,16 @@ impl App {
         Ok((Self { ctx, storage }, cli))
     }
 
-    pub fn shutdown_token(&self) -> CancellationToken {
-        CancellationToken::new()
-    }
-
-    pub fn starting_block(&self) -> u64 {
-        self.storage
+    pub fn starting_block(&self) -> Result<u64> {
+        let last = self
+            .storage
             .load_last()
-            .unwrap_or_default()
-            .map(|last| last.height + 1)
-            .unwrap_or(self.ctx.start)
+            .context("loading last processed block")?;
+
+        Ok(match last {
+            Some(last) => last.height + 1,
+            None => self.ctx.start,
+        })
     }
 
     pub fn build_scanner(&self, start_block: u64) -> Result<scanner::Scanner<Client>> {
@@ -82,7 +82,7 @@ pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
         log::info!("📝 Log file: {}", path.to_string_lossy());
     }
 
-    let shutdown = app.shutdown_token();
+    let shutdown = CancellationToken::new();
 
     // REST
     let api_addr = cli.api_listen;
@@ -96,7 +96,7 @@ pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
     });
 
     // Core
-    let starting_block = app.starting_block();
+    let starting_block = app.starting_block()?;
     let scanner = app.build_scanner(starting_block)?;
     let parser = app.build_parser();
     let core_shutdown = shutdown.clone();
@@ -118,9 +118,15 @@ pub async fn run_daemon(app: App, cli: cli::Cli) -> Result<()> {
     }
 
     shutdown.cancel();
+    let rest_result = rest_handle.await;
+    let core_result = core_handle.await;
 
-    let _ = rest_handle.await;
-    let _ = core_handle.await;
+    if let Err(e) = rest_result {
+        log::error!("REST task panicked/join error: {}", e);
+    }
+    if let Err(e) = core_result {
+        log::error!("Core task panicked/join error: {}", e);
+    }
 
     log::info!("✅ Shutdown complete");
     Ok(())
