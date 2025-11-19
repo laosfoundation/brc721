@@ -1,7 +1,9 @@
 mod register_collection;
+mod traits;
 
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
+pub use traits::BlockParse;
 
 pub struct Parser {
     storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
@@ -12,7 +14,22 @@ impl Parser {
         Self { storage }
     }
 
-    pub fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
+    fn digest(
+        &self,
+        output: &Brc721Output,
+        block_height: u64,
+        tx_index: u32,
+    ) -> Result<(), Brc721Error> {
+        match output.message() {
+            Brc721Message::RegisterCollection(data) => {
+                register_collection::digest(data, self.storage.as_ref(), block_height, tx_index)
+            }
+        }
+    }
+}
+
+impl BlockParse for Parser {
+    fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let Some(first_output) = tx.output.first() else {
                 continue;
@@ -36,19 +53,6 @@ impl Parser {
             }
         }
         Ok(())
-    }
-
-    fn digest(
-        &self,
-        output: &Brc721Output,
-        block_height: u64,
-        tx_index: u32,
-    ) -> Result<(), Brc721Error> {
-        match output.message() {
-            Brc721Message::RegisterCollection(data) => {
-                register_collection::digest(data, self.storage.as_ref(), block_height, tx_index)
-            }
-        }
     }
 }
 

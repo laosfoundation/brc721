@@ -1,4 +1,4 @@
-use crate::parser::Parser;
+use crate::parser::{BlockParse, Parser};
 use crate::scanner::Scanner;
 use crate::storage::Storage;
 use bitcoin::Block;
@@ -54,7 +54,12 @@ impl<C: crate::scanner::BitcoinRpc> Core<C> {
     }
 }
 
-fn process_block_impl(parser: &Parser, storage: &dyn Storage, height: u64, block: &Block) {
+fn process_block_impl<P: BlockParse>(
+    parser: &P,
+    storage: &dyn Storage,
+    height: u64,
+    block: &Block,
+) {
     let hash = block.block_hash();
     log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
