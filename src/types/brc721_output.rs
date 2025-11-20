@@ -1,4 +1,4 @@
-use super::{Brc721Command, Brc721Message, BRC721_CODE};
+use super::{Brc721Message, BRC721_CODE};
 use crate::types::Brc721Error;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::opcodes;
@@ -45,10 +45,6 @@ impl Brc721Output {
     pub fn message(&self) -> &Brc721Message {
         &self.message
     }
-
-    pub fn command(&self) -> Brc721Command {
-        self.message.command()
-    }
 }
 
 fn extract_payload(script: &ScriptBuf) -> Option<Vec<u8>> {
@@ -70,7 +66,7 @@ fn extract_payload(script: &ScriptBuf) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::RegisterCollectionData;
+    use crate::types::{Brc721Command, RegisterCollectionData};
     use bitcoin::script::Builder;
     use bitcoin::{Amount, ScriptBuf, TxOut};
     use ethereum_types::H160;
