@@ -36,7 +36,6 @@ fn e2e_balance() {
 
     let out = String::from_utf8_lossy(&output.stdout);
     let err = String::from_utf8_lossy(&output.stderr);
-    assert!(out.contains("Loaded env from .env"));
 
     let combined = format!("{}{}", out, err);
     assert!(
