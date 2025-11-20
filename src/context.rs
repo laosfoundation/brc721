@@ -25,7 +25,7 @@ impl Context {
         };
         let rpc_url = Url::parse(&cli.rpc_url).expect("rpc url");
         let network = detect_network(&rpc_url, &auth)
-            .expect(&format!("detect network from node {}", rpc_url.to_string()));
+            .unwrap_or_else(|_| panic!("detect network from node {}", rpc_url));
         let mut data_dir = PathBuf::from(&cli.data_dir);
         let network_dir = network.to_string();
         data_dir.push(network_dir);
