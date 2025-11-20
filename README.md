@@ -1,234 +1,275 @@
 # brc721
 
-A simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
+A Rust daemon that connects to a Bitcoin Core node, scans blocks for BRC‑721 data, persists state to SQLite and exposes a small HTTP API. It also provides a CLI for managing a watch‑only wallet and building protocol transactions.
 
-Storage
+---
 
-- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically.
-- No CSV or legacy fallback.
-- Use --reset to delete the database file before starting.
+## Storage
 
-Environment
+- Default data directory: `./.brc721/`
+- Per‑network layout: `./.brc721/<network>/brc721.sqlite` (e.g. `./.brc721/regtest/brc721.sqlite`)
+- Use `--reset` to wipe the SQLite database before starting.
 
-- BITCOIN_RPC_URL, BITCOIN_RPC_USER/PASS or BITCOIN_RPC_COOKIE
-- BRC721_DB_PATH (optional, default ./.brc721/brc721.sqlite)
-- BRC721_API_BIND (optional, default 127.0.0.1:8080)
-- BRC721_API_TOKEN (optional auth token; if set, requests must send x-api-key: <token> or Authorization: Bearer <token>)
+---
 
-CLI
+## Environment & configuration
 
-- --confirmations N: process up to tip - N (default 3)
-- --batch-size SIZE: batch processing size (default 100)
-- --reset: delete DB before start
-- Subcommands:
-  - wallet-init --name <wallet>
-  - wallet-newaddress --name <wallet>
-  - wallet-balance --name <wallet>
-  - collection-create --name <wallet> --evm-collection-address <H160> [--rebaseable] [--fee-rate <sat/vB>]
-  - serve [--bind <addr:port>]  Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
+Configuration is a mix of CLI flags and environment variables. The CLI parser lives in `src/cli/args.rs:6-105` and the runtime context in `src/context.rs:7-42`.
 
-HTTP API
+### Core RPC
 
-Start the server (scanner runs concurrently, persisting to SQLite):
+- `BITCOIN_RPC_URL` (required unless passed via `--rpc-url`)
+  - Default: `http://127.0.0.1:8332`
+- `BITCOIN_RPC_USER` / `BITCOIN_RPC_PASS`
+  - Default: `dev` / `dev` (also usable via `--rpc-user` / `--rpc-pass`)
 
-```
-# start API and the background scanner together
-cargo run -- serve --bind 127.0.0.1:8080
-# pass debug and confirmations flags to control scanner verbosity/lag
-cargo run -- -d -c 3 serve --bind 127.0.0.1:8080
-# or via env
-BRC721_API_BIND=0.0.0.0:8080 cargo run -- serve
-# optional auth
-export BRC721_API_TOKEN=secret123
-```
+### Daemon / scanner
 
-Endpoints:
+Global flags (apply to both daemon and subcommands):
 
-- POST /wallet/init
+- `--start HEIGHT` / `BRC721_START_BLOCK`
+  - Initial block height if no prior state exists (default: `923580`).
+- `--confirmations N`
+  - Only process up to `tip - N` (default: `3`).
+- `--batch-size SIZE`
+  - Batch size for block processing (default: `1`).
+- `--reset`
+  - Delete the SQLite database before starting.
+- `--data-dir DIR`
+  - Base directory for persistent data (default: `.brc721/`). The effective path is `DIR/<network>/brc721.sqlite`.
 
-  Request body:
-  {"name":"default"}
+### Logging & HTTP
 
-  Response:
-  {"ok":true,"name":"default"}
+- `--log-file PATH` / `BRC721_LOG_FILE`
+  - Optional log file (in addition to stderr).
+- `--api-listen ADDR` / `BRC721_API_LISTEN`
+  - REST API bind address (default: `127.0.0.1:8083`).
 
-- GET /wallet/{name}/address
+### Env loading
 
-  Response:
-  {"address":"bcrt1..."}
+- `DOTENV_PATH` (optional)
+  - Path to a dotenv file loaded before parsing CLI args (default: `.env`).
+  - See `src/cli/args.rs:107-112`.
 
-- GET /wallet/{name}/balance
+---
 
-  Response:
-  {"balance_btc": 12.345}
+## Running the daemon
 
-- POST /collections
+The daemon runs the block scanner and HTTP API together. If no subcommand is given, the app runs as a long‑lived process.
 
-  Request body:
-  {"wallet":"default","evm_collection_address":"<0x...40-hex>","rebaseable":false,"fee_rate":1.0}
-
-  Response:
-  {"txid":"<txid>"}
-
-If BRC721_API_TOKEN is set, include either header:
-- x-api-key: <token>
-- Authorization: Bearer <token>
-
-Local testing with Bitcoin Core (regtest)
-
-Option A: Native install
-
-- Requirements: Bitcoin Core v26+ installed and on PATH
-- Start a fresh regtest node with RPC enabled:
-
-```
-bitcoind -regtest -datadir=.bitcoin-regtest -fallbackfee=0.0001 -server=1 -txindex=1 -rpcallowip=127.0.0.1 -rpcuser=dev -rpcpassword=dev -rpcport=18443 -port=18444 -daemon
-```
-
-- Configure the app to point at regtest:
-
-Create a .env (or edit existing):
-
-```
-BITCOIN_RPC_URL=http://127.0.0.1:18443
-BITCOIN_RPC_USER=dev
-BITCOIN_RPC_PASS=dev
-```
-
-- Generate some blocks so there is data:
-
-```
-bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcport=18443 -generate 101
-```
-
-- Run the scanner or API:
-
-```
-# scanner
+```bash
+# Using the default .env
 cargo run
-# API server
-cargo run -- serve --bind 127.0.0.1:8080
+
+# Using a custom dotenv file
+DOTENV_PATH=.env.testing cargo run
+
+# Override some runtime parameters
+DOTENV_PATH=.env.testing \
+  cargo run -- \
+    --data-dir .brc721/ \
+    --confirmations 3 \
+    --batch-size 100 \
+    --api-listen 127.0.0.1:8083
 ```
 
-Option B: Docker (recommended for quick setup)
+If a subcommand is provided (`wallet` or `tx`), the app runs that command once and exits (see `src/app.rs:184-193`).
 
-- Requirements: Docker + Docker Compose
-- Start regtest node in Docker:
+---
 
-```
-docker compose up -d
-```
+## CLI usage
 
-This uses bitcoin/bitcoin with configs under docker/bitcoin/*. RPC is mapped to 127.0.0.1:18443.
+Top‑level help:
 
-- Configure the app:
-
-```
-cp .env.example .env
-BITCOIN_RPC_URL=http://127.0.0.1:18443
-BITCOIN_RPC_USER=dev
-BITCOIN_RPC_PASS=dev
-```
-
-- Create wallet and generate blocks inside the container:
-
-```
-docker compose exec bitcoind bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev createwallet default
-docker compose exec bitcoind bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -generate 101
-```
-
-- Run the app/tests against Docker node:
-
-```
-# scanner
-cargo run
-# api
-cargo run -- serve
-# tests
-cargo test -- --nocapture
-```
-
-- Stop and clean up:
-
-```
-docker compose down
-```
-
-Integration test helper
-
-- You can also run a simple smoke test that connects to the regtest node and asserts it can read the tip and a block header. Make sure the node is running and has blocks.
-
-```
-cargo test -- --nocapture
-```
-
-Troubleshooting
-
-- If you see connection refused, ensure bitcoind is running on regtest and RPC creds/port match .env
-- If auth fails, try using cookie auth instead of user/pass. Typically: BITCOIN_RPC_COOKIE=./.bitcoin-regtest/regtest/.cookie
-
-
-## Testing on a local node
-
-Start a local bitcoin node:
 ```bash
-docker compose up -d
+cargo run -- --help
 ```
 
-Initialize wallet:
+### Wallet commands
+
+Subcommands are defined in `src/cli/wallet_cmd.rs:3-44` and wired in `src/commands/wallet.rs:10-23`.
+
+- Initialize (or reuse) wallet and Core watch‑only wallet:
+
+  ```bash
+  DOTENV_PATH=.env.testing cargo run -- wallet init \
+    --mnemonic "word1 word2 ... word12" \
+    [--passphrase "optional-passphrase"]
+  ```
+
+  - If a wallet already exists in `data_dir`, it is loaded and the Core watch‑only wallet is set up again if needed.
+
+- Generate a new 12‑word BIP39 mnemonic (no side effects):
+
+  ```bash
+  cargo run -- wallet generate
+  ```
+
+- Get the next receive address (stateful, persisted):
+
+  ```bash
+  DOTENV_PATH=.env.testing cargo run -- wallet address
+  ```
+
+- Show wallet balances (as reported by the Core watch‑only wallet and local index):
+
+  ```bash
+  DOTENV_PATH=.env.testing cargo run -- wallet balance
+  ```
+
+- Trigger a Core wallet rescan:
+
+  ```bash
+  DOTENV_PATH=.env.testing cargo run -- wallet rescan
+  ```
+
+### Transaction commands
+
+Subcommands are defined in `src/cli/tx_cmd.rs:4-68` and implemented in `src/commands/tx.rs:37-83`.
+
+- Register a BRC‑721 collection:
+
+  ```bash
+  DOTENV_PATH=.env.testing cargo run -- tx register-collection \
+    --evm-collection-address 0x0123456789abcdef0123456789abcdef01234567 \
+    [--rebaseable] \
+    [--fee-rate 1.0] \
+    [--passphrase "optional-passphrase"]
+  ```
+
+- Send a specific amount (in satoshis) to an address on the connected network:
+
+  ```bash
+  DOTENV_PATH=.env.testing cargo run -- tx send-amount \
+    bcrt1...target-address... \
+    --amount-sat 100000 \
+    [--fee-rate 1.0] \
+    [--passphrase "optional-passphrase"]
+  ```
+
+Both transaction commands load the same wallet data as the wallet subcommands and will fail if no wallet has been initialized.
+
+---
+
+## HTTP API
+
+The HTTP server is implemented in `src/rest.rs:47-72`. It currently exposes read‑only endpoints; wallet operations are driven through the CLI, not HTTP.
+
+Start the daemon (scanner + API):
+
 ```bash
-DOTENV_PATH=.env.testing cargo run -- wallet init
+DOTENV_PATH=.env.testing cargo run
+# or explicitly
+DOTENV_PATH=.env.testing cargo run -- --api-listen 127.0.0.1:8083
 ```
 
-Example output:
-```
-2025-11-03T15:13:40.078999Z  INFO brc721::commands::wallet: 📡 Watch-only wallet '3afbbca07a285e6520386c328847960ba5c684294e788b602d0f69b5206c4829' ready in Core
-```
+Endpoints (default base URL: `http://127.0.0.1:8083`):
 
-Save the Core wallet name (this is just an ID for the wallet, not a receiving address) in a variable for convenience:
+- `GET /health`
+
+  ```json
+  { "status": "ok", "uptime_secs": 123 }
+  ```
+
+- `GET /state`
+
+  ```json
+  { "last": { "height": 123, "hash": "..." } }
+  ```
+
+- `GET /collections`
+
+  ```json
+  {
+    "collections": [
+      {
+        "id": "<collection-id>",
+        "evmCollectionAddress": "0x...",
+        "rebaseable": false
+      }
+    ]
+  }
+  ```
+
+Example curl:
+
 ```bash
-WALLET_NAME=3afbbca07a285e6520386c328847960ba5c684294e788b602d0f69b5206c4829
+curl http://127.0.0.1:8083/health
+curl http://127.0.0.1:8083/state
+curl http://127.0.0.1:8083/collections
 ```
 
-Sanity check on the bitcoin node:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -getinfo
-```
+There is currently no HTTP authentication layer; protect the bind address at the infrastructure level if needed.
 
-Get one of the addresses in your derivation path (on every run, you will get a different address):
-```bash
-ADDR=$(DOTENV_PATH=.env.testing cargo run -- wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
-echo $ADDR
-```
+---
 
-Mine 101 blocks to that receiving address, so that it has some funds:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev generatetoaddress 101 "$ADDR"
-```
+## Local regtest with Docker
 
-Query the node about balance of ADDR:
-```bash
- docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcwallet="$WALLET_NAME" getbalances
-```
-...expect the following:
-```
-expect mine.trusted ≈ 50.00000000,
-mine.immature ≈ 5000.00000000,
-mine.untrusted_pending = 0.00000000
-```
+A minimal regtest setup is provided via `docker-compose.yml:13-32` (service `bitcoind-testnet`).
 
-Query using the app, expect same result:
-```bash
-DOTENV_PATH=.env.testing cargo run -- --network regtest wallet balance
-```
+1. Start the node:
 
-Other sanity checks:
+   ```bash
+   docker compose up -d
+   ```
 
-• Verify the watch-only wallet is loaded:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev listwallets
-```
-* Verify the mined-to address belongs to the wallet:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcwallet="$WALLET_NAME" scantxoutset start "[\"addr($ADDR)\"]"
-```
+2. Configure the app (example `.env.testing`):
+
+   ```bash
+   BITCOIN_RPC_URL=http://127.0.0.1:18443
+   BITCOIN_RPC_USER=dev
+   BITCOIN_RPC_PASS=dev
+   ```
+
+3. Initialize the wallet:
+
+   ```bash
+   DOTENV_PATH=.env.testing cargo run -- wallet init --mnemonic "word1 ... word12"
+   ```
+
+   Example log (wallet creation + Core watch‑only wallet): see `src/commands/wallet.rs:25-63`.
+
+4. Get a receive address and mine funds to it:
+
+   ```bash
+   ADDR=$(DOTENV_PATH=.env.testing cargo run -- wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
+   echo "$ADDR"
+
+   docker exec bitcoind-testnet bitcoin-cli \
+     -regtest -rpcuser=dev -rpcpassword=dev \
+     generatetoaddress 101 "$ADDR"
+   ```
+
+5. Inspect balances via Core and via the app:
+
+   ```bash
+   # Core view
+   docker exec bitcoind-testnet bitcoin-cli \
+     -regtest -rpcuser=dev -rpcpassword=dev -getinfo
+
+   # App view
+   DOTENV_PATH=.env.testing cargo run -- wallet balance
+   ```
+
+6. Run tests (many tests require Docker / regtest):
+
+   ```bash
+   cargo test -- --nocapture
+   ```
+
+7. Stop the node:
+
+   ```bash
+   docker compose down
+   ```
+
+---
+
+## Troubleshooting
+
+- Connection refused:
+  - Ensure `bitcoind` is running and `BITCOIN_RPC_URL` / credentials match.
+- Wrong network / address errors:
+  - Addresses passed to `tx send-amount` must match the detected network (`src/context.rs:46-52`).
+- State looks stale:
+  - Check `--confirmations`, `--batch-size` and logs; use `--reset` to rescan from `--start`.
