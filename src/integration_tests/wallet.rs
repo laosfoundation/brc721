@@ -22,7 +22,7 @@ fn test_wallet_creation() {
     let mut wallet = Brc721Wallet::create(
         data_dir.path(),
         Network::Regtest,
-        Some(mnemonic),
+        mnemonic,
         SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
@@ -59,7 +59,7 @@ fn test_setup_watch_only_idempotent() {
     let wallet = Brc721Wallet::create(
         data_dir.path(),
         Network::Regtest,
-        Some(mnemonic),
+        mnemonic,
         SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
