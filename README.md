@@ -62,15 +62,14 @@ The daemon runs the block scanner and HTTP API together. If no subcommand is giv
 cargo run
 
 # Using a custom dotenv file
-DOTENV_PATH=.env.testing cargo run
+DOTENV_PATH=.env.local cargo run
 
 # Override some runtime parameters
-DOTENV_PATH=.env.testing \
-  cargo run -- \
-    --data-dir .brc721/ \
-    --confirmations 3 \
-    --batch-size 100 \
-    --api-listen 127.0.0.1:8083
+cargo run -- \
+  --data-dir .brc721/ \
+  --confirmations 3 \
+  --batch-size 100 \
+  --api-listen 127.0.0.1:8083
 ```
 
 If a subcommand is provided (`wallet` or `tx`), the app runs that command once and exits (see `src/app.rs:184-193`).
@@ -92,7 +91,7 @@ Subcommands are defined in `src/cli/wallet_cmd.rs:3-44` and wired in `src/comman
 - Initialize (or reuse) wallet and Core watch‑only wallet:
 
   ```bash
-  DOTENV_PATH=.env.testing cargo run -- wallet init \
+  cargo run -- wallet init \
     --mnemonic "word1 word2 ... word12" \
     [--passphrase "optional-passphrase"]
   ```
@@ -108,19 +107,19 @@ Subcommands are defined in `src/cli/wallet_cmd.rs:3-44` and wired in `src/comman
 - Get the next receive address (stateful, persisted):
 
   ```bash
-  DOTENV_PATH=.env.testing cargo run -- wallet address
+  cargo run -- wallet address
   ```
 
 - Show wallet balances (as reported by the Core watch‑only wallet and local index):
 
   ```bash
-  DOTENV_PATH=.env.testing cargo run -- wallet balance
+  cargo run -- wallet balance
   ```
 
 - Trigger a Core wallet rescan:
 
   ```bash
-  DOTENV_PATH=.env.testing cargo run -- wallet rescan
+  cargo run -- wallet rescan
   ```
 
 ### Transaction commands
@@ -130,7 +129,7 @@ Subcommands are defined in `src/cli/tx_cmd.rs:4-68` and implemented in `src/comm
 - Register a BRC‑721 collection:
 
   ```bash
-  DOTENV_PATH=.env.testing cargo run -- tx register-collection \
+  cargo run -- tx register-collection \
     --evm-collection-address 0x0123456789abcdef0123456789abcdef01234567 \
     [--rebaseable] \
     [--fee-rate 1.0] \
@@ -140,7 +139,7 @@ Subcommands are defined in `src/cli/tx_cmd.rs:4-68` and implemented in `src/comm
 - Send a specific amount (in satoshis) to an address on the connected network:
 
   ```bash
-  DOTENV_PATH=.env.testing cargo run -- tx send-amount \
+  cargo run -- tx send-amount \
     bcrt1...target-address... \
     --amount-sat 100000 \
     [--fee-rate 1.0] \
@@ -158,9 +157,9 @@ The HTTP server is implemented in `src/rest.rs:47-72`. It currently exposes read
 Start the daemon (scanner + API):
 
 ```bash
-DOTENV_PATH=.env.testing cargo run
+cargo run
 # or explicitly
-DOTENV_PATH=.env.testing cargo run -- --api-listen 127.0.0.1:8083
+cargo run -- --api-listen 127.0.0.1:8083
 ```
 
 Endpoints (default base URL: `http://127.0.0.1:8083`):
@@ -213,7 +212,7 @@ A minimal regtest setup is provided via `docker-compose.yml:13-32` (service `bit
    docker compose up -d
    ```
 
-2. Configure the app (example `.env.testing`):
+2. Configure the app (example `.env.local` used for regtest):
 
    ```bash
    BITCOIN_RPC_URL=http://127.0.0.1:18443
@@ -224,7 +223,7 @@ A minimal regtest setup is provided via `docker-compose.yml:13-32` (service `bit
 3. Initialize the wallet:
 
    ```bash
-   DOTENV_PATH=.env.testing cargo run -- wallet init --mnemonic "word1 ... word12"
+   cargo run -- wallet init --mnemonic "word1 ... word12"
    ```
 
    Example log (wallet creation + Core watch‑only wallet): see `src/commands/wallet.rs:25-63`.
@@ -232,7 +231,7 @@ A minimal regtest setup is provided via `docker-compose.yml:13-32` (service `bit
 4. Get a receive address and mine funds to it:
 
    ```bash
-   ADDR=$(DOTENV_PATH=.env.testing cargo run -- wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
+   ADDR=$(cargo run -- wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
    echo "$ADDR"
 
    docker exec bitcoind-testnet bitcoin-cli \
@@ -248,7 +247,7 @@ A minimal regtest setup is provided via `docker-compose.yml:13-32` (service `bit
      -regtest -rpcuser=dev -rpcpassword=dev -getinfo
 
    # App view
-   DOTENV_PATH=.env.testing cargo run -- wallet balance
+   cargo run -- wallet balance
    ```
 
 6. Run tests (many tests require Docker / regtest):
