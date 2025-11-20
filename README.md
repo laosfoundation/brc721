@@ -14,11 +14,11 @@ A Rust daemon that connects to a Bitcoin Core node, scans blocks for BRC‑721 d
 
 ## Environment & configuration
 
-Configuration is a mix of CLI flags and environment variables. The CLI parser lives in `src/cli/args.rs:6-105` and the runtime context in `src/context.rs:7-42`.
+Configuration is based on a `.env` file in the project root (loaded automatically) plus CLI flags. The CLI parser lives in `src/cli/args.rs:6-105` and the runtime context in `src/context.rs:7-42`.
 
-You will typically either:
-- Create a `.env` file in the project root with your RPC settings, or
-- Point `DOTENV_PATH` at a custom file (e.g. `.env.local`).
+Typical flow:
+- Create a `.env` file in the project root with your RPC settings.
+- Optionally override the file used by setting `DOTENV_PATH` (e.g. `.env.local`).
 
 ### Core RPC
 
@@ -88,77 +88,9 @@ If a subcommand is provided (`wallet` or `tx`), the app runs that command once a
 
 ---
 
-## CLI usage
+## CLI
 
-Top‑level help:
-
-```bash
-cargo run -- --help
-```
-
-### Wallet commands
-
-Subcommands are defined in `src/cli/wallet_cmd.rs:3-44` and wired in `src/commands/wallet.rs:10-23`.
-
-- Initialize (or reuse) wallet and Core watch‑only wallet:
-
-  ```bash
-  cargo run -- wallet init \
-    --mnemonic "word1 word2 ... word12" \
-    [--passphrase "optional-passphrase"]
-  ```
-
-  - If a wallet already exists in `data_dir`, it is loaded and the Core watch‑only wallet is set up again if needed.
-
-- Generate a new 12‑word BIP39 mnemonic (no side effects):
-
-  ```bash
-  cargo run -- wallet generate
-  ```
-
-- Get the next receive address (stateful, persisted):
-
-  ```bash
-  cargo run -- wallet address
-  ```
-
-- Show wallet balances (as reported by the Core watch‑only wallet and local index):
-
-  ```bash
-  cargo run -- wallet balance
-  ```
-
-- Trigger a Core wallet rescan:
-
-  ```bash
-  cargo run -- wallet rescan
-  ```
-
-### Transaction commands
-
-Subcommands are defined in `src/cli/tx_cmd.rs:4-68` and implemented in `src/commands/tx.rs:37-83`.
-
-- Register a BRC‑721 collection:
-
-  ```bash
-  cargo run -- tx register-collection \
-    --evm-collection-address 0x0123456789abcdef0123456789abcdef01234567 \
-    [--rebaseable] \
-    [--fee-rate 1.0] \
-    [--passphrase "optional-passphrase"]
-  ```
-
-- Send a specific amount (in satoshis) to an address on the connected network:
-
-  ```bash
-  cargo run -- tx send-amount \
-    bcrt1...target-address... \
-    --amount-sat 100000 \
-    [--fee-rate 1.0] \
-    [--passphrase "optional-passphrase"]
-  ```
-
-Both transaction commands load the same wallet data as the wallet subcommands and will fail if no wallet has been initialized.
+See `cargo run -- --help` for the current set of wallet and transaction subcommands and their flags.
 
 ---
 
