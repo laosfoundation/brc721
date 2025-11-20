@@ -46,16 +46,8 @@ impl Context {
 
 fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
     let client = Client::new(rpc_url.as_ref(), auth.clone()).context("create root client")?;
-    loop {
-        let info = client
-            .get_blockchain_info()
-            .context("get_blockchain_info")?;
-        if !info.initial_block_download {
-            break Ok(info.chain);
-        }
-        log::warn!(
-            "Bitcoin Core is still in initial block download (IBD); waiting before starting brc721"
-        );
-        std::thread::sleep(std::time::Duration::from_secs(5));
-    }
+    let info = client
+        .get_blockchain_info()
+        .context("get_blockchain_info")?;
+    Ok(info.chain)
 }
