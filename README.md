@@ -35,7 +35,8 @@ CLI
 - --batch-size SIZE: batch processing size (default 100)
 - --reset: delete DB before start
 - Subcommands:
-  - wallet init                             Initialize wallet (creates local and Core watch-only)
+  - wallet generate                         Prints out a newly generated mnemonic
+  - wallet init --mnemonic "12|24 words"    Initialize wallet with provided mnemonic
   - wallet address                          Derive and print a new receive address
   - wallet balance                          Show wallet balances via Core
   - wallet rescan                           Trigger Core rescan for the watch-only wallet
