@@ -23,6 +23,19 @@ pub enum WalletCmd {
         passphrase: Option<String>,
     },
     #[command(
+        about = "Generate a new BIP39 mnemonic",
+        long_about = "Generate a new BIP39 mnemonic phrase (24 words by default, 12 with --short)."
+    )]
+    Generate {
+        #[arg(
+            long = "short",
+            help = "Generate a short 12-word mnemonic instead of 24-word",
+            num_args(0),
+            default_value_t = false
+        )]
+        short: bool,
+    },
+    #[command(
         about = "Get a new receive address",
         long_about = "Advance derivation and display the next unused receive address (state is persisted)."
     )]
