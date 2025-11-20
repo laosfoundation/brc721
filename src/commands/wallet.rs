@@ -3,7 +3,7 @@ use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::wallet::passphrase::prompt_passphrase;
 use crate::{cli, context};
 use age::secrecy::SecretString;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use bdk_wallet::bip39::{Language, Mnemonic};
 use rand::{rngs::OsRng, RngCore};
 
@@ -28,18 +28,18 @@ fn run_init(
     passphrase: Option<String>,
 ) -> Result<()> {
     // Check if wallet already exists
-    if let Ok(wallet) =
-        Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
-    {
+    if let Ok(wallet) = load_wallet(ctx) {
         wallet.setup_watch_only().context("setup watch only")?;
         log::info!("📡 Watch-only wallet '{}' ready in Core", wallet.id());
         return Ok(());
     }
 
-    // Parse mnemonic if provided
-    let mnemonic = mnemonic
+    let mnemonic_str = mnemonic
         .as_ref()
-        .map(|m| Mnemonic::parse_in(Language::English, m).expect("invalid mnemonic"));
+        .ok_or_else(|| anyhow!("mnemonic is required when creating a new wallet"))?;
+
+    let mnemonic =
+        Mnemonic::parse_in(Language::English, mnemonic_str).context("invalid mnemonic")?;
 
     // Resolve passphrase
     let passphrase = resolve_passphrase_init(passphrase);
@@ -118,8 +118,7 @@ mod tests {
     fn generate_mnemonic_is_valid_12_words() {
         let mnemonic = generate_mnemonic();
         assert_eq!(mnemonic.word_count(), 12);
-        let parsed =
-            Mnemonic::parse_in(Language::English, &mnemonic.to_string()).expect("parse");
+        let parsed = Mnemonic::parse_in(Language::English, &mnemonic.to_string()).expect("parse");
         assert_eq!(parsed.word_count(), 12);
     }
 }

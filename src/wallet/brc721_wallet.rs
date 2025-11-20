@@ -6,7 +6,6 @@ use bdk_wallet::{bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, Keycha
 use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
 use bitcoincore_rpc::json;
 use bitcoincore_rpc::Auth;
-use rand::{rngs::OsRng, RngCore};
 use std::path::Path;
 use url::Url;
 
@@ -20,20 +19,11 @@ impl Brc721Wallet {
     pub fn create<P: AsRef<Path>>(
         data_dir: P,
         network: Network,
-        mnemonic: Option<Mnemonic>,
+        mnemonic: Mnemonic,
         passphrase: SecretString,
         rpc_url: &Url,
         auth: Auth,
     ) -> Result<Brc721Wallet> {
-        let mnemonic = mnemonic.unwrap_or_else(|| {
-            // TODO: this has to die for security reasons
-            let mut entropy = [0u8; 32];
-            OsRng.fill_bytes(&mut entropy);
-            let m = Mnemonic::from_entropy(&entropy).expect("mnemonic");
-            eprintln!("{m}");
-            m
-        });
-
         let seed = mnemonic.to_seed(String::default());
         let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
         let external = Bip86(master_xprv, KeychainKind::External);
@@ -159,7 +149,7 @@ mod tests {
         let wallet = Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -191,7 +181,7 @@ mod tests {
         let mut wallet = Brc721Wallet::create(
             &data_dir,
             network,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -233,7 +223,7 @@ mod tests {
         let mut wallet = Brc721Wallet::create(
             &data_dir,
             network,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -261,7 +251,7 @@ mod tests {
         let mut wallet = Brc721Wallet::create(
             &data_dir,
             network,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -306,7 +296,7 @@ mod tests {
         let wallet_regtest = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
@@ -315,7 +305,7 @@ mod tests {
         let wallet_bitcoin = Brc721Wallet::create(
             &data_dir1,
             Network::Bitcoin,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -343,7 +333,7 @@ mod tests {
         let wallet0 = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
@@ -354,7 +344,7 @@ mod tests {
         let wallet1 = Brc721Wallet::create(
             &data_dir1,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -382,7 +372,7 @@ mod tests {
         let wallet0 = Brc721Wallet::create(
             &data_dir0,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase1".to_string()),
             &node_url,
             auth.clone(),
@@ -393,7 +383,7 @@ mod tests {
         let wallet1 = Brc721Wallet::create(
             &data_dir1,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase1".to_string()),
             &node_url,
             auth,
@@ -422,7 +412,7 @@ mod tests {
         Brc721Wallet::create(
             &data_dir,
             network,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
@@ -446,7 +436,7 @@ mod tests {
         Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -470,7 +460,7 @@ mod tests {
         Brc721Wallet::create(
             &data_dir,
             Network::Bitcoin,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth,
@@ -495,7 +485,7 @@ mod tests {
         Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
-            Some(mnemonic.clone()),
+            mnemonic.clone(),
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),
@@ -505,7 +495,7 @@ mod tests {
         let result = Brc721Wallet::create(
             &data_dir,
             Network::Regtest,
-            Some(mnemonic),
+            mnemonic,
             SecretString::from("passphrase".to_string()),
             &node_url,
             auth.clone(),

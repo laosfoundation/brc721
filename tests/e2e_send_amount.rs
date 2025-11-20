@@ -41,6 +41,8 @@ fn e2e_send_amount() {
         .arg("init")
         .arg("--passphrase")
         .arg("passphrase")
+        .arg("--mnemonic")
+        .arg(MNEMONIC)
         .output()
         .expect("run wallet init B");
     assert!(output.status.success());
