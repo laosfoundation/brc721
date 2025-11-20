@@ -24,7 +24,7 @@ pub enum WalletCmd {
     },
     #[command(
         about = "Generate a new BIP39 mnemonic",
-        long_about = "Generate a new 12-word BIP39 mnemonic phrase without creating a wallet."
+        long_about = "Generate a new 12-word BIP39 mnemonic phrase."
     )]
     Generate,
     #[command(
