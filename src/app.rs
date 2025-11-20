@@ -161,6 +161,7 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
     log::info!("🌐 Network: {}", ctx.network);
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
+    log::info!("🔍 Bitcoin Core must not be in initial block download (IBD); RPC during IBD is unreliable.");
 }
 
 fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
