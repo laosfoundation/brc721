@@ -16,6 +16,10 @@ A Rust daemon that connects to a Bitcoin Core node, scans blocks for BRC‑721 d
 
 Configuration is a mix of CLI flags and environment variables. The CLI parser lives in `src/cli/args.rs:6-105` and the runtime context in `src/context.rs:7-42`.
 
+You will typically either:
+- Create a `.env` file in the project root with your RPC settings, or
+- Point `DOTENV_PATH` at a custom file (e.g. `.env.local`).
+
 ### Core RPC
 
 - `BITCOIN_RPC_URL` (required unless passed via `--rpc-url`)
@@ -50,6 +54,14 @@ Global flags (apply to both daemon and subcommands):
 - `DOTENV_PATH` (optional)
   - Path to a dotenv file loaded before parsing CLI args (default: `.env`).
   - See `src/cli/args.rs:107-112`.
+
+Example `.env`:
+
+```bash
+BITCOIN_RPC_URL=http://127.0.0.1:8332
+BITCOIN_RPC_USER=dev
+BITCOIN_RPC_PASS=dev
+```
 
 ---
 
