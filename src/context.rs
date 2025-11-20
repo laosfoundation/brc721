@@ -53,7 +53,9 @@ fn detect_network(rpc_url: &Url, auth: &Auth) -> Result<bitcoin::Network> {
         if !info.initial_block_download {
             break Ok(info.chain);
         }
-        log::warn!("Bitcoin Core is still in initial block download (IBD); waiting before starting brc721");
+        log::warn!(
+            "Bitcoin Core is still in initial block download (IBD); waiting before starting brc721"
+        );
         std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
