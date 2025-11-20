@@ -23,6 +23,11 @@ pub enum WalletCmd {
         passphrase: Option<String>,
     },
     #[command(
+        about = "Generate a new BIP39 mnemonic",
+        long_about = "Generate a new 12-word BIP39 mnemonic phrase without creating a wallet."
+    )]
+    Generate,
+    #[command(
         about = "Get a new receive address",
         long_about = "Advance derivation and display the next unused receive address (state is persisted)."
     )]
