@@ -118,7 +118,7 @@ mod tests {
     fn generate_mnemonic_is_valid_12_words() {
         let mnemonic = generate_mnemonic();
         assert_eq!(mnemonic.word_count(), 12);
-        let parsed = Mnemonic::parse_in(Language::English, &mnemonic.to_string()).expect("parse");
+        let parsed = Mnemonic::parse_in(Language::English, mnemonic.to_string()).expect("parse");
         assert_eq!(parsed.word_count(), 12);
     }
 }
