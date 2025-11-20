@@ -4,9 +4,6 @@ use testcontainers::runners::SyncRunner;
 
 mod common;
 
-const MNEMONIC: &str =
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-
 #[test]
 fn e2e_send_amount() {
     let image = common::bitcoind_image();
@@ -24,7 +21,7 @@ fn e2e_send_amount() {
         .arg("--passphrase")
         .arg("passphrase")
         .arg("--mnemonic")
-        .arg(MNEMONIC)
+        .arg("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
         .output()
         .expect("run wallet init");
     assert!(output.status.success());
@@ -42,7 +39,7 @@ fn e2e_send_amount() {
         .arg("--passphrase")
         .arg("passphrase")
         .arg("--mnemonic")
-        .arg(MNEMONIC)
+        .arg("spread scrub pepper awful hint scan oil mystery push dignity again tomato")
         .output()
         .expect("run wallet init B");
     assert!(output.status.success());
