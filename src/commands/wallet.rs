@@ -14,7 +14,7 @@ impl CommandRunner for cli::WalletCmd {
                 mnemonic,
                 passphrase,
             } => run_init(ctx, mnemonic.clone(), passphrase.clone()),
-            cli::WalletCmd::Generate => run_generate(),
+            cli::WalletCmd::Generate { short } => run_generate(*short),
             cli::WalletCmd::Address => run_address(ctx),
             cli::WalletCmd::Balance => run_balance(ctx),
             cli::WalletCmd::Rescan => run_rescan(ctx),
@@ -98,14 +98,15 @@ fn resolve_passphrase_init(passphrase: Option<String>) -> SecretString {
     })
 }
 
-fn generate_mnemonic() -> Mnemonic {
-    let mut entropy = [0u8; 16];
+fn generate_mnemonic(short: bool) -> Mnemonic {
+    let entropy_bytes = if short { 16 } else { 32 };
+    let mut entropy = vec![0u8; entropy_bytes];
     OsRng.fill_bytes(&mut entropy);
     Mnemonic::from_entropy(&entropy).expect("mnemonic")
 }
 
-fn run_generate() -> Result<()> {
-    let mnemonic = generate_mnemonic();
+fn run_generate(short: bool) -> Result<()> {
+    let mnemonic = generate_mnemonic(short);
     println!("{}", mnemonic);
     Ok(())
 }
@@ -116,9 +117,17 @@ mod tests {
 
     #[test]
     fn generate_mnemonic_is_valid_12_words() {
-        let mnemonic = generate_mnemonic();
+        let mnemonic = generate_mnemonic(true);
         assert_eq!(mnemonic.word_count(), 12);
         let parsed = Mnemonic::parse_in(Language::English, mnemonic.to_string()).expect("parse");
         assert_eq!(parsed.word_count(), 12);
+    }
+
+    #[test]
+    fn generate_mnemonic_is_valid_24_words() {
+        let mnemonic = generate_mnemonic(false);
+        assert_eq!(mnemonic.word_count(), 24);
+        let parsed = Mnemonic::parse_in(Language::English, mnemonic.to_string()).expect("parse");
+        assert_eq!(parsed.word_count(), 24);
     }
 }
