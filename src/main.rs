@@ -15,6 +15,8 @@ use anyhow::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    crate::tracing::init();
+
     if let Err(e) = app::run().await {
         log::error!("Fatal error: {e}");
         std::process::exit(1);

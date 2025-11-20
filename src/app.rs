@@ -24,10 +24,11 @@ impl App {
     /// Handles the "dirty" work of side-effects like logging init and filesystem creation.
     pub fn from_cli() -> Result<(App<Client>, cli::Cli)> {
         let cli = crate::cli::parse();
-        let ctx = context::Context::from_cli(&cli);
 
-        // Side-effect: Initialize Logging
-        crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
+        // Configure logging file after CLI is parsed
+        crate::tracing::set_log_file(cli.log_file.as_deref().map(Path::new));
+
+        let ctx = context::Context::from_cli(&cli);
         log_startup_info(&ctx);
 
         // Side-effect: Initialize Storage
@@ -161,7 +162,6 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
     log::info!("🌐 Network: {}", ctx.network);
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
-    log::info!("🔍 Bitcoin Core must not be in initial block download (IBD); RPC during IBD is unreliable.");
 }
 
 fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
