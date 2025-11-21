@@ -24,10 +24,11 @@ impl App {
     /// Handles the "dirty" work of side-effects like logging init and filesystem creation.
     pub fn from_cli() -> Result<(App<Client>, cli::Cli)> {
         let cli = crate::cli::parse();
-        let ctx = context::Context::from_cli(&cli);
 
-        // Side-effect: Initialize Logging
-        crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
+        // Configure logging file after CLI is parsed
+        crate::tracing::set_log_file(cli.log_file.as_deref().map(Path::new));
+
+        let ctx = context::Context::from_cli(&cli);
         log_startup_info(&ctx);
 
         // Side-effect: Initialize Storage
