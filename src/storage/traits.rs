@@ -1,3 +1,4 @@
+use anyhow::Result;
 use ethereum_types::H160;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,14 +12,19 @@ pub struct CollectionKey {
     pub id: String,
 }
 
-pub trait Storage {
-    fn load_last(&self) -> anyhow::Result<Option<Block>>;
-    fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()>;
+pub trait StorageRead {
+    fn load_last(&self) -> Result<Option<Block>>;
+    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>>;
+}
+
+pub trait StorageWrite: StorageRead {
+    fn save_last(&self, height: u64, hash: &str) -> Result<()>;
     fn save_collection(
         &self,
         key: CollectionKey,
         evm_collection_address: H160,
         rebaseable: bool,
-    ) -> anyhow::Result<()>;
-    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>>;
+    ) -> Result<()>;
 }
+
+pub trait Storage: StorageWrite {}

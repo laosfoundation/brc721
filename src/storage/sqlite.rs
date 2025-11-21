@@ -3,8 +3,10 @@ use std::path::Path;
 use ethereum_types::H160;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{Block, Storage};
-use crate::storage::traits::CollectionKey;
+use super::{
+    traits::{CollectionKey, Storage, StorageRead, StorageWrite},
+    Block,
+};
 
 const DB_SCHEMA_VERSION: i64 = 1;
 
@@ -12,6 +14,8 @@ const DB_SCHEMA_VERSION: i64 = 1;
 pub struct SqliteStorage {
     pub path: String,
 }
+
+impl Storage for SqliteStorage {}
 
 impl SqliteStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
@@ -79,7 +83,7 @@ impl SqliteStorage {
     }
 }
 
-impl Storage for SqliteStorage {
+impl StorageRead for SqliteStorage {
     fn load_last(&self) -> anyhow::Result<Option<Block>> {
         let opt = self.with_conn(|conn| {
             conn.query_row(
@@ -99,6 +103,27 @@ impl Storage for SqliteStorage {
         Ok(opt)
     }
 
+    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+        let rows = self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
+            )?;
+            let mapped = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    let evm_collection_address: String = row.get(1)?;
+                    let rebaseable_int: i64 = row.get(2)?;
+                    let rebaseable = rebaseable_int != 0;
+                    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(mapped)
+        })?;
+        Ok(rows)
+    }
+}
+
+impl StorageWrite for SqliteStorage {
     fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
         self.with_conn(|conn| {
             conn.execute(
@@ -127,25 +152,6 @@ impl Storage for SqliteStorage {
             Ok(())
         })?;
         Ok(())
-    }
-
-    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
-        let rows = self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
-            )?;
-            let mapped = stmt
-                .query_map([], |row| {
-                    let id: String = row.get(0)?;
-                    let evm_collection_address: String = row.get(1)?;
-                    let rebaseable_int: i64 = row.get(2)?;
-                    let rebaseable = rebaseable_int != 0;
-                    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(mapped)
-        })?;
-        Ok(rows)
     }
 }
 

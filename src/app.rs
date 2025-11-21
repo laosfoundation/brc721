@@ -221,11 +221,17 @@ mod tests {
         }
     }
 
-    impl storage::Storage for DummyStorage {
+    impl storage::StorageRead for DummyStorage {
         fn load_last(&self) -> Result<Option<Block>> {
             Ok(self.last.lock().unwrap().clone())
         }
 
+        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl storage::StorageWrite for DummyStorage {
         fn save_last(&self, height: u64, hash: &str) -> Result<()> {
             *self.last.lock().unwrap() = Some(Block {
                 height,
@@ -242,11 +248,9 @@ mod tests {
         ) -> Result<()> {
             Ok(())
         }
-
-        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
-            Ok(Vec::new())
-        }
     }
+
+    impl storage::Storage for DummyStorage {}
 
     #[derive(Clone)]
     struct DummyRpc;

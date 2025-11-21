@@ -103,11 +103,19 @@ mod tests {
         }
     }
 
-    impl Storage for DummyStorage {
+    impl Storage for DummyStorage {}
+
+    impl crate::storage::traits::StorageRead for DummyStorage {
         fn load_last(&self) -> anyhow::Result<Option<StorageBlock>> {
             Ok(None)
         }
 
+        fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl crate::storage::traits::StorageWrite for DummyStorage {
         fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
             if self.fail {
                 return Err(anyhow!("fail"));
@@ -124,10 +132,6 @@ mod tests {
             _rebaseable: bool,
         ) -> anyhow::Result<()> {
             Ok(())
-        }
-
-        fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
-            Ok(Vec::new())
         }
     }
 
