@@ -1,3 +1,4 @@
+use std::time::Instant;
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
@@ -6,9 +7,9 @@ use serde::Serialize;
 use crate::storage::Storage;
 
 #[derive(Clone)]
-pub struct AppState<S: Storage> {
-    pub storage: Arc<S>,
-    pub started_at: std::time::SystemTime,
+pub struct AppState {
+    pub storage: Arc<dyn Storage + Send + Sync>,
+    pub started_at: Instant,
 }
 
 #[derive(Serialize)]
@@ -43,20 +44,20 @@ struct LastBlock {
     hash: String,
 }
 
-pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
+pub async fn serve(
     addr: SocketAddr,
-    storage: S,
+    storage: Arc<dyn Storage + Send + Sync>,
     shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
     let state = AppState {
-        storage: Arc::new(storage),
-        started_at: std::time::SystemTime::now(),
+        storage,
+        started_at: Instant::now(),
     };
 
     let app = Router::new()
-        .route("/health", get(health::<S>))
-        .route("/state", get(chain_state::<S>))
-        .route("/collections", get(list_collections::<S>))
+        .route("/health", get(health))
+        .route("/state", get(chain_state))
+        .route("/collections", get(list_collections))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -71,8 +72,8 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-async fn health<S: Storage>(State(state): State<AppState<S>>) -> impl IntoResponse {
-    let uptime_secs = state.started_at.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    let uptime_secs = state.started_at.elapsed().as_secs();
     (
         StatusCode::OK,
         Json(HealthResponse {
@@ -82,7 +83,7 @@ async fn health<S: Storage>(State(state): State<AppState<S>>) -> impl IntoRespon
     )
 }
 
-async fn chain_state<S: Storage>(State(state): State<AppState<S>>) -> impl IntoResponse {
+async fn chain_state(State(state): State<AppState>) -> impl IntoResponse {
     let last = state.storage.load_last().ok().flatten().map(|b| LastBlock {
         height: b.height,
         hash: b.hash,
@@ -90,7 +91,7 @@ async fn chain_state<S: Storage>(State(state): State<AppState<S>>) -> impl IntoR
     Json(ChainStateResponse { last })
 }
 
-async fn list_collections<S: Storage>(State(state): State<AppState<S>>) -> impl IntoResponse {
+async fn list_collections(State(state): State<AppState>) -> impl IntoResponse {
     let collections = state
         .storage
         .list_collections()

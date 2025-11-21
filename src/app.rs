@@ -77,7 +77,7 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
-        let storage = storage::SqliteStorage::new(self.db_path.clone());
+        let storage = Arc::new(storage::SqliteStorage::new(self.db_path.clone()));
         let token = self.shutdown.clone();
 
         tokio::spawn(async move {
