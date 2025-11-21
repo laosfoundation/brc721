@@ -250,11 +250,7 @@ mod tests {
         }
     }
 
-    impl storage::Storage for DummyStorage {
-        fn begin(&self) -> storage::traits::Return<()> {
-            unimplemented!()
-        }
-    }
+    impl storage::Storage for DummyStorage {}
 
     #[derive(Clone)]
     struct DummyRpc;

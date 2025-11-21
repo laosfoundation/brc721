@@ -15,11 +15,7 @@ pub struct SqliteStorage {
     pub path: String,
 }
 
-impl Storage for SqliteStorage {
-    fn begin(&self) -> Result<()> {
-        unimplemented!()
-    }
-}
+impl Storage for SqliteStorage {}
 
 impl SqliteStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
@@ -28,7 +24,7 @@ impl SqliteStorage {
         }
     }
 
-    pub fn reset_all(&self) -> anyhow::Result<()> {
+    pub fn reset_all(&self) -> Result<()> {
         if !std::path::Path::new(&self.path).exists() {
             return Ok(());
         }
@@ -36,7 +32,7 @@ impl SqliteStorage {
         Ok(())
     }
 
-    pub fn init(&self) -> anyhow::Result<()> {
+    pub fn init(&self) -> Result<()> {
         self.with_conn(|_conn| Ok(()))?;
         Ok(())
     }
@@ -88,7 +84,7 @@ impl SqliteStorage {
 }
 
 impl StorageRead for SqliteStorage {
-    fn load_last(&self) -> anyhow::Result<Option<Block>> {
+    fn load_last(&self) -> Result<Option<Block>> {
         let opt = self.with_conn(|conn| {
             conn.query_row(
                 "SELECT height, hash FROM chain_state WHERE id = 1",
@@ -107,7 +103,7 @@ impl StorageRead for SqliteStorage {
         Ok(opt)
     }
 
-    fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
         let rows = self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
@@ -128,7 +124,7 @@ impl StorageRead for SqliteStorage {
 }
 
 impl StorageWrite for SqliteStorage {
-    fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
+    fn save_last(&self, height: u64, hash: &str) -> Result<()> {
         self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
@@ -145,7 +141,7 @@ impl StorageWrite for SqliteStorage {
         key: CollectionKey,
         evm_collection_address: H160,
         rebaseable: bool,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let id = key.id;
         self.with_conn(|conn| {
             conn.execute(
