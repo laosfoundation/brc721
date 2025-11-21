@@ -97,15 +97,12 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
         let parser_storage = storage::sqlite::SqliteStorage::new(self.db_path.clone());
         let parser = parser::Brc721Parser::new(parser_storage);
 
-        let core_storage: Arc<dyn storage::Storage + Send + Sync> =
-            Arc::new(storage::SqliteStorage::new(self.db_path.clone()));
-
         // Clone for thread
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
         let handle = tokio::task::spawn_blocking(move || {
-            let mut core = core::Core::new(core_storage, scanner, parser);
+            let mut core = core::Core::new(scanner, parser);
             if let Err(e) = core.run(token) {
                 log::error!("Core indexer failed: {:#}", e);
             }

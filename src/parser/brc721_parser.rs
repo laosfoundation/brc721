@@ -32,6 +32,9 @@ impl<S: Storage> Brc721Parser<S> {
 
 impl<S: Storage> BlockParser for Brc721Parser<S> {
     fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
+        let hash = block.block_hash();
+        let hash_str = hash.to_string();
+
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let Some(first_output) = tx.output.first() else {
                 continue;
@@ -54,6 +57,17 @@ impl<S: Storage> BlockParser for Brc721Parser<S> {
                 log::warn!("{:?}", e);
             }
         }
+        // Persist last processed block once per block
+        if let Err(e) = self.storage.save_last(block_height, &hash_str) {
+            log::error!(
+                "storage error saving block {} at height {}: {}",
+                hash,
+                block_height,
+                e
+            );
+            return Err(Brc721Error::StorageError(e.to_string()));
+        }
+
         Ok(())
     }
 }
@@ -61,12 +75,19 @@ impl<S: Storage> BlockParser for Brc721Parser<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::traits::{Block as StorageBlock, CollectionKey, StorageRead, StorageWrite};
+    use crate::storage::Storage;
     use crate::types::Brc721Command;
     use crate::types::BRC721_CODE;
+    use anyhow::anyhow;
+    use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::hashes::Hash;
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+    use bitcoin::Network;
+    use ethereum_types::H160;
     use hex::FromHex;
+    use std::sync::{Arc, Mutex};
 
     fn build_payload(addr20: [u8; 20], rebase: u8) -> Vec<u8> {
         let mut v = Vec::with_capacity(1 + 20 + 1);
@@ -134,5 +155,101 @@ mod tests {
         let parser = Brc721Parser::new(storage);
         let r = parser.parse_block(&block, 0);
         assert!(r.is_ok());
+    }
+
+    struct DummyStorageInner {
+        last_height: Mutex<Option<u64>>,
+        last_hash: Mutex<Option<String>>,
+        fail: bool,
+    }
+
+    #[derive(Clone)]
+    struct DummyStorage {
+        inner: Arc<DummyStorageInner>,
+    }
+
+    impl DummyStorage {
+        fn new(fail: bool) -> Self {
+            Self {
+                inner: Arc::new(DummyStorageInner {
+                    last_height: Mutex::new(None),
+                    last_hash: Mutex::new(None),
+                    fail,
+                }),
+            }
+        }
+    }
+
+    impl Storage for DummyStorage {}
+
+    impl StorageRead for DummyStorage {
+        fn load_last(&self) -> anyhow::Result<Option<StorageBlock>> {
+            Ok(self
+                .inner
+                .last_height
+                .lock()
+                .unwrap()
+                .map(|h| StorageBlock {
+                    height: h,
+                    hash: String::new(),
+                }))
+        }
+
+        fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl StorageWrite for DummyStorage {
+        fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
+            if self.inner.fail {
+                return Err(anyhow!("fail"));
+            }
+            *self.inner.last_height.lock().unwrap() = Some(height);
+            *self.inner.last_hash.lock().unwrap() = Some(hash.to_string());
+            Ok(())
+        }
+
+        fn save_collection(
+            &self,
+            _key: CollectionKey,
+            _evm_collection_address: H160,
+            _rebaseable: bool,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser<DummyStorage>) {
+        let storage = DummyStorage::new(fail_storage);
+        let parser = Brc721Parser::new(storage.clone());
+        (storage, parser)
+    }
+
+    #[test]
+    fn parse_block_success_saves_height_and_hash() {
+        let (storage, parser) = make_parser_with_storage(false);
+
+        let block = genesis_block(Network::Regtest);
+        let height = 42;
+        parser.parse_block(&block, height).unwrap();
+
+        assert_eq!(*storage.inner.last_height.lock().unwrap(), Some(height));
+        assert_eq!(
+            *storage.inner.last_hash.lock().unwrap(),
+            Some(block.block_hash().to_string())
+        );
+    }
+
+    #[test]
+    fn parse_block_storage_error_returns_error_and_does_not_persist() {
+        let (storage, parser) = make_parser_with_storage(true);
+
+        let block = genesis_block(Network::Regtest);
+        let height = 1;
+        assert!(parser.parse_block(&block, height).is_err());
+
+        assert_eq!(*storage.inner.last_height.lock().unwrap(), None);
+        assert_eq!(*storage.inner.last_hash.lock().unwrap(), None);
     }
 }
