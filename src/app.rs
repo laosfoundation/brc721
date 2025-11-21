@@ -1,11 +1,11 @@
 use crate::{
     cli, context, core, parser, rest,
     scanner::{self, BitcoinRpc},
-    storage,
+    storage::{self, Storage},
 };
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -17,6 +17,7 @@ pub struct App<C: BitcoinRpc = Client> {
     storage: Arc<dyn storage::Storage + Send + Sync>,
     shutdown: CancellationToken,
     scanner: Option<scanner::Scanner<C>>,
+    db_path: PathBuf,
 }
 
 impl App {
@@ -55,11 +56,13 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
         storage: Arc<dyn storage::Storage + Send + Sync>,
         scanner: scanner::Scanner<C>,
     ) -> Self {
+        let db_path = config.data_dir.join("brc721.sqlite");
         Self {
             config,
             storage,
             shutdown: CancellationToken::new(),
             scanner: Some(scanner),
+            db_path,
         }
     }
 
@@ -93,7 +96,9 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
         // Take the scanner out of the Option
         let scanner = self.scanner.take().context("Scanner already consumed")?;
-        let parser = parser::Brc721Parser::new(self.storage.clone());
+
+        let storage = storage::sqlite::SqliteStorage::new(self.db_path.clone());
+        let parser = parser::Brc721Parser::new(storage);
 
         // Clone for thread
         let storage = self.storage.clone();

@@ -1,14 +1,15 @@
+use crate::storage::traits::Storage;
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser {
-    storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
+pub struct Brc721Parser<S: Storage> {
+    storage: S,
 }
 
-impl Brc721Parser {
-    pub fn new(storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>) -> Self {
+impl<S: Storage> Brc721Parser<S> {
+    pub fn new(storage: S) -> Self {
         Self { storage }
     }
 
@@ -21,7 +22,7 @@ impl Brc721Parser {
         match output.message() {
             Brc721Message::RegisterCollection(data) => crate::parser::register_collection::digest(
                 data,
-                self.storage.as_ref(),
+                &self.storage,
                 block_height,
                 tx_index,
             ),
@@ -29,7 +30,7 @@ impl Brc721Parser {
     }
 }
 
-impl BlockParser for Brc721Parser {
+impl<S: Storage> BlockParser for Brc721Parser<S> {
     fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         for (tx_index, tx) in block.txdata.iter().enumerate() {
             let Some(first_output) = tx.output.first() else {
@@ -130,7 +131,7 @@ mod tests {
         };
         let storage =
             crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
-        let parser = Brc721Parser::new(std::sync::Arc::new(storage));
+        let parser = Brc721Parser::new(storage);
         let r = parser.parse_block(&block, 0);
         assert!(r.is_ok());
     }
