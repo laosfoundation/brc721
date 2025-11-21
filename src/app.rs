@@ -195,7 +195,7 @@ pub async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block, CollectionKey};
+    use crate::storage::traits::{Block, CollectionKey, StorageRead, StorageWrite};
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
@@ -221,7 +221,7 @@ mod tests {
         }
     }
 
-    impl storage::StorageRead for DummyStorage {
+    impl StorageRead for DummyStorage {
         fn load_last(&self) -> Result<Option<Block>> {
             Ok(self.last.lock().unwrap().clone())
         }
@@ -231,7 +231,7 @@ mod tests {
         }
     }
 
-    impl storage::StorageWrite for DummyStorage {
+    impl StorageWrite for DummyStorage {
         fn save_last(&self, height: u64, hash: &str) -> Result<()> {
             *self.last.lock().unwrap() = Some(Block {
                 height,
