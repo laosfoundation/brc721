@@ -1,15 +1,4 @@
 services:
-  # bitcoin-mainnet:
-  #   image: bitcoin/bitcoin:latest
-  #   container_name: bitcoind-mainnet
-  #   command: ["bitcoind", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
-  #   ports:
-  #     - "127.0.0.1:8332:8332"
-  #     - "8333:8333"
-  #   volumes:
-  #     - bitcoind-mainnet-data:/home/bitcoin/.bitcoin
-  #   restart: unless-stopped
-
   bitcoind-testnet:
     image: bitcoin/bitcoin:latest
     container_name: bitcoind-testnet
@@ -32,7 +21,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  # bitcoind-mainnet-data:
-  #   driver: local
   bitcoind-testnet-data:
-    driver: local
