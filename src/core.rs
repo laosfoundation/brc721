@@ -103,7 +103,11 @@ mod tests {
         }
     }
 
-    impl Storage for DummyStorage {}
+    impl Storage for DummyStorage {
+        fn begin(&self) -> crate::storage::traits::Return<()> {
+            unimplemented!()
+        }
+    }
 
     impl crate::storage::traits::StorageRead for DummyStorage {
         fn load_last(&self) -> anyhow::Result<Option<StorageBlock>> {

@@ -1,6 +1,8 @@
 use anyhow::Result;
 use ethereum_types::H160;
 
+pub type Return<T> = Result<T>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     pub height: u64,
@@ -27,4 +29,15 @@ pub trait StorageWrite: StorageRead {
     ) -> Result<()>;
 }
 
-pub trait Storage: StorageWrite {}
+pub trait StorageTx: StorageWrite {
+    fn commit(self) -> Result<()>;
+    fn rollback(self) -> Result<()>;
+}
+
+pub trait Storage: StorageWrite {
+    // type Tx<'s>: StorageTx
+    // where
+    //     Self: 's;
+
+    fn begin(&self) -> Return<()>;
+}

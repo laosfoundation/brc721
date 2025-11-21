@@ -1,7 +1,7 @@
-use std::path::Path;
-
+use anyhow::Result;
 use ethereum_types::H160;
 use rusqlite::{params, Connection, OptionalExtension};
+use std::path::Path;
 
 use super::{
     traits::{CollectionKey, Storage, StorageRead, StorageWrite},
@@ -15,7 +15,11 @@ pub struct SqliteStorage {
     pub path: String,
 }
 
-impl Storage for SqliteStorage {}
+impl Storage for SqliteStorage {
+    fn begin(&self) -> Result<()> {
+        unimplemented!()
+    }
+}
 
 impl SqliteStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
