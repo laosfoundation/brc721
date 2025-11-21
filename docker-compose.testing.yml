@@ -1,7 +1,6 @@
 services:
-  bitcoind-testnet:
+  bitcoind-regtest:
     image: bitcoin/bitcoin:latest
-    container_name: bitcoind-testnet
     command:
       [
         "bitcoind",
@@ -17,8 +16,8 @@ services:
     ports:
       - "127.0.0.1:18443:18443"
     volumes:
-      - bitcoind-testnet-data:/home/bitcoin/.bitcoin
+      - bitcoind-regtest-data:/home/bitcoin/.bitcoin
     restart: unless-stopped
 
 volumes:
-  bitcoind-testnet-data:
+  bitcoind-regtest-data:

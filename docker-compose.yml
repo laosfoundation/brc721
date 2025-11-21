@@ -1,7 +1,6 @@
 services:
   bitcoin-mainnet:
     image: bitcoin/bitcoin:latest
-    container_name: bitcoind-mainnet
     command:
       [
         "bitcoind",
@@ -33,7 +32,6 @@ services:
 
   app:
     build: .
-    container_name: brc721-app
     environment:
       - RUST_LOG=info
       - BITCOIN_RPC_URL=http://bitcoind-mainnet:8332
