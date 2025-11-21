@@ -77,10 +77,7 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
-        let storage = {
-            let db_path = self.db_path.clone();
-            std::sync::Arc::new(storage::SqliteStorage::new(db_path)) as std::sync::Arc<dyn storage::Storage + Send + Sync>
-        };
+        let storage = storage::SqliteStorage::new(self.db_path.clone());
         let token = self.shutdown.clone();
 
         tokio::spawn(async move {
@@ -91,13 +88,9 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     }
 
     fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
-        // Take the scanner out of the Option
         let scanner = self.scanner.take().context("Scanner already consumed")?;
-
-        let parser_storage = storage::sqlite::SqliteStorage::new(self.db_path.clone());
-        let parser = parser::Brc721Parser::new(parser_storage);
-
-        // Clone for thread
+        let storage = storage::SqliteStorage::new(self.db_path.clone());
+        let parser = parser::Brc721Parser::new(storage);
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
