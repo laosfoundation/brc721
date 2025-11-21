@@ -14,7 +14,6 @@ use tokio_util::sync::CancellationToken;
 /// decoupled from CLI parsing to allow for easier testing.
 pub struct App<C: BitcoinRpc = Client> {
     config: context::Context,
-    storage: Arc<dyn storage::Storage + Send + Sync>,
     shutdown: CancellationToken,
     scanner: Option<scanner::Scanner<C>>,
     db_path: PathBuf,
@@ -44,22 +43,17 @@ impl App {
             .with_capacity(ctx.batch_size)
             .with_start_from(start_block);
 
-        Ok((App::new(ctx, storage, scanner), cli))
+        Ok((App::new(ctx, scanner), cli))
     }
 }
 
 impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     /// Create a new App instance.
     /// Dependencies are injected here, making it easy to swap Storage for mocks.
-    fn new(
-        config: context::Context,
-        storage: Arc<dyn storage::Storage + Send + Sync>,
-        scanner: scanner::Scanner<C>,
-    ) -> Self {
+    fn new(config: context::Context, scanner: scanner::Scanner<C>) -> Self {
         let db_path = config.data_dir.join("brc721.sqlite");
         Self {
             config,
-            storage,
             shutdown: CancellationToken::new(),
             scanner: Some(scanner),
             db_path,
@@ -83,11 +77,14 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
-        let store = self.storage.clone();
+        let storage = {
+            let db_path = self.db_path.clone();
+            std::sync::Arc::new(storage::SqliteStorage::new(db_path)) as std::sync::Arc<dyn storage::Storage + Send + Sync>
+        };
         let token = self.shutdown.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = rest::serve(addr, store, token).await {
+            if let Err(e) = rest::serve(addr, storage, token).await {
                 log::error!("REST server failed: {:#}", e);
             }
         })
@@ -97,16 +94,18 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
         // Take the scanner out of the Option
         let scanner = self.scanner.take().context("Scanner already consumed")?;
 
-        let storage = storage::sqlite::SqliteStorage::new(self.db_path.clone());
-        let parser = parser::Brc721Parser::new(storage);
+        let parser_storage = storage::sqlite::SqliteStorage::new(self.db_path.clone());
+        let parser = parser::Brc721Parser::new(parser_storage);
+
+        let core_storage: Arc<dyn storage::Storage + Send + Sync> =
+            Arc::new(storage::SqliteStorage::new(self.db_path.clone()));
 
         // Clone for thread
-        let storage = self.storage.clone();
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
         let handle = tokio::task::spawn_blocking(move || {
-            let mut core = core::Core::new(storage, scanner, parser);
+            let mut core = core::Core::new(core_storage, scanner, parser);
             if let Err(e) = core.run(token) {
                 log::error!("Core indexer failed: {:#}", e);
             }
@@ -281,7 +280,7 @@ mod tests {
         }
     }
 
-    fn make_app_with_storage(storage: DummyStorage) -> App<DummyRpc> {
+    fn make_app_with_storage(_storage: DummyStorage) -> App<DummyRpc> {
         let config = context::Context {
             rpc_url: url::Url::parse("http://localhost:8332").unwrap(),
             auth: bitcoincore_rpc::Auth::None,
@@ -294,10 +293,9 @@ mod tests {
             log_file: None,
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
-        let storage = Arc::new(storage);
         let rpc = DummyRpc;
         let scanner = scanner::Scanner::new(rpc);
-        App::new(config, storage, scanner)
+        App::new(config, scanner)
     }
 
     #[test]

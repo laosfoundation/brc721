@@ -12,7 +12,11 @@ pub struct Core<C: BitcoinRpc, P: BlockParser> {
 }
 
 impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
-    pub fn new(storage: Arc<dyn Storage + Send + Sync>, scanner: Scanner<C>, parser: P) -> Self {
+    pub fn new(
+        storage: Arc<dyn Storage + Send + Sync>,
+        scanner: Scanner<C>,
+        parser: P,
+    ) -> Self {
         Self {
             storage,
             scanner,
@@ -60,13 +64,8 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
         }
 
         if let Err(e) = self.storage.save_last(height, &hash.to_string()) {
-            log::error!(
-                "storage error saving block {} at height {}: {}",
-                hash,
-                height,
-                e
-            );
-            return Err(e);
+            log::error!("Failed to persist last processed block {} ({}): {}", height, hash, e);
+            return Err(e.into());
         }
 
         Ok(())
