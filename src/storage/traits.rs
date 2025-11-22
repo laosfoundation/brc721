@@ -27,4 +27,8 @@ pub trait StorageWrite: StorageRead {
     ) -> Result<()>;
 }
 
-pub trait Storage: StorageWrite {}
+pub trait StorageTx {}
+
+pub trait Storage: StorageWrite {
+    type Tx: StorageTx;
+}
