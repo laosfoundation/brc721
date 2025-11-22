@@ -63,8 +63,6 @@ mod tests {
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::Network;
     use bitcoincore_rpc::Error as RpcError;
-    use std::sync::Arc;
-
 
     #[derive(Clone)]
     struct DummyRpc;
@@ -95,14 +93,6 @@ mod tests {
         let rpc = DummyRpc;
         let scanner = Scanner::new(rpc);
         Core::new(scanner, parser)
-    }
-
-    struct NoopParser;
-
-    impl BlockParser for NoopParser {
-        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), Brc721Error> {
-            Ok(())
-        }
     }
 
     struct FailingParser;

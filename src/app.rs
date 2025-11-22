@@ -1,7 +1,7 @@
 use crate::{
     cli, context, core, parser, rest,
     scanner::{self, BitcoinRpc},
-    storage::{self, Storage},
+    storage,
 };
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
