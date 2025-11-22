@@ -198,12 +198,12 @@ impl SqliteStorage {
 
 impl StorageRead for SqliteStorage {
     fn load_last(&self) -> Result<Option<Block>> {
-        let opt = self.with_conn(|conn| db_load_last(conn))?;
+        let opt = self.with_conn(db_load_last)?;
         Ok(opt)
     }
 
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
-        let rows = self.with_conn(|conn| db_list_collections(conn))?;
+        let rows = self.with_conn(db_list_collections)?;
         Ok(rows)
     }
 }
