@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ethereum_types::H160;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
 use super::{
@@ -15,15 +15,34 @@ pub struct SqliteStorage {
     pub path: String,
 }
 
-pub struct SqliteTx;
+pub struct SqliteTx {
+    conn: Connection,
+}
 
-impl StorageTx for SqliteTx {}
+impl StorageTx for SqliteTx {
+    fn commit(self) -> Result<()> {
+        self.conn.execute("COMMIT", [])?;
+        Ok(())
+    }
+
+    fn rollback(self) -> Result<()> {
+        self.conn.execute("ROLLBACK", [])?;
+        Ok(())
+    }
+}
 
 impl Storage for SqliteStorage {
     type Tx = SqliteTx;
 
     fn begin_tx(&self) -> Result<Self::Tx> {
-        Ok(SqliteTx)
+        let conn = Connection::open(&self.path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.busy_timeout(std::time::Duration::from_millis(500))?;
+
+        conn.execute("BEGIN IMMEDIATE", [])?;
+
+        Ok(SqliteTx { conn })
     }
 }
 

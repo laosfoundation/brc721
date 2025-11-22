@@ -27,9 +27,20 @@ pub trait StorageWrite: StorageRead {
     ) -> Result<()>;
 }
 
-pub trait StorageTx {}
+pub trait StorageTx {
+    fn commit(self) -> Result<()>;
+    fn rollback(self) -> Result<()>;
+}
 
-impl StorageTx for () {}
+impl StorageTx for () {
+    fn commit(self) -> Result<()> {
+        Ok(())
+    }
+
+    fn rollback(self) -> Result<()> {
+        Ok(())
+    }
+}
 
 pub trait Storage: StorageWrite {
     type Tx: StorageTx;
