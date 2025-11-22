@@ -27,13 +27,48 @@ pub trait StorageWrite: StorageRead {
     ) -> Result<()>;
 }
 
-pub trait StorageTx: StorageRead {
+pub trait StorageTx: StorageRead + StorageWrite {
+    #[allow(dead_code)]
     fn commit(self) -> Result<()>;
+    #[allow(dead_code)]
     fn rollback(self) -> Result<()>;
+}
+
+impl StorageRead for () {
+    fn load_last(&self) -> Result<Option<Block>> {
+        Ok(None)
+    }
+    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+        Ok(vec![])
+    }
+}
+
+impl StorageWrite for () {
+    fn save_last(&self, _height: u64, _hash: &str) -> Result<()> {
+        Ok(())
+    }
+    fn save_collection(
+        &self,
+        _key: CollectionKey,
+        _evm_collection_address: H160,
+        _rebaseable: bool,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl StorageTx for () {
+    fn commit(self) -> Result<()> {
+        Ok(())
+    }
+    fn rollback(self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub trait Storage: StorageWrite {
     type Tx: StorageTx;
 
+    #[allow(dead_code)]
     fn begin_tx(&self) -> Result<Self::Tx>;
 }

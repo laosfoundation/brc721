@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ethereum_types::H160;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
 use super::{
@@ -31,12 +31,83 @@ impl StorageTx for SqliteTx {
     }
 }
 
+fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
+    conn.query_row(
+        "SELECT height, hash FROM chain_state WHERE id = 1",
+        [],
+        |row| {
+            let height: i64 = row.get(0)?;
+            let hash: String = row.get(1)?;
+            Ok(Block {
+                height: height as u64,
+                hash,
+            })
+        },
+    )
+    .optional()
+}
+
+fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<(CollectionKey, String, bool)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
+    )?;
+    let mapped = stmt
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            let evm_collection_address: String = row.get(1)?;
+            let rebaseable_int: i64 = row.get(2)?;
+            let rebaseable = rebaseable_int != 0;
+            Ok((CollectionKey { id }, evm_collection_address, rebaseable))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(mapped)
+}
+
+fn db_save_last(conn: &Connection, height: u64, hash: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash",
+        params![height as i64, hash],
+    )?;
+    Ok(())
+}
+
+fn db_save_collection(
+    conn: &Connection,
+    key: CollectionKey,
+    evm_collection_address: H160,
+    rebaseable: bool,
+) -> rusqlite::Result<()> {
+    let id = key.id;
+    conn.execute(
+        "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
+        params![id, format!("0x{:x}", evm_collection_address), rebaseable as i64],
+    )?;
+    Ok(())
+}
+
 impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
-        unimplemented!()
+        Ok(db_load_last(&self.conn)?)
     }
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
-        unimplemented!()
+        Ok(db_list_collections(&self.conn)?)
+    }
+}
+
+impl StorageWrite for SqliteTx {
+    fn save_last(&self, height: u64, hash: &str) -> Result<()> {
+        Ok(db_save_last(&self.conn, height, hash)?)
+    }
+
+    fn save_collection(
+        &self,
+        key: CollectionKey,
+        evm_collection_address: H160,
+        rebaseable: bool,
+    ) -> Result<()> {
+        Ok(db_save_collection(&self.conn, key, evm_collection_address, rebaseable)?)
     }
 }
 
@@ -123,54 +194,19 @@ impl SqliteStorage {
 
 impl StorageRead for SqliteStorage {
     fn load_last(&self) -> Result<Option<Block>> {
-        let opt = self.with_conn(|conn| {
-            conn.query_row(
-                "SELECT height, hash FROM chain_state WHERE id = 1",
-                [],
-                |row| {
-                    let height: i64 = row.get(0)?;
-                    let hash: String = row.get(1)?;
-                    Ok(Block {
-                        height: height as u64,
-                        hash,
-                    })
-                },
-            )
-            .optional()
-        })?;
+        let opt = self.with_conn(|conn| db_load_last(conn))?;
         Ok(opt)
     }
 
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
-        let rows = self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
-            )?;
-            let mapped = stmt
-                .query_map([], |row| {
-                    let id: String = row.get(0)?;
-                    let evm_collection_address: String = row.get(1)?;
-                    let rebaseable_int: i64 = row.get(2)?;
-                    let rebaseable = rebaseable_int != 0;
-                    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(mapped)
-        })?;
+        let rows = self.with_conn(|conn| db_list_collections(conn))?;
         Ok(rows)
     }
 }
 
 impl StorageWrite for SqliteStorage {
     fn save_last(&self, height: u64, hash: &str) -> Result<()> {
-        self.with_conn(|conn| {
-            conn.execute(
-                "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
-                 ON CONFLICT(id) DO UPDATE SET height=excluded.height, hash=excluded.hash",
-                params![height as i64, hash],
-            )?;
-            Ok(())
-        })?;
+        self.with_conn(|conn| db_save_last(conn, height, hash))?;
         Ok(())
     }
 
@@ -180,15 +216,7 @@ impl StorageWrite for SqliteStorage {
         evm_collection_address: H160,
         rebaseable: bool,
     ) -> Result<()> {
-        let id = key.id;
-        self.with_conn(|conn| {
-            conn.execute(
-                "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
-                params![id, format!("0x{:x}", evm_collection_address), rebaseable as i64],
-            )?;
-            Ok(())
-        })?;
+        self.with_conn(|conn| db_save_collection(conn, key, evm_collection_address, rebaseable))?;
         Ok(())
     }
 }
@@ -355,5 +383,34 @@ mod tests {
             "0xbbbb000000000000000000000000000000000000"
         );
         assert!(!collections[1].2);
+    }
+
+    #[test]
+    fn sqlite_transaction_commit_persists_data() {
+        let path = unique_temp_file("brc721_tx_commit", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let tx = repo.begin_tx().unwrap();
+        tx.save_last(200, "hash200").unwrap();
+        tx.commit().unwrap();
+
+        let last = repo.load_last().unwrap().unwrap();
+        assert_eq!(last.height, 200);
+        assert_eq!(last.hash, "hash200");
+    }
+
+    #[test]
+    fn sqlite_transaction_rollback_discards_data() {
+        let path = unique_temp_file("brc721_tx_rollback", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let tx = repo.begin_tx().unwrap();
+        tx.save_last(300, "hash300").unwrap();
+        tx.rollback().unwrap();
+
+        let last = repo.load_last().unwrap();
+        assert_eq!(last, None);
     }
 }
