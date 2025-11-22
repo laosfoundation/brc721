@@ -242,6 +242,10 @@ mod tests {
 
     impl storage::Storage for DummyStorage {
         type Tx = ();
+
+        fn begin_tx(&self) -> Result<Self::Tx> {
+            Ok(())
+        }
     }
 
     #[derive(Clone)]

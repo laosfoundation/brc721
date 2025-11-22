@@ -21,6 +21,10 @@ impl StorageTx for SqliteTx {}
 
 impl Storage for SqliteStorage {
     type Tx = SqliteTx;
+
+    fn begin_tx(&self) -> Result<Self::Tx> {
+        Ok(SqliteTx)
+    }
 }
 
 impl SqliteStorage {

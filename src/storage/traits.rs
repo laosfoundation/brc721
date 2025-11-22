@@ -33,4 +33,6 @@ impl StorageTx for () {}
 
 pub trait Storage: StorageWrite {
     type Tx: StorageTx;
+
+    fn begin_tx(&self) -> Result<Self::Tx>;
 }

@@ -182,6 +182,10 @@ mod tests {
 
     impl Storage for DummyStorage {
         type Tx = ();
+
+        fn begin_tx(&self) -> anyhow::Result<Self::Tx> {
+            Ok(())
+        }
     }
 
     impl StorageRead for DummyStorage {
