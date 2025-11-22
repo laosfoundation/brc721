@@ -1,12 +1,11 @@
 use crate::{
     cli, context, core, parser, rest,
     scanner::{self, BitcoinRpc},
-    storage,
+    storage::{self, sqlite, Storage},
 };
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -34,7 +33,7 @@ impl App {
         let storage = init_storage(&ctx.data_dir, ctx.reset)?;
 
         // Prepare Scanner Dependencies
-        let start_block = determine_start_block(storage.as_ref(), &ctx)?;
+        let start_block = determine_start_block(storage, &ctx)?;
         let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
             .context("failed to connect to Bitcoin RPC")?;
 
@@ -142,10 +141,7 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
 // --- Standalone Helpers ---
 
-fn determine_start_block(
-    storage: &(dyn storage::Storage<Tx = ()> + Send + Sync),
-    config: &context::Context,
-) -> Result<u64> {
+fn determine_start_block<S: Storage>(storage: S, config: &context::Context) -> Result<u64> {
     let last_processed = storage.load_last().context("loading last block")?;
     Ok(last_processed.map(|b| b.height + 1).unwrap_or(config.start))
 }
@@ -157,7 +153,7 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 }
 
-fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage<Tx = ()> + Send + Sync>> {
+fn init_storage(data_dir: &Path, reset: bool) -> Result<sqlite::SqliteStorage> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -170,7 +166,7 @@ fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage
     }
     sqlite.init().context("initializing storage")?;
 
-    Ok(Arc::new(sqlite))
+    Ok(sqlite)
 }
 
 // --- Entry Point ---
@@ -306,7 +302,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(&storage, &config).unwrap();
+        let start = determine_start_block(storage, &config).unwrap();
         assert_eq!(start, 123);
     }
 
@@ -326,7 +322,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(&storage, &config).unwrap();
+        let start = determine_start_block(storage, &config).unwrap();
         assert_eq!(start, 101);
     }
 

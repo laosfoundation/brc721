@@ -4,11 +4,11 @@ use bitcoin::Block;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser<S: Storage<Tx = ()>> {
+pub struct Brc721Parser<S: Storage> {
     storage: S,
 }
 
-impl<S: Storage<Tx = ()>> Brc721Parser<S> {
+impl<S: Storage> Brc721Parser<S> {
     pub fn new(storage: S) -> Self {
         Self { storage }
     }
@@ -30,7 +30,7 @@ impl<S: Storage<Tx = ()>> Brc721Parser<S> {
     }
 }
 
-impl<S: Storage<Tx = ()>> BlockParser for Brc721Parser<S> {
+impl<S: Storage> BlockParser for Brc721Parser<S> {
     fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
@@ -83,8 +83,8 @@ mod tests {
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::hashes::Hash;
     use bitcoin::opcodes::all::OP_RETURN;
-    use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
     use bitcoin::Network;
+    use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
     use ethereum_types::H160;
     use hex::FromHex;
     use std::sync::{Arc, Mutex};

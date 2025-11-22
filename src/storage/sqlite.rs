@@ -15,8 +15,12 @@ pub struct SqliteStorage {
     pub path: String,
 }
 
+pub struct SqliteTx;
+
+impl StorageTx for SqliteTx {}
+
 impl Storage for SqliteStorage {
-    type Tx = ();
+    type Tx = SqliteTx;
 }
 
 impl SqliteStorage {
