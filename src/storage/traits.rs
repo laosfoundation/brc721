@@ -17,7 +17,7 @@ pub trait StorageRead {
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>>;
 }
 
-pub trait StorageWrite: StorageRead {
+pub trait StorageWrite {
     fn save_last(&self, height: u64, hash: &str) -> Result<()>;
     fn save_collection(
         &self,
@@ -66,7 +66,7 @@ impl StorageTx for () {
     }
 }
 
-pub trait Storage: StorageWrite {
+pub trait Storage: StorageRead + StorageWrite {
     type Tx: StorageTx;
 
     #[allow(dead_code)]
