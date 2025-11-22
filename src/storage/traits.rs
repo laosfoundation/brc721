@@ -29,6 +29,8 @@ pub trait StorageWrite: StorageRead {
 
 pub trait StorageTx {}
 
+impl StorageTx for () {}
+
 pub trait Storage: StorageWrite {
     type Tx: StorageTx;
 }

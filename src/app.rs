@@ -143,7 +143,7 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 // --- Standalone Helpers ---
 
 fn determine_start_block(
-    storage: &(dyn storage::Storage + Send + Sync),
+    storage: &(dyn storage::Storage<Tx = ()> + Send + Sync),
     config: &context::Context,
 ) -> Result<u64> {
     let last_processed = storage.load_last().context("loading last block")?;
@@ -157,7 +157,7 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 }
 
-fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
+fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage<Tx = ()> + Send + Sync>> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -244,7 +244,9 @@ mod tests {
         }
     }
 
-    impl storage::Storage for DummyStorage {}
+    impl storage::Storage for DummyStorage {
+        type Tx = ();
+    }
 
     #[derive(Clone)]
     struct DummyRpc;

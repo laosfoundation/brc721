@@ -4,7 +4,7 @@ use crate::types::{Brc721Error, RegisterCollectionData};
 
 pub fn digest(
     payload: &RegisterCollectionData,
-    storage: &dyn Storage,
+    storage: &dyn Storage<Tx = ()>,
     block_height: u64,
     tx_index: u32,
 ) -> Result<(), Brc721Error> {

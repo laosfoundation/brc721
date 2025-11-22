@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
 use super::{
-    traits::{CollectionKey, Storage, StorageRead, StorageWrite},
+    traits::{CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
     Block,
 };
 
@@ -15,7 +15,9 @@ pub struct SqliteStorage {
     pub path: String,
 }
 
-impl Storage for SqliteStorage {}
+impl Storage for SqliteStorage {
+    type Tx = ();
+}
 
 impl SqliteStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {

@@ -4,11 +4,11 @@ use bitcoin::Block;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser<S: Storage> {
+pub struct Brc721Parser<S: Storage<Tx = ()>> {
     storage: S,
 }
 
-impl<S: Storage> Brc721Parser<S> {
+impl<S: Storage<Tx = ()>> Brc721Parser<S> {
     pub fn new(storage: S) -> Self {
         Self { storage }
     }
@@ -30,7 +30,7 @@ impl<S: Storage> Brc721Parser<S> {
     }
 }
 
-impl<S: Storage> BlockParser for Brc721Parser<S> {
+impl<S: Storage<Tx = ()>> BlockParser for Brc721Parser<S> {
     fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
@@ -180,7 +180,9 @@ mod tests {
         }
     }
 
-    impl Storage for DummyStorage {}
+    impl Storage for DummyStorage {
+        type Tx = ();
+    }
 
     impl StorageRead for DummyStorage {
         fn load_last(&self) -> anyhow::Result<Option<StorageBlock>> {
