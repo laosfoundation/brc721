@@ -1,20 +1,24 @@
-use crate::storage::traits::Storage;
+use crate::storage::traits::StorageWrite;
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
+use std::marker::PhantomData;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser<S: Storage> {
-    storage: S,
+pub struct Brc721Parser<T: StorageWrite> {
+    _phantom: PhantomData<T>,
 }
 
-impl<S: Storage> Brc721Parser<S> {
-    pub fn new(storage: S) -> Self {
-        Self { storage }
+impl<T: StorageWrite> Brc721Parser<T> {
+    pub fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
     }
 
     fn digest(
         &self,
+        tx: &T,
         output: &Brc721Output,
         block_height: u64,
         tx_index: u32,
@@ -22,7 +26,7 @@ impl<S: Storage> Brc721Parser<S> {
         match output.message() {
             Brc721Message::RegisterCollection(data) => crate::parser::register_collection::digest(
                 data,
-                &self.storage,
+                tx,
                 block_height,
                 tx_index,
             ),
@@ -30,13 +34,15 @@ impl<S: Storage> Brc721Parser<S> {
     }
 }
 
-impl<S: Storage> BlockParser for Brc721Parser<S> {
-    fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
+impl<T: StorageWrite> BlockParser for Brc721Parser<T> {
+    type Tx = T;
+
+    fn parse_block(&self, tx: &T, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
 
-        for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let Some(first_output) = tx.output.first() else {
+        for (tx_index, tx_data) in block.txdata.iter().enumerate() {
+            let Some(first_output) = tx_data.output.first() else {
                 continue;
             };
             let brc721_output = match Brc721Output::from_output(first_output) {
@@ -53,12 +59,12 @@ impl<S: Storage> BlockParser for Brc721Parser<S> {
                 tx_index
             );
 
-            if let Err(ref e) = self.digest(&brc721_output, block_height, tx_index as u32) {
+            if let Err(ref e) = self.digest(tx, &brc721_output, block_height, tx_index as u32) {
                 log::warn!("{:?}", e);
             }
         }
         // Persist last processed block once per block
-        if let Err(e) = self.storage.save_last(block_height, &hash_str) {
+        if let Err(e) = tx.save_last(block_height, &hash_str) {
             log::error!(
                 "storage error saving block {} at height {}: {}",
                 hash,
@@ -75,7 +81,7 @@ impl<S: Storage> BlockParser for Brc721Parser<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block as StorageBlock, CollectionKey, StorageRead, StorageWrite};
+    use crate::storage::traits::{Block as StorageBlock, CollectionKey, StorageRead, StorageTx, StorageWrite};
     use crate::storage::Storage;
     use crate::types::Brc721Command;
     use crate::types::BRC721_CODE;
@@ -152,9 +158,12 @@ mod tests {
         };
         let storage =
             crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
-        let parser = Brc721Parser::new(storage);
-        let r = parser.parse_block(&block, 0);
+        storage.init().unwrap();
+        let parser = Brc721Parser::new();
+        let tx = storage.begin_tx().unwrap();
+        let r = parser.parse_block(&tx, &block, 0);
         assert!(r.is_ok());
+        tx.commit().unwrap();
     }
 
     struct DummyStorageInner {
@@ -228,7 +237,7 @@ mod tests {
 
     fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser<DummyStorage>) {
         let storage = DummyStorage::new(fail_storage);
-        let parser = Brc721Parser::new(storage.clone());
+        let parser = Brc721Parser::new();
         (storage, parser)
     }
 
@@ -238,7 +247,8 @@ mod tests {
 
         let block = genesis_block(Network::Regtest);
         let height = 42;
-        parser.parse_block(&block, height).unwrap();
+        let tx = storage.clone();
+        parser.parse_block(&tx, &block, height).unwrap();
 
         assert_eq!(*storage.inner.last_height.lock().unwrap(), Some(height));
         assert_eq!(
@@ -253,7 +263,8 @@ mod tests {
 
         let block = genesis_block(Network::Regtest);
         let height = 1;
-        assert!(parser.parse_block(&block, height).is_err());
+        let tx = storage.clone();
+        assert!(parser.parse_block(&tx, &block, height).is_err());
 
         assert_eq!(*storage.inner.last_height.lock().unwrap(), None);
         assert_eq!(*storage.inner.last_hash.lock().unwrap(), None);

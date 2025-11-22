@@ -1,16 +1,22 @@
 use crate::parser::BlockParser;
 use crate::scanner::{BitcoinRpc, Scanner};
+use crate::storage::traits::{Storage, StorageTx};
 use anyhow::Result;
 use bitcoin::Block;
 
-pub struct Core<C: BitcoinRpc, P: BlockParser> {
+pub struct Core<C: BitcoinRpc, S: Storage, P: BlockParser<Tx = S::Tx>> {
     scanner: Scanner<C>,
+    storage: S,
     parser: P,
 }
 
-impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
-    pub fn new(scanner: Scanner<C>, parser: P) -> Self {
-        Self { scanner, parser }
+impl<C: BitcoinRpc, S: Storage, P: BlockParser<Tx = S::Tx>> Core<C, S, P> {
+    pub fn new(scanner: Scanner<C>, storage: S, parser: P) -> Self {
+        Self {
+            scanner,
+            storage,
+            parser,
+        }
     }
 
     /// Main loop: keep stepping until shutdown is requested.
@@ -26,9 +32,14 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
     pub fn step(&mut self, shutdown: &tokio_util::sync::CancellationToken) -> Result<()> {
         match self.scanner.next_blocks_with_shutdown(shutdown) {
             Ok(blocks) => {
-                for (height, block) in blocks {
-                    self.process_block(height, &block)?;
+                if blocks.is_empty() {
+                    return Ok(());
                 }
+                let tx = self.storage.begin_tx()?;
+                for (height, block) in blocks {
+                    self.process_block(&tx, height, &block)?;
+                }
+                tx.commit()?;
             }
             Err(e) => {
                 log::error!("scanner error: {}", e);
@@ -38,11 +49,11 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
         Ok(())
     }
 
-    fn process_block(&self, height: u64, block: &Block) -> Result<()> {
+    fn process_block(&self, tx: &S::Tx, height: u64, block: &Block) -> Result<()> {
         let hash = block.block_hash();
         log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
-        if let Err(e) = self.parser.parse_block(block, height) {
+        if let Err(e) = self.parser.parse_block(tx, block, height) {
             log::error!(
                 "parsing error of block {} at height {}: {}",
                 hash,
@@ -59,10 +70,12 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::traits::{CollectionKey, StorageRead, StorageWrite};
     use crate::types::Brc721Error;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::Network;
     use bitcoincore_rpc::Error as RpcError;
+    use ethereum_types::H160;
 
     #[derive(Clone)]
     struct DummyRpc;
@@ -89,16 +102,67 @@ mod tests {
         genesis_block(Network::Regtest)
     }
 
-    fn make_core_with_parser<P: BlockParser>(parser: P) -> Core<DummyRpc, P> {
+    #[derive(Clone)]
+    struct DummyStorage;
+
+    impl StorageRead for DummyStorage {
+        fn load_last(&self) -> Result<Option<crate::storage::Block>> {
+            Ok(None)
+        }
+        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(vec![])
+        }
+    }
+
+    impl StorageWrite for DummyStorage {
+        fn save_last(&self, _height: u64, _hash: &str) -> Result<()> {
+            Ok(())
+        }
+        fn save_collection(
+            &self,
+            _key: CollectionKey,
+            _evm_collection_address: H160,
+            _rebaseable: bool,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl StorageTx for DummyStorage {
+        fn commit(self) -> Result<()> {
+            Ok(())
+        }
+        fn rollback(self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Storage for DummyStorage {
+        type Tx = DummyStorage;
+        fn begin_tx(&self) -> Result<Self::Tx> {
+            Ok(DummyStorage)
+        }
+    }
+
+    fn make_core_with_parser<P: BlockParser<Tx = DummyStorage>>(
+        parser: P,
+    ) -> Core<DummyRpc, DummyStorage, P> {
         let rpc = DummyRpc;
         let scanner = Scanner::new(rpc);
-        Core::new(scanner, parser)
+        let storage = DummyStorage;
+        Core::new(scanner, storage, parser)
     }
 
     struct FailingParser;
 
     impl BlockParser for FailingParser {
-        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), Brc721Error> {
+        type Tx = DummyStorage;
+        fn parse_block(
+            &self,
+            _tx: &Self::Tx,
+            _block: &Block,
+            _height: u64,
+        ) -> Result<(), Brc721Error> {
             Err(Brc721Error::InvalidPayload)
         }
     }
@@ -109,6 +173,7 @@ mod tests {
 
         let block = empty_block();
         let height = 7;
-        assert!(core.process_block(height, &block).is_err());
+        let tx = DummyStorage;
+        assert!(core.process_block(&tx, height, &block).is_err());
     }
 }
