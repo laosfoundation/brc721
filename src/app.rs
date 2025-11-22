@@ -1,12 +1,11 @@
 use crate::{
     cli, context, core, parser, rest,
     scanner::{self, BitcoinRpc},
-    storage,
+    storage::{self, sqlite, Storage},
 };
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -14,9 +13,9 @@ use tokio_util::sync::CancellationToken;
 /// decoupled from CLI parsing to allow for easier testing.
 pub struct App<C: BitcoinRpc = Client> {
     config: context::Context,
-    storage: Arc<dyn storage::Storage + Send + Sync>,
     shutdown: CancellationToken,
     scanner: Option<scanner::Scanner<C>>,
+    db_path: PathBuf,
 }
 
 impl App {
@@ -35,7 +34,7 @@ impl App {
         let storage = init_storage(&ctx.data_dir, ctx.reset)?;
 
         // Prepare Scanner Dependencies
-        let start_block = determine_start_block(storage.as_ref(), &ctx)?;
+        let start_block = determine_start_block(storage, &ctx)?;
         let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
             .context("failed to connect to Bitcoin RPC")?;
 
@@ -44,23 +43,20 @@ impl App {
             .with_capacity(ctx.batch_size)
             .with_start_from(start_block);
 
-        Ok((App::new(ctx, storage, scanner), cli))
+        Ok((App::new(ctx, scanner), cli))
     }
 }
 
 impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     /// Create a new App instance.
     /// Dependencies are injected here, making it easy to swap Storage for mocks.
-    fn new(
-        config: context::Context,
-        storage: Arc<dyn storage::Storage + Send + Sync>,
-        scanner: scanner::Scanner<C>,
-    ) -> Self {
+    fn new(config: context::Context, scanner: scanner::Scanner<C>) -> Self {
+        let db_path = config.data_dir.join("brc721.sqlite");
         Self {
             config,
-            storage,
             shutdown: CancellationToken::new(),
             scanner: Some(scanner),
+            db_path,
         }
     }
 
@@ -81,28 +77,25 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
-        let store = self.storage.clone();
+        let storage = storage::SqliteStorage::new(self.db_path.clone());
         let token = self.shutdown.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = rest::serve(addr, store, token).await {
+            if let Err(e) = rest::serve(addr, storage, token).await {
                 log::error!("REST server failed: {:#}", e);
             }
         })
     }
 
     fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
-        // Take the scanner out of the Option
         let scanner = self.scanner.take().context("Scanner already consumed")?;
-        let parser = parser::Brc721Parser::new(self.storage.clone());
-
-        // Clone for thread
-        let storage = self.storage.clone();
+        let storage = storage::SqliteStorage::new(self.db_path.clone());
+        let parser = parser::Brc721Parser::<storage::sqlite::SqliteTx>::new();
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
         let handle = tokio::task::spawn_blocking(move || {
-            let mut core = core::Core::new(storage, scanner, parser);
+            let mut core = core::Core::new(scanner, storage, parser);
             if let Err(e) = core.run(token) {
                 log::error!("Core indexer failed: {:#}", e);
             }
@@ -149,10 +142,7 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
 // --- Standalone Helpers ---
 
-fn determine_start_block(
-    storage: &(dyn storage::Storage + Send + Sync),
-    config: &context::Context,
-) -> Result<u64> {
+fn determine_start_block<S: Storage>(storage: S, config: &context::Context) -> Result<u64> {
     let last_processed = storage.load_last().context("loading last block")?;
     Ok(last_processed.map(|b| b.height + 1).unwrap_or(config.start))
 }
@@ -164,7 +154,7 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 }
 
-fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
+fn init_storage(data_dir: &Path, reset: bool) -> Result<sqlite::SqliteStorage> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -177,7 +167,7 @@ fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage
     }
     sqlite.init().context("initializing storage")?;
 
-    Ok(Arc::new(sqlite))
+    Ok(sqlite)
 }
 
 // --- Entry Point ---
@@ -196,7 +186,7 @@ pub async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block, CollectionKey};
+    use crate::storage::traits::{Block, CollectionKey, StorageRead, StorageWrite};
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
@@ -222,11 +212,17 @@ mod tests {
         }
     }
 
-    impl storage::Storage for DummyStorage {
+    impl StorageRead for DummyStorage {
         fn load_last(&self) -> Result<Option<Block>> {
             Ok(self.last.lock().unwrap().clone())
         }
 
+        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl StorageWrite for DummyStorage {
         fn save_last(&self, height: u64, hash: &str) -> Result<()> {
             *self.last.lock().unwrap() = Some(Block {
                 height,
@@ -243,9 +239,13 @@ mod tests {
         ) -> Result<()> {
             Ok(())
         }
+    }
 
-        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
-            Ok(Vec::new())
+    impl storage::Storage for DummyStorage {
+        type Tx = ();
+
+        fn begin_tx(&self) -> Result<Self::Tx> {
+            Ok(())
         }
     }
 
@@ -273,7 +273,7 @@ mod tests {
         }
     }
 
-    fn make_app_with_storage(storage: DummyStorage) -> App<DummyRpc> {
+    fn make_app_with_storage(_storage: DummyStorage) -> App<DummyRpc> {
         let config = context::Context {
             rpc_url: url::Url::parse("http://localhost:8332").unwrap(),
             auth: bitcoincore_rpc::Auth::None,
@@ -286,10 +286,9 @@ mod tests {
             log_file: None,
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
-        let storage = Arc::new(storage);
         let rpc = DummyRpc;
         let scanner = scanner::Scanner::new(rpc);
-        App::new(config, storage, scanner)
+        App::new(config, scanner)
     }
 
     #[test]
@@ -308,7 +307,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(&storage, &config).unwrap();
+        let start = determine_start_block(storage, &config).unwrap();
         assert_eq!(start, 123);
     }
 
@@ -328,7 +327,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(&storage, &config).unwrap();
+        let start = determine_start_block(storage, &config).unwrap();
         assert_eq!(start, 101);
     }
 

@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use serde::Serialize;
@@ -7,8 +6,8 @@ use serde::Serialize;
 use crate::storage::Storage;
 
 #[derive(Clone)]
-pub struct AppState {
-    pub storage: Arc<dyn Storage + Send + Sync>,
+pub struct AppState<S: Storage> {
+    pub storage: S,
     pub started_at: std::time::SystemTime,
 }
 
@@ -44,9 +43,9 @@ struct LastBlock {
     hash: String,
 }
 
-pub async fn serve(
+pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     addr: SocketAddr,
-    storage: Arc<dyn Storage + Send + Sync>,
+    storage: S,
     shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
     let state = AppState {
@@ -55,9 +54,9 @@ pub async fn serve(
     };
 
     let app = Router::new()
-        .route("/health", get(health))
-        .route("/state", get(chain_state))
-        .route("/collections", get(list_collections))
+        .route("/health", get(health::<S>))
+        .route("/state", get(chain_state::<S>))
+        .route("/collections", get(list_collections::<S>))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -72,7 +71,9 @@ pub async fn serve(
     Ok(())
 }
 
-async fn health(State(state): State<AppState>) -> impl IntoResponse {
+async fn health<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+) -> impl IntoResponse {
     let uptime_secs = state.started_at.elapsed().map(|d| d.as_secs()).unwrap_or(0);
     (
         StatusCode::OK,
@@ -83,7 +84,9 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-async fn chain_state(State(state): State<AppState>) -> impl IntoResponse {
+async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+) -> impl IntoResponse {
     let last = state.storage.load_last().ok().flatten().map(|b| LastBlock {
         height: b.height,
         hash: b.hash,
@@ -91,7 +94,9 @@ async fn chain_state(State(state): State<AppState>) -> impl IntoResponse {
     Json(ChainStateResponse { last })
 }
 
-async fn list_collections(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+) -> impl IntoResponse {
     let collections = state
         .storage
         .list_collections()
