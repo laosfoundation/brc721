@@ -314,6 +314,7 @@ mod tests {
         let repo = SqliteStorage::new(&path);
         repo.init().unwrap();
 
+        let repo = repo.begin_tx().unwrap();
         assert_eq!(repo.load_last().unwrap(), None);
 
         repo.save_last(100, "hash100").unwrap();
@@ -325,6 +326,7 @@ mod tests {
         let second = repo.load_last().unwrap().unwrap();
         assert_eq!(second.height, 101);
         assert_eq!(second.hash, "hash101");
+        repo.commit().unwrap();
 
         let conn = Connection::open(&path).unwrap();
         let row_count: i64 = conn
@@ -339,6 +341,7 @@ mod tests {
         let repo = SqliteStorage::new(&path);
         repo.init().unwrap();
 
+        let repo = repo.begin_tx().unwrap();
         repo.save_collection(
             CollectionKey {
                 id: "123:0".to_string(),
