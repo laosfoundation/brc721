@@ -66,7 +66,7 @@ impl StorageTx for () {
     }
 }
 
-pub trait Storage: StorageRead + StorageWrite {
+pub trait Storage: StorageRead {
     type Tx: StorageTx;
 
     #[allow(dead_code)]

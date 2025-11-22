@@ -48,9 +48,8 @@ fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
 }
 
 fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<(CollectionKey, String, bool)>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id")?;
     let mapped = stmt
         .query_map([], |row| {
             let id: String = row.get(0)?;
@@ -107,7 +106,12 @@ impl StorageWrite for SqliteTx {
         evm_collection_address: H160,
         rebaseable: bool,
     ) -> Result<()> {
-        Ok(db_save_collection(&self.conn, key, evm_collection_address, rebaseable)?)
+        Ok(db_save_collection(
+            &self.conn,
+            key,
+            evm_collection_address,
+            rebaseable,
+        )?)
     }
 }
 
@@ -201,23 +205,6 @@ impl StorageRead for SqliteStorage {
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
         let rows = self.with_conn(|conn| db_list_collections(conn))?;
         Ok(rows)
-    }
-}
-
-impl StorageWrite for SqliteStorage {
-    fn save_last(&self, height: u64, hash: &str) -> Result<()> {
-        self.with_conn(|conn| db_save_last(conn, height, hash))?;
-        Ok(())
-    }
-
-    fn save_collection(
-        &self,
-        key: CollectionKey,
-        evm_collection_address: H160,
-        rebaseable: bool,
-    ) -> Result<()> {
-        self.with_conn(|conn| db_save_collection(conn, key, evm_collection_address, rebaseable))?;
-        Ok(())
     }
 }
 
