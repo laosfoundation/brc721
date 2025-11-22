@@ -6,4 +6,3 @@ pub trait BlockParser {
     type Tx: StorageWrite;
     fn parse_block(&self, tx: &Self::Tx, block: &Block, height: u64) -> Result<(), Brc721Error>;
 }
-

@@ -24,12 +24,9 @@ impl<T: StorageWrite> Brc721Parser<T> {
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
         match output.message() {
-            Brc721Message::RegisterCollection(data) => crate::parser::register_collection::digest(
-                data,
-                tx,
-                block_height,
-                tx_index,
-            ),
+            Brc721Message::RegisterCollection(data) => {
+                crate::parser::register_collection::digest(data, tx, block_height, tx_index)
+            }
         }
     }
 }
@@ -81,7 +78,9 @@ impl<T: StorageWrite> BlockParser for Brc721Parser<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block as StorageBlock, CollectionKey, StorageRead, StorageTx, StorageWrite};
+    use crate::storage::traits::{
+        Block as StorageBlock, CollectionKey, StorageRead, StorageTx, StorageWrite,
+    };
     use crate::storage::Storage;
     use crate::types::Brc721Command;
     use crate::types::BRC721_CODE;
