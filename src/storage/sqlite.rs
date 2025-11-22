@@ -31,6 +31,15 @@ impl StorageTx for SqliteTx {
     }
 }
 
+impl StorageRead for SqliteTx {
+    fn load_last(&self) -> Result<Option<Block>> {
+        unimplemented!()
+    }
+    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+        unimplemented!()
+    }
+}
+
 impl Storage for SqliteStorage {
     type Tx = SqliteTx;
 
