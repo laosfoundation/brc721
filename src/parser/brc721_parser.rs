@@ -1,22 +1,17 @@
 use crate::storage::traits::StorageWrite;
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
-use std::marker::PhantomData;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser<T: StorageWrite> {
-    _phantom: PhantomData<T>,
-}
+pub struct Brc721Parser;
 
-impl<T: StorageWrite> Brc721Parser<T> {
+impl Brc721Parser {
     pub fn new() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
+        Self
     }
 
-    fn digest(
+    fn digest<T: StorageWrite>(
         &self,
         tx: &T,
         output: &Brc721Output,
@@ -31,9 +26,7 @@ impl<T: StorageWrite> Brc721Parser<T> {
     }
 }
 
-impl<T: StorageWrite> BlockParser for Brc721Parser<T> {
-    type Tx = T;
-
+impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
     fn parse_block(&self, tx: &T, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
@@ -234,7 +227,7 @@ mod tests {
         }
     }
 
-    fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser<DummyStorage>) {
+    fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser) {
         let storage = DummyStorage::new(fail_storage);
         let parser = Brc721Parser::new();
         (storage, parser)

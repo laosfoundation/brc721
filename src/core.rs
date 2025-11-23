@@ -4,13 +4,13 @@ use crate::storage::traits::{Storage, StorageTx};
 use anyhow::Result;
 use bitcoin::Block;
 
-pub struct Core<C: BitcoinRpc, S: Storage, P: BlockParser<Tx = S::Tx>> {
+pub struct Core<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> {
     scanner: Scanner<C>,
     storage: S,
     parser: P,
 }
 
-impl<C: BitcoinRpc, S: Storage, P: BlockParser<Tx = S::Tx>> Core<C, S, P> {
+impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
     pub fn new(scanner: Scanner<C>, storage: S, parser: P) -> Self {
         Self {
             scanner,
@@ -144,7 +144,7 @@ mod tests {
         }
     }
 
-    fn make_core_with_parser<P: BlockParser<Tx = DummyStorage>>(
+    fn make_core_with_parser<P: BlockParser<DummyStorage>>(
         parser: P,
     ) -> Core<DummyRpc, DummyStorage, P> {
         let rpc = DummyRpc;
@@ -155,11 +155,10 @@ mod tests {
 
     struct FailingParser;
 
-    impl BlockParser for FailingParser {
-        type Tx = DummyStorage;
+    impl BlockParser<DummyStorage> for FailingParser {
         fn parse_block(
             &self,
-            _tx: &Self::Tx,
+            _tx: &DummyStorage,
             _block: &Block,
             _height: u64,
         ) -> Result<(), Brc721Error> {

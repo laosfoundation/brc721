@@ -69,7 +69,7 @@ impl App {
             .with_capacity(self.config.batch_size)
             .with_start_from(start_block);
 
-        let parser = parser::Brc721Parser::<storage::sqlite::SqliteTx>::new();
+        let parser = parser::Brc721Parser::new();
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
