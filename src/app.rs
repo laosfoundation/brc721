@@ -1,7 +1,7 @@
 use crate::{
     cli, context, core, parser, rest,
     scanner::{self, BitcoinRpc},
-    storage::{self, sqlite, Storage},
+    storage::{self, Storage},
 };
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 pub struct App<C: BitcoinRpc = Client> {
     config: context::Context,
     shutdown: CancellationToken,
-    scanner: Option<scanner::Scanner<C>>,
+    client: Option<C>,
     db_path: PathBuf,
 }
 
@@ -29,32 +29,25 @@ impl App {
         crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
         log_startup_info(&ctx);
 
-        // Side-effect: Initialize Storage
-        let storage = init_storage(&ctx.data_dir, ctx.reset)?;
+        init_storage(&ctx.data_dir, ctx.reset)?;
 
         // Prepare Scanner Dependencies
-        let start_block = determine_start_block(storage, &ctx)?;
         let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
             .context("failed to connect to Bitcoin RPC")?;
 
-        let scanner = scanner::Scanner::new(client)
-            .with_confirmations(ctx.confirmations)
-            .with_capacity(ctx.batch_size)
-            .with_start_from(start_block);
-
-        Ok((App::new(ctx, scanner), cli))
+        Ok((App::new(ctx, client), cli))
     }
 }
 
 impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     /// Create a new App instance.
     /// Dependencies are injected here, making it easy to swap Storage for mocks.
-    fn new(config: context::Context, scanner: scanner::Scanner<C>) -> Self {
+    fn new(config: context::Context, client: C) -> Self {
         let db_path = config.data_dir.join("brc721.sqlite");
         Self {
             config,
             shutdown: CancellationToken::new(),
-            scanner: Some(scanner),
+            client: Some(client),
             db_path,
         }
     }
@@ -87,8 +80,14 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     }
 
     fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
-        let scanner = self.scanner.take().context("Scanner already consumed")?;
+        let client = self.client.take().context("Client already consumed")?;
         let storage = storage::SqliteStorage::new(self.db_path.clone());
+        let start_block = determine_start_block(&storage, self.config.start)?;
+        let scanner = scanner::Scanner::new(client)
+            .with_confirmations(self.config.confirmations)
+            .with_capacity(self.config.batch_size)
+            .with_start_from(start_block);
+
         let parser = parser::Brc721Parser::<storage::sqlite::SqliteTx>::new();
         let token = self.shutdown.clone();
 
@@ -141,9 +140,9 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
 
 // --- Standalone Helpers ---
 
-fn determine_start_block<S: Storage>(storage: S, config: &context::Context) -> Result<u64> {
+fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
     let last_processed = storage.load_last().context("loading last block")?;
-    Ok(last_processed.map(|b| b.height + 1).unwrap_or(config.start))
+    Ok(last_processed.map(|b| b.height + 1).unwrap_or(default))
 }
 
 fn log_startup_info(ctx: &context::Context) {
@@ -153,7 +152,7 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 }
 
-fn init_storage(data_dir: &Path, reset: bool) -> Result<sqlite::SqliteStorage> {
+fn init_storage(data_dir: &Path, reset: bool) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -166,7 +165,7 @@ fn init_storage(data_dir: &Path, reset: bool) -> Result<sqlite::SqliteStorage> {
     }
     sqlite.init().context("initializing storage")?;
 
-    Ok(sqlite)
+    Ok(())
 }
 
 // --- Entry Point ---
@@ -286,8 +285,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
         let rpc = DummyRpc;
-        let scanner = scanner::Scanner::new(rpc);
-        App::new(config, scanner)
+        App::new(config, rpc)
     }
 
     #[test]
@@ -306,7 +304,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(storage, &config).unwrap();
+        let start = determine_start_block(&storage, config.start).unwrap();
         assert_eq!(start, 123);
     }
 
@@ -326,7 +324,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(storage, &config).unwrap();
+        let start = determine_start_block(&storage, config.start).unwrap();
         assert_eq!(start, 101);
     }
 
@@ -347,7 +345,7 @@ mod tests {
         let _ = app.spawn_core_indexer();
         let res = app.spawn_core_indexer();
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().to_string(), "Scanner already consumed");
+        assert_eq!(res.unwrap_err().to_string(), "Client already consumed");
     }
 
     #[tokio::test]
