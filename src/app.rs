@@ -31,12 +31,6 @@ impl App {
         &mut self,
         client: C,
     ) -> Result<()> {
-        log::info!("🧮 Confirmations: {}", self.config.confirmations);
-        log::info!("🧮 Batch size: {}", self.config.batch_size);
-        if let Some(path) = self.config.log_file.as_deref() {
-            log::info!("📝 Log file: {}", path.to_string_lossy());
-        }
-
         // 1. Spawn Tasks
         let mut rest_handle = self.spawn_rest_server();
         let mut core_handle = self.spawn_core_indexer(client)?;
@@ -47,6 +41,7 @@ impl App {
     }
 
     fn spawn_rest_server(&self) -> JoinHandle<()> {
+        log::info!("🌐 REST service on http://{}", self.config.api_listen);
         let addr = self.config.api_listen;
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let token = self.shutdown.clone();
@@ -62,6 +57,9 @@ impl App {
         &mut self,
         client: C,
     ) -> Result<JoinHandle<()>> {
+        log::info!("🧮 Confirmations: {}", self.config.confirmations);
+        log::info!("🧮 Batch size: {}", self.config.batch_size);
+
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let start_block = determine_start_block(&storage, self.config.start)?;
         let scanner = scanner::Scanner::new(client)
@@ -140,7 +138,11 @@ pub async fn run() -> Result<()> {
 
     let cli = crate::cli::parse();
     let ctx = context::Context::from_cli(&cli);
-    crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
+
+    if let Some(path) = ctx.log_file.as_deref() {
+        log::info!("📝 Log file: {}", path.to_string_lossy());
+        crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
+    }
 
     log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
     log::info!("🌐 Network: {}", ctx.network);

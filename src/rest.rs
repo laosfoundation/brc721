@@ -60,7 +60,6 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    log::info!("🌐 REST listening on http://{}", listener.local_addr()?);
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.cancelled().await;
