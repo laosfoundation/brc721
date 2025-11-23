@@ -41,7 +41,6 @@ impl App {
     }
 
     fn spawn_rest_server(&self) -> JoinHandle<()> {
-        log::info!("🌐 REST service on http://{}", self.config.api_listen);
         let addr = self.config.api_listen;
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let token = self.shutdown.clone();
@@ -66,7 +65,6 @@ impl App {
             .with_confirmations(self.config.confirmations)
             .with_capacity(self.config.batch_size)
             .with_start_from(start_block);
-
         let parser = parser::Brc721Parser::new();
         let token = self.shutdown.clone();
 

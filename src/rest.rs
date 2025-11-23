@@ -48,6 +48,8 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     storage: S,
     shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
+    log::info!("🌐 REST service on http://{}", addr.to_string());
+
     let state = AppState {
         storage,
         started_at: std::time::SystemTime::now(),
