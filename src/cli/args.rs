@@ -108,6 +108,6 @@ pub fn parse() -> Cli {
     let dotenv_path = env::var("DOTENV_PATH").unwrap_or(".env".into());
     dotenvy::from_filename(&dotenv_path).ok();
 
-    println!("Loaded env from {}", dotenv_path);
+    log::info!("Loaded env from {}", dotenv_path);
     Cli::parse()
 }

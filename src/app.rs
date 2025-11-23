@@ -46,8 +46,6 @@ impl App {
             .await
     }
 
-    // --- Helper Methods ---
-
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
         let storage = storage::SqliteStorage::new(self.db_path.clone());
@@ -137,16 +135,16 @@ fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
 
 // --- Entry Point ---
 pub async fn run() -> Result<()> {
+    crate::tracing::init(None);
     log::info!("🚀 Starting brc721");
 
     let cli = crate::cli::parse();
     let ctx = context::Context::from_cli(&cli);
+    crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
 
     log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
     log::info!("🌐 Network: {}", ctx.network);
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
-
-    crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
 
     // Handle one-shot commands
     if let Some(cmd) = &cli.cmd {
