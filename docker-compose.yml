@@ -1,38 +1,47 @@
 services:
-  # bitcoin-mainnet:
-  #   image: bitcoin/bitcoin:latest
-  #   container_name: bitcoind-mainnet
-  #   command: ["bitcoind", "-server=1", "-txindex=1", "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=dev"]
-  #   ports:
-  #     - "127.0.0.1:8332:8332"
-  #     - "8333:8333"
-  #   volumes:
-  #     - bitcoind-mainnet-data:/home/bitcoin/.bitcoin
-  #   restart: unless-stopped
-
-  bitcoind-testnet:
+  bitcoin-mainnet:
     image: bitcoin/bitcoin:latest
-    container_name: bitcoind-testnet
     command:
       [
         "bitcoind",
-        "-regtest=1",
         "-server=1",
         "-txindex=1",
         "-rpcbind=0.0.0.0",
         "-rpcallowip=0.0.0.0/0",
-        "-rpcuser=dev",
-        "-rpcpassword=dev",
-        "-fallbackfee=0.0002",
+        "-rpcuser=username",
+        "-rpcpassword=password",
       ]
-    ports:
-      - "127.0.0.1:18443:18443"
     volumes:
-      - bitcoind-testnet-data:/home/bitcoin/.bitcoin
+      - bitcoind-mainnet-data:/home/bitcoin/.bitcoin
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bitcoin-cli",
+          "-rpcuser=username",
+          "-rpcpassword=password",
+          "-rpcconnect=127.0.0.1",
+          "-rpcport=8332",
+          "getblockchaininfo",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
+  app:
+    build: .
+    environment:
+      - RUST_LOG=info
+      - BITCOIN_RPC_URL=http://bitcoind-mainnet:8332
+      - BITCOIN_RPC_USER=username
+      - BITCOIN_RPC_PASS=password
+    depends_on:
+      bitcoin-mainnet:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8083:8083"
+
 volumes:
-  # bitcoind-mainnet-data:
-  #   driver: local
-  bitcoind-testnet-data:
-    driver: local
+  bitcoind-mainnet-data:
