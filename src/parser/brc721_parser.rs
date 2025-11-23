@@ -185,9 +185,6 @@ mod tests {
         fn commit(self) -> anyhow::Result<()> {
             Ok(())
         }
-        fn rollback(self) -> anyhow::Result<()> {
-            Ok(())
-        }
     }
 
     impl Storage for DummyStorage {

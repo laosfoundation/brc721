@@ -24,11 +24,6 @@ impl StorageTx for SqliteTx {
         self.conn.execute("COMMIT", [])?;
         Ok(())
     }
-
-    fn rollback(self) -> Result<()> {
-        self.conn.execute("ROLLBACK", [])?;
-        Ok(())
-    }
 }
 
 fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
@@ -388,19 +383,5 @@ mod tests {
         let last = repo.load_last().unwrap().unwrap();
         assert_eq!(last.height, 200);
         assert_eq!(last.hash, "hash200");
-    }
-
-    #[test]
-    fn sqlite_transaction_rollback_discards_data() {
-        let path = unique_temp_file("brc721_tx_rollback", "db");
-        let repo = SqliteStorage::new(&path);
-        repo.init().unwrap();
-
-        let tx = repo.begin_tx().unwrap();
-        tx.save_last(300, "hash300").unwrap();
-        tx.rollback().unwrap();
-
-        let last = repo.load_last().unwrap();
-        assert_eq!(last, None);
     }
 }

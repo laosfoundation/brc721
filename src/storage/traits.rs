@@ -28,15 +28,11 @@ pub trait StorageWrite {
 }
 
 pub trait StorageTx: StorageRead + StorageWrite {
-    #[allow(dead_code)]
     fn commit(self) -> Result<()>;
-    #[allow(dead_code)]
-    fn rollback(self) -> Result<()>;
 }
 
 pub trait Storage: StorageRead {
     type Tx: StorageTx;
 
-    #[allow(dead_code)]
     fn begin_tx(&self) -> Result<Self::Tx>;
 }

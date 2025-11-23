@@ -132,9 +132,6 @@ mod tests {
         fn commit(self) -> Result<()> {
             Ok(())
         }
-        fn rollback(self) -> Result<()> {
-            Ok(())
-        }
     }
 
     impl Storage for DummyStorage {
