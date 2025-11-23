@@ -1,5 +1,5 @@
 use crate::{
-    cli, context, core, parser, rest,
+    context, core, parser, rest,
     scanner::{self, BitcoinRpc},
     storage::{self, Storage},
 };
@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-/// The main application state.
-/// decoupled from CLI parsing to allow for easier testing.
 pub struct App {
     config: context::Context,
     shutdown: CancellationToken,
@@ -18,35 +16,14 @@ pub struct App {
 }
 
 impl App {
-    /// Factory method to build the App from CLI arguments.
-    /// Handles the "dirty" work of side-effects like logging init and filesystem creation.
-    pub fn from_cli() -> Result<(App, Client, cli::Cli)> {
-        let cli = crate::cli::parse();
-        let ctx = context::Context::from_cli(&cli);
-
-        // Side-effect: Initialize Logging
-        crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
-        log_startup_info(&ctx);
-
-        setup_storage(&ctx.data_dir, ctx.reset)?;
-
-        let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
-            .context("failed to connect to Bitcoin RPC")?;
-
-        Ok((App::new(ctx), client, cli))
-    }
-}
-
-impl App {
-    /// Create a new App instance.
-    /// Dependencies are injected here, making it easy to swap Storage for mocks.
-    fn new(config: context::Context) -> Self {
+    pub fn new(config: context::Context) -> Result<Self> {
         let db_path = config.data_dir.join("brc721.sqlite");
-        Self {
+        setup_storage(&config.data_dir, config.reset)?;
+        Ok(Self {
             config,
             shutdown: CancellationToken::new(),
             db_path,
-        }
+        })
     }
 
     /// Main entry point for the Daemon.
@@ -137,19 +114,6 @@ impl App {
 }
 
 // --- Standalone Helpers ---
-
-fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
-    let last_processed = storage.load_last().context("loading last block")?;
-    Ok(last_processed.map(|b| b.height + 1).unwrap_or(default))
-}
-
-fn log_startup_info(ctx: &context::Context) {
-    log::info!("🚀 Starting brc721");
-    log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
-    log::info!("🌐 Network: {}", ctx.network);
-    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
-}
-
 fn setup_storage(data_dir: &Path, reset: bool) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
@@ -166,17 +130,33 @@ fn setup_storage(data_dir: &Path, reset: bool) -> Result<()> {
     Ok(())
 }
 
-// --- Entry Point ---
+fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
+    let last_processed = storage.load_last().context("loading last block")?;
+    Ok(last_processed.map(|b| b.height + 1).unwrap_or(default))
+}
 
+// --- Entry Point ---
 pub async fn run() -> Result<()> {
-    let (mut app, client, cli) = App::from_cli()?;
+    log::info!("🚀 Starting brc721");
+
+    let cli = crate::cli::parse();
+    let ctx = context::Context::from_cli(&cli);
+
+    log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
+    log::info!("🌐 Network: {}", ctx.network);
+    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
+
+    crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
 
     // Handle one-shot commands
     if let Some(cmd) = &cli.cmd {
-        return cmd.run(&app.config);
+        return cmd.run(&ctx);
     }
 
-    app.run_daemon(client).await
+    let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
+        .context("failed to connect to Bitcoin RPC")?;
+
+    App::new(ctx)?.run_daemon(client).await
 }
 
 #[cfg(test)]
@@ -285,7 +265,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
         let rpc = DummyRpc;
-        (App::new(config), rpc, temp_dir)
+        (App::new(config).unwrap(), rpc, temp_dir)
     }
 
     #[test]
