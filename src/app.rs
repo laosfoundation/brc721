@@ -18,7 +18,6 @@ pub struct App {
 impl App {
     pub fn new(config: context::Context) -> Result<Self> {
         let db_path = config.data_dir.join("brc721.sqlite");
-        setup_storage(&config.data_dir, config.reset)?;
         Ok(Self {
             config,
             shutdown: CancellationToken::new(),
@@ -111,23 +110,6 @@ impl App {
         log::info!("✅ Shutdown complete");
         Ok(())
     }
-}
-
-// --- Standalone Helpers ---
-fn setup_storage(data_dir: &Path, reset: bool) -> Result<()> {
-    std::fs::create_dir_all(data_dir)?;
-    let db_path = data_dir
-        .join("brc721.sqlite")
-        .to_string_lossy()
-        .into_owned();
-
-    let sqlite = storage::SqliteStorage::new(&db_path);
-    if reset {
-        sqlite.reset_all().context("resetting storage")?;
-    }
-    sqlite.init().context("initializing storage")?;
-
-    Ok(())
 }
 
 fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
