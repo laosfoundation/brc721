@@ -14,8 +14,8 @@ use tokio_util::sync::CancellationToken;
 pub struct App<C: BitcoinRpc = Client> {
     config: context::Context,
     shutdown: CancellationToken,
-    client: Option<C>,
     db_path: PathBuf,
+    client: Option<C>,
 }
 
 impl App {
@@ -29,9 +29,8 @@ impl App {
         crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
         log_startup_info(&ctx);
 
-        init_storage(&ctx.data_dir, ctx.reset)?;
+        setup_storage(&ctx.data_dir, ctx.reset)?;
 
-        // Prepare Scanner Dependencies
         let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
             .context("failed to connect to Bitcoin RPC")?;
 
@@ -80,7 +79,10 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
     }
 
     fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
-        let client = self.client.take().context("Client already consumed")?;
+        let client = self
+            .client
+            .take()
+            .context("Client already consumed")?;
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let start_block = determine_start_block(&storage, self.config.start)?;
         let scanner = scanner::Scanner::new(client)
@@ -152,7 +154,7 @@ fn log_startup_info(ctx: &context::Context) {
     log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 }
 
-fn init_storage(data_dir: &Path, reset: bool) -> Result<()> {
+fn setup_storage(data_dir: &Path, reset: bool) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -189,6 +191,7 @@ mod tests {
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
     use std::sync::Mutex;
+    use tempfile::TempDir;
 
     struct DummyStorage {
         last: Mutex<Option<Block>>,
@@ -271,7 +274,8 @@ mod tests {
         }
     }
 
-    fn make_app_with_storage(_storage: DummyStorage) -> App<DummyRpc> {
+    fn make_app_with_storage(_storage: DummyStorage) -> (App<DummyRpc>, TempDir) {
+        let temp_dir = tempfile::tempdir().unwrap();
         let config = context::Context {
             rpc_url: url::Url::parse("http://localhost:8332").unwrap(),
             auth: bitcoincore_rpc::Auth::None,
@@ -279,13 +283,13 @@ mod tests {
             start: 0,
             confirmations: 1,
             batch_size: 1,
-            data_dir: std::path::PathBuf::from("."),
+            data_dir: temp_dir.path().to_path_buf(),
             reset: false,
             log_file: None,
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
         let rpc = DummyRpc;
-        App::new(config, rpc)
+        (App::new(config, rpc), temp_dir)
     }
 
     #[test]
@@ -331,7 +335,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_core_indexer_creates_thread() {
         let storage = DummyStorage::new();
-        let mut app = make_app_with_storage(storage);
+        let (mut app, _temp) = make_app_with_storage(storage);
 
         let res = app.spawn_core_indexer();
         assert!(res.is_ok());
@@ -340,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_core_indexer_fails_on_second_call() {
         let storage = DummyStorage::new();
-        let mut app = make_app_with_storage(storage);
+        let (mut app, _temp) = make_app_with_storage(storage);
 
         let _ = app.spawn_core_indexer();
         let res = app.spawn_core_indexer();
@@ -351,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn wait_for_shutdown_exits_when_task_finishes() {
         let storage = DummyStorage::new();
-        let app = make_app_with_storage(storage);
+        let (app, _temp) = make_app_with_storage(storage);
         let token = app.shutdown.clone();
 
         // Create dummy tasks
@@ -380,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_rest_server_starts_and_serves_health_check() {
         let storage = DummyStorage::new();
-        let mut app = make_app_with_storage(storage);
+        let (mut app, _temp) = make_app_with_storage(storage);
         // Use a random-ish port to avoid conflicts
         let port = 34567;
         app.config.api_listen = format!("127.0.0.1:{}", port).parse().unwrap();
