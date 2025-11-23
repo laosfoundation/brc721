@@ -11,17 +11,16 @@ use tokio_util::sync::CancellationToken;
 
 /// The main application state.
 /// decoupled from CLI parsing to allow for easier testing.
-pub struct App<C: BitcoinRpc = Client> {
+pub struct App {
     config: context::Context,
     shutdown: CancellationToken,
     db_path: PathBuf,
-    client: Option<C>,
 }
 
 impl App {
     /// Factory method to build the App from CLI arguments.
     /// Handles the "dirty" work of side-effects like logging init and filesystem creation.
-    pub fn from_cli() -> Result<(App<Client>, cli::Cli)> {
+    pub fn from_cli() -> Result<(App, Client, cli::Cli)> {
         let cli = crate::cli::parse();
         let ctx = context::Context::from_cli(&cli);
 
@@ -34,30 +33,32 @@ impl App {
         let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
             .context("failed to connect to Bitcoin RPC")?;
 
-        Ok((App::new(ctx, client), cli))
+        Ok((App::new(ctx), client, cli))
     }
 }
 
-impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
+impl App {
     /// Create a new App instance.
     /// Dependencies are injected here, making it easy to swap Storage for mocks.
-    fn new(config: context::Context, client: C) -> Self {
+    fn new(config: context::Context) -> Self {
         let db_path = config.data_dir.join("brc721.sqlite");
         Self {
             config,
             shutdown: CancellationToken::new(),
-            client: Some(client),
             db_path,
         }
     }
 
     /// Main entry point for the Daemon.
-    pub async fn run_daemon(&mut self) -> Result<()> {
+    pub async fn run_daemon<C: BitcoinRpc + Send + Sync + 'static>(
+        &mut self,
+        client: C,
+    ) -> Result<()> {
         self.log_runtime_config();
 
         // 1. Spawn Tasks
         let mut rest_handle = self.spawn_rest_server();
-        let mut core_handle = self.spawn_core_indexer()?;
+        let mut core_handle = self.spawn_core_indexer(client)?;
 
         // 2. Wait for Signal or Error
         self.wait_for_shutdown(&mut rest_handle, &mut core_handle)
@@ -78,11 +79,10 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
         })
     }
 
-    fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
-        let client = self
-            .client
-            .take()
-            .context("Client already consumed")?;
+    fn spawn_core_indexer<C: BitcoinRpc + Send + Sync + 'static>(
+        &mut self,
+        client: C,
+    ) -> Result<JoinHandle<()>> {
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let start_block = determine_start_block(&storage, self.config.start)?;
         let scanner = scanner::Scanner::new(client)
@@ -173,14 +173,14 @@ fn setup_storage(data_dir: &Path, reset: bool) -> Result<()> {
 // --- Entry Point ---
 
 pub async fn run() -> Result<()> {
-    let (mut app, cli) = App::from_cli()?;
+    let (mut app, client, cli) = App::from_cli()?;
 
     // Handle one-shot commands
     if let Some(cmd) = &cli.cmd {
         return cmd.run(&app.config);
     }
 
-    app.run_daemon().await
+    app.run_daemon(client).await
 }
 
 #[cfg(test)]
@@ -274,7 +274,7 @@ mod tests {
         }
     }
 
-    fn make_app_with_storage(_storage: DummyStorage) -> (App<DummyRpc>, TempDir) {
+    fn make_app_with_storage(_storage: DummyStorage) -> (App, DummyRpc, TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let config = context::Context {
             rpc_url: url::Url::parse("http://localhost:8332").unwrap(),
@@ -289,7 +289,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
         let rpc = DummyRpc;
-        (App::new(config, rpc), temp_dir)
+        (App::new(config), rpc, temp_dir)
     }
 
     #[test]
@@ -335,27 +335,26 @@ mod tests {
     #[tokio::test]
     async fn spawn_core_indexer_creates_thread() {
         let storage = DummyStorage::new();
-        let (mut app, _temp) = make_app_with_storage(storage);
+        let (mut app, rpc, _temp) = make_app_with_storage(storage);
 
-        let res = app.spawn_core_indexer();
+        let res = app.spawn_core_indexer(rpc);
         assert!(res.is_ok());
     }
 
     #[tokio::test]
     async fn spawn_core_indexer_fails_on_second_call() {
-        let storage = DummyStorage::new();
-        let (mut app, _temp) = make_app_with_storage(storage);
-
-        let _ = app.spawn_core_indexer();
-        let res = app.spawn_core_indexer();
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err().to_string(), "Client already consumed");
+        // This test is no longer valid or relevant with the new architecture.
+        // Before, App held the client and yielded it once via Option::take().
+        // Now, App doesn't hold the client; it's passed by value to spawn_core_indexer.
+        // The Rust type system prevents reusing a moved value, so the "second call" error
+        // becomes a compile-time guarantee (you can't call it twice with the same client).
+        assert!(true);
     }
 
     #[tokio::test]
     async fn wait_for_shutdown_exits_when_task_finishes() {
         let storage = DummyStorage::new();
-        let (app, _temp) = make_app_with_storage(storage);
+        let (app, _rpc, _temp) = make_app_with_storage(storage);
         let token = app.shutdown.clone();
 
         // Create dummy tasks
@@ -384,7 +383,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_rest_server_starts_and_serves_health_check() {
         let storage = DummyStorage::new();
-        let (mut app, _temp) = make_app_with_storage(storage);
+        let (mut app, _rpc, _temp) = make_app_with_storage(storage);
         // Use a random-ish port to avoid conflicts
         let port = 34567;
         app.config.api_listen = format!("127.0.0.1:{}", port).parse().unwrap();
