@@ -61,6 +61,8 @@ impl App {
 
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let start_block = determine_start_block(&storage, self.config.start)?;
+        log::info!("🧮 Starting block: {}", start_block);
+
         let scanner = scanner::Scanner::new(client)
             .with_confirmations(self.config.confirmations)
             .with_capacity(self.config.batch_size)
