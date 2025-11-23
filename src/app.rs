@@ -162,29 +162,30 @@ pub async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block, CollectionKey, StorageRead, StorageWrite};
+    use crate::storage::traits::{Block, CollectionKey, StorageRead, StorageTx, StorageWrite};
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
+    #[derive(Clone)]
     struct DummyStorage {
-        last: Mutex<Option<Block>>,
+        last: Arc<Mutex<Option<Block>>>,
     }
 
     impl DummyStorage {
         fn new() -> Self {
             Self {
-                last: Mutex::new(None),
+                last: Arc::new(Mutex::new(None)),
             }
         }
 
-        fn with_last(mut self, height: u64) -> Self {
-            self.last = Mutex::new(Some(Block {
+        fn with_last(self, height: u64) -> Self {
+            *self.last.lock().unwrap() = Some(Block {
                 height,
                 hash: "hash".to_string(),
-            }));
+            });
             self
         }
     }
@@ -218,11 +219,20 @@ mod tests {
         }
     }
 
+    impl StorageTx for DummyStorage {
+        fn commit(self) -> Result<()> {
+            Ok(())
+        }
+        fn rollback(self) -> Result<()> {
+            Ok(())
+        }
+    }
+
     impl storage::Storage for DummyStorage {
-        type Tx = ();
+        type Tx = DummyStorage;
 
         fn begin_tx(&self) -> Result<Self::Tx> {
-            Ok(())
+            Ok(self.clone())
         }
     }
 

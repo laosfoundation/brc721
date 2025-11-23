@@ -181,11 +181,20 @@ mod tests {
         }
     }
 
+    impl StorageTx for DummyStorage {
+        fn commit(self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn rollback(self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
     impl Storage for DummyStorage {
-        type Tx = ();
+        type Tx = DummyStorage;
 
         fn begin_tx(&self) -> anyhow::Result<Self::Tx> {
-            Ok(())
+            Ok(self.clone())
         }
     }
 
