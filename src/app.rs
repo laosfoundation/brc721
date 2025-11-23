@@ -54,7 +54,11 @@ impl App {
         &mut self,
         client: C,
     ) -> Result<()> {
-        self.log_runtime_config();
+        log::info!("🧮 Confirmations: {}", self.config.confirmations);
+        log::info!("🧮 Batch size: {}", self.config.batch_size);
+        if let Some(path) = self.config.log_file.as_deref() {
+            log::info!("📝 Log file: {}", path.to_string_lossy());
+        }
 
         // 1. Spawn Tasks
         let mut rest_handle = self.spawn_rest_server();
@@ -129,14 +133,6 @@ impl App {
 
         log::info!("✅ Shutdown complete");
         Ok(())
-    }
-
-    fn log_runtime_config(&self) {
-        log::info!("🧮 Confirmations: {}", self.config.confirmations);
-        log::info!("🧮 Batch size: {}", self.config.batch_size);
-        if let Some(path) = self.config.log_file.as_deref() {
-            log::info!("📝 Log file: {}", path.to_string_lossy());
-        }
     }
 }
 
@@ -339,16 +335,6 @@ mod tests {
 
         let res = app.spawn_core_indexer(rpc);
         assert!(res.is_ok());
-    }
-
-    #[tokio::test]
-    async fn spawn_core_indexer_fails_on_second_call() {
-        // This test is no longer valid or relevant with the new architecture.
-        // Before, App held the client and yielded it once via Option::take().
-        // Now, App doesn't hold the client; it's passed by value to spawn_core_indexer.
-        // The Rust type system prevents reusing a moved value, so the "second call" error
-        // becomes a compile-time guarantee (you can't call it twice with the same client).
-        assert!(true);
     }
 
     #[tokio::test]
