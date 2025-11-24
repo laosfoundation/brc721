@@ -1,108 +1,78 @@
 use crate::{
-    cli, context, core, parser, rest,
+    context, core, parser, rest,
     scanner::{self, BitcoinRpc},
-    storage,
+    storage::{self, Storage},
 };
 use anyhow::{Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-/// The main application state.
-/// decoupled from CLI parsing to allow for easier testing.
-pub struct App<C: BitcoinRpc = Client> {
+pub struct App {
     config: context::Context,
-    storage: Arc<dyn storage::Storage + Send + Sync>,
     shutdown: CancellationToken,
-    scanner: Option<scanner::Scanner<C>>,
+    db_path: PathBuf,
 }
 
 impl App {
-    /// Factory method to build the App from CLI arguments.
-    /// Handles the "dirty" work of side-effects like logging init and filesystem creation.
-    pub fn from_cli() -> Result<(App<Client>, cli::Cli)> {
-        let cli = crate::cli::parse();
-
-        // Configure logging file after CLI is parsed
-        crate::tracing::set_log_file(cli.log_file.as_deref().map(Path::new));
-
-        let ctx = context::Context::from_cli(&cli);
-        log_startup_info(&ctx);
-
-        // Side-effect: Initialize Storage
-        let storage = init_storage(&ctx.data_dir, ctx.reset)?;
-
-        // Prepare Scanner Dependencies
-        let start_block = determine_start_block(storage.as_ref(), &ctx)?;
-        let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
-            .context("failed to connect to Bitcoin RPC")?;
-
-        let scanner = scanner::Scanner::new(client)
-            .with_confirmations(ctx.confirmations)
-            .with_capacity(ctx.batch_size)
-            .with_start_from(start_block);
-
-        Ok((App::new(ctx, storage, scanner), cli))
-    }
-}
-
-impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
-    /// Create a new App instance.
-    /// Dependencies are injected here, making it easy to swap Storage for mocks.
-    fn new(
-        config: context::Context,
-        storage: Arc<dyn storage::Storage + Send + Sync>,
-        scanner: scanner::Scanner<C>,
-    ) -> Self {
-        Self {
+    pub fn new(config: context::Context) -> Result<Self> {
+        let db_path = config.data_dir.join("brc721.sqlite");
+        setup_storage(&config.data_dir, config.reset)?;
+        Ok(Self {
             config,
-            storage,
             shutdown: CancellationToken::new(),
-            scanner: Some(scanner),
-        }
+            db_path,
+        })
     }
 
     /// Main entry point for the Daemon.
-    pub async fn run_daemon(&mut self) -> Result<()> {
-        self.log_runtime_config();
-
+    pub async fn run_daemon<C: BitcoinRpc + Send + Sync + 'static>(
+        &mut self,
+        client: C,
+    ) -> Result<()> {
         // 1. Spawn Tasks
         let mut rest_handle = self.spawn_rest_server();
-        let mut core_handle = self.spawn_core_indexer()?;
+        let mut core_handle = self.spawn_core_indexer(client)?;
 
         // 2. Wait for Signal or Error
         self.wait_for_shutdown(&mut rest_handle, &mut core_handle)
             .await
     }
 
-    // --- Helper Methods ---
-
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
-        let store = self.storage.clone();
+        let storage = storage::SqliteStorage::new(self.db_path.clone());
         let token = self.shutdown.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = rest::serve(addr, store, token).await {
+            if let Err(e) = rest::serve(addr, storage, token).await {
                 log::error!("REST server failed: {:#}", e);
             }
         })
     }
 
-    fn spawn_core_indexer(&mut self) -> Result<JoinHandle<()>> {
-        // Take the scanner out of the Option
-        let scanner = self.scanner.take().context("Scanner already consumed")?;
-        let parser = parser::Brc721Parser::new(self.storage.clone());
+    fn spawn_core_indexer<C: BitcoinRpc + Send + Sync + 'static>(
+        &mut self,
+        client: C,
+    ) -> Result<JoinHandle<()>> {
+        log::info!("🧮 Confirmations: {}", self.config.confirmations);
+        log::info!("🧮 Batch size: {}", self.config.batch_size);
 
-        // Clone for thread
-        let storage = self.storage.clone();
+        let storage = storage::SqliteStorage::new(self.db_path.clone());
+        let start_block = determine_start_block(&storage, self.config.start)?;
+        log::info!("🧮 Starting block: {}", start_block);
+
+        let scanner = scanner::Scanner::new(client)
+            .with_confirmations(self.config.confirmations)
+            .with_capacity(self.config.batch_size)
+            .with_start_from(start_block);
+        let parser = parser::Brc721Parser::new();
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
         let handle = tokio::task::spawn_blocking(move || {
-            let mut core = core::Core::new(storage, scanner, parser);
+            let mut core = core::Core::new(scanner, storage, parser);
             if let Err(e) = core.run(token) {
                 log::error!("Core indexer failed: {:#}", e);
             }
@@ -137,34 +107,10 @@ impl<C: BitcoinRpc + Send + Sync + 'static> App<C> {
         log::info!("✅ Shutdown complete");
         Ok(())
     }
-
-    fn log_runtime_config(&self) {
-        log::info!("🧮 Confirmations: {}", self.config.confirmations);
-        log::info!("🧮 Batch size: {}", self.config.batch_size);
-        if let Some(path) = self.config.log_file.as_deref() {
-            log::info!("📝 Log file: {}", path.to_string_lossy());
-        }
-    }
 }
 
 // --- Standalone Helpers ---
-
-fn determine_start_block(
-    storage: &(dyn storage::Storage + Send + Sync),
-    config: &context::Context,
-) -> Result<u64> {
-    let last_processed = storage.load_last().context("loading last block")?;
-    Ok(last_processed.map(|b| b.height + 1).unwrap_or(config.start))
-}
-
-fn log_startup_info(ctx: &context::Context) {
-    log::info!("🚀 Starting brc721");
-    log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
-    log::info!("🌐 Network: {}", ctx.network);
-    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
-}
-
-fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage + Send + Sync>> {
+fn setup_storage(data_dir: &Path, reset: bool) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir
         .join("brc721.sqlite")
@@ -177,56 +123,84 @@ fn init_storage(data_dir: &Path, reset: bool) -> Result<Arc<dyn storage::Storage
     }
     sqlite.init().context("initializing storage")?;
 
-    Ok(Arc::new(sqlite))
+    Ok(())
+}
+
+fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
+    let last_processed = storage.load_last().context("loading last block")?;
+    Ok(last_processed.map(|b| b.height + 1).unwrap_or(default))
 }
 
 // --- Entry Point ---
-
 pub async fn run() -> Result<()> {
-    let (mut app, cli) = App::from_cli()?;
+    crate::tracing::init(None);
+    log::info!("🚀 Starting brc721");
+
+    let cli = crate::cli::parse();
+    let ctx = context::Context::from_cli(&cli);
+
+    if let Some(path) = ctx.log_file.as_deref() {
+        log::info!("📝 Log file: {}", path.to_string_lossy());
+        crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
+    }
+
+    log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
+    log::info!("🌐 Network: {}", ctx.network);
+    log::info!("📂 Data dir: {}", ctx.data_dir.to_string_lossy());
 
     // Handle one-shot commands
     if let Some(cmd) = &cli.cmd {
-        return cmd.run(&app.config);
+        return cmd.run(&ctx);
     }
 
-    app.run_daemon().await
+    let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
+        .context("failed to connect to Bitcoin RPC")?;
+
+    App::new(ctx)?.run_daemon(client).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block, CollectionKey};
+    use crate::storage::traits::{Block, CollectionKey, StorageRead, StorageTx, StorageWrite};
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
 
+    #[derive(Clone)]
     struct DummyStorage {
-        last: Mutex<Option<Block>>,
+        last: Arc<Mutex<Option<Block>>>,
     }
 
     impl DummyStorage {
         fn new() -> Self {
             Self {
-                last: Mutex::new(None),
+                last: Arc::new(Mutex::new(None)),
             }
         }
 
-        fn with_last(mut self, height: u64) -> Self {
-            self.last = Mutex::new(Some(Block {
+        fn with_last(self, height: u64) -> Self {
+            *self.last.lock().unwrap() = Some(Block {
                 height,
                 hash: "hash".to_string(),
-            }));
+            });
             self
         }
     }
 
-    impl storage::Storage for DummyStorage {
+    impl StorageRead for DummyStorage {
         fn load_last(&self) -> Result<Option<Block>> {
             Ok(self.last.lock().unwrap().clone())
         }
 
+        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl StorageWrite for DummyStorage {
         fn save_last(&self, height: u64, hash: &str) -> Result<()> {
             *self.last.lock().unwrap() = Some(Block {
                 height,
@@ -243,9 +217,19 @@ mod tests {
         ) -> Result<()> {
             Ok(())
         }
+    }
 
-        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
-            Ok(Vec::new())
+    impl StorageTx for DummyStorage {
+        fn commit(self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl storage::Storage for DummyStorage {
+        type Tx = DummyStorage;
+
+        fn begin_tx(&self) -> Result<Self::Tx> {
+            Ok(self.clone())
         }
     }
 
@@ -273,7 +257,8 @@ mod tests {
         }
     }
 
-    fn make_app_with_storage(storage: DummyStorage) -> App<DummyRpc> {
+    fn make_app_with_storage(_storage: DummyStorage) -> (App, DummyRpc, TempDir) {
+        let temp_dir = tempfile::tempdir().unwrap();
         let config = context::Context {
             rpc_url: url::Url::parse("http://localhost:8332").unwrap(),
             auth: bitcoincore_rpc::Auth::None,
@@ -281,15 +266,13 @@ mod tests {
             start: 0,
             confirmations: 1,
             batch_size: 1,
-            data_dir: std::path::PathBuf::from("."),
+            data_dir: temp_dir.path().to_path_buf(),
             reset: false,
             log_file: None,
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
-        let storage = Arc::new(storage);
         let rpc = DummyRpc;
-        let scanner = scanner::Scanner::new(rpc);
-        App::new(config, storage, scanner)
+        (App::new(config).unwrap(), rpc, temp_dir)
     }
 
     #[test]
@@ -308,7 +291,7 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(&storage, &config).unwrap();
+        let start = determine_start_block(&storage, config.start).unwrap();
         assert_eq!(start, 123);
     }
 
@@ -328,34 +311,23 @@ mod tests {
             api_listen: "127.0.0.1:3000".parse().unwrap(),
         };
 
-        let start = determine_start_block(&storage, &config).unwrap();
+        let start = determine_start_block(&storage, config.start).unwrap();
         assert_eq!(start, 101);
     }
 
     #[tokio::test]
     async fn spawn_core_indexer_creates_thread() {
         let storage = DummyStorage::new();
-        let mut app = make_app_with_storage(storage);
+        let (mut app, rpc, _temp) = make_app_with_storage(storage);
 
-        let res = app.spawn_core_indexer();
+        let res = app.spawn_core_indexer(rpc);
         assert!(res.is_ok());
-    }
-
-    #[tokio::test]
-    async fn spawn_core_indexer_fails_on_second_call() {
-        let storage = DummyStorage::new();
-        let mut app = make_app_with_storage(storage);
-
-        let _ = app.spawn_core_indexer();
-        let res = app.spawn_core_indexer();
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err().to_string(), "Scanner already consumed");
     }
 
     #[tokio::test]
     async fn wait_for_shutdown_exits_when_task_finishes() {
         let storage = DummyStorage::new();
-        let app = make_app_with_storage(storage);
+        let (app, _rpc, _temp) = make_app_with_storage(storage);
         let token = app.shutdown.clone();
 
         // Create dummy tasks
@@ -384,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_rest_server_starts_and_serves_health_check() {
         let storage = DummyStorage::new();
-        let mut app = make_app_with_storage(storage);
+        let (mut app, _rpc, _temp) = make_app_with_storage(storage);
         // Use a random-ish port to avoid conflicts
         let port = 34567;
         app.config.api_listen = format!("127.0.0.1:{}", port).parse().unwrap();

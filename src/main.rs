@@ -15,10 +15,10 @@ use anyhow::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    crate::tracing::init();
+    crate::tracing::init(None);
 
     if let Err(e) = app::run().await {
-        log::error!("Fatal error: {e}");
+        log::error!("Fatal error: {:#}", e);
         std::process::exit(1);
     }
     Ok(())

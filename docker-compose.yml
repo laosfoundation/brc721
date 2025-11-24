@@ -34,7 +34,7 @@ services:
     build: .
     environment:
       - RUST_LOG=info
-      - BITCOIN_RPC_URL=http://bitcoind-mainnet:8332
+      - BITCOIN_RPC_URL=http://bitcoin-mainnet:8332
       - BITCOIN_RPC_USER=username
       - BITCOIN_RPC_PASS=password
     depends_on:
