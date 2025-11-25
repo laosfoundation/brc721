@@ -5,5 +5,51 @@ tag: "main" # Use the latest image tag for development
 bitcoind:
   service:
     type: LoadBalancer
+    rpcPort: 18443
+    p2pPort: 18444
+  rpc:
+    user: dev
+    password: dev
+    allowIPs:
+      - 0.0.0.0/0
   storage:
     size: 100Gi
+brc721:
+  image:
+    repository: ghcr.io/asini/brc721
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  rustLog: debug
+  api:
+    listen: 0.0.0.0:8083
+  service:
+    type: ClusterIP
+    port: 8083
+  dataDir: /data/brc721
+  confirmations: 1
+  batchSize: 1
+  startBlock: 923580
+  resetOnStart: false
+  rpc:
+    scheme: http
+    host: bitcoind
+    port: 18443
+    user: dev
+    password: dev
+    usernameKey: rpcuser
+    passwordKey: rpcpassword
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: local-path
+  readinessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  livenessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 10

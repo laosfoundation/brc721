@@ -12,6 +12,9 @@ environments:
   digitalocean:
     values:
     - ./values-digitalocean.yaml
+  prod-digitalocean:
+    values:
+    - ./values-digitalocean.yaml
 
 ---
 helmDefaults:
@@ -21,5 +24,12 @@ releases:
   - name: bitcoind
     namespace: {{ .Environment.Values.namespace }}
     chart: ./charts/bitcoind
+    values:
+      - {{ toYaml .Values | nindent 8 }}
+  - name: brc721
+    namespace: {{ .Environment.Values.namespace }}
+    chart: ./charts/brc721
+    needs:
+      - {{ .Environment.Values.namespace }}/bitcoind
     values:
       - {{ toYaml .Values | nindent 8 }}

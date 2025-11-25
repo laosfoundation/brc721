@@ -2,40 +2,88 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: bitcoind
+  labels:
+    app: bitcoind
 spec:
+  serviceName: bitcoind-headless
+  replicas: 1
   selector:
     matchLabels:
       app: bitcoind
-  serviceName: "bitcoind-headless"
   template:
     metadata:
       labels:
         app: bitcoind
+{{- with .Values.bitcoind.podLabels }}
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.bitcoind.podAnnotations }}
+      annotations:
+{{ toYaml . | indent 8 }}
+{{- end }}
     spec:
       securityContext:
         fsGroup: 1000
       containers:
-      - name: bitcoind
-        image: lncm/bitcoind:v28.0
-        args: [
-          "--datadir=/data",
-          "--txindex",
-          "-chain={{ .Values.chain }}",
-          "-rpcport=18443",
-          "-rpcallowip=0.0.0.0/0",
-          "-rpcbind=0.0.0.0",
-          "-rpcuser=dev", 
-          "-rpcpassword=dev"     
-        ]
-        volumeMounts:
-        - mountPath: /data
-          name: data
+        - name: bitcoind
+          image: {{ printf "%s:%s" .Values.bitcoind.image.repository .Values.bitcoind.image.tag }}
+          imagePullPolicy: {{ .Values.bitcoind.image.pullPolicy }}
+          ports:
+            - name: rpc
+              containerPort: {{ .Values.bitcoind.service.rpcPort }}
+              protocol: TCP
+            - name: p2p
+              containerPort: {{ .Values.bitcoind.service.p2pPort }}
+              protocol: TCP
+          args:
+            - "-datadir={{ .Values.bitcoind.storage.dataDir }}"
+            - "-server=1"
+            - "-txindex=1"
+            - "-listen=1"
+            - "-chain={{ .Values.chain }}"
+            - "-rpcbind={{ .Values.bitcoind.rpc.bind }}"
+            - "-rpcport={{ .Values.bitcoind.service.rpcPort }}"
+            - "-port={{ .Values.bitcoind.service.p2pPort }}"
+{{- range $ip := .Values.bitcoind.rpc.allowIPs }}
+            - "-rpcallowip={{ $ip }}"
+{{- end }}
+{{- if .Values.bitcoind.rpc.rpcauth }}
+            - "-rpcauth={{ .Values.bitcoind.rpc.rpcauth }}"
+{{- else }}
+            - "-rpcuser={{ .Values.bitcoind.rpc.user }}"
+            - "-rpcpassword={{ .Values.bitcoind.rpc.password }}"
+{{- end }}
+{{- range $arg := .Values.bitcoind.extraArgs }}
+            - "{{ $arg }}"
+{{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.bitcoind.storage.dataDir }}
+{{- with .Values.bitcoind.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- with .Values.bitcoind.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.bitcoind.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.bitcoind.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+{{- end }}
   volumeClaimTemplates:
-  - metadata:
-      name: data
-    spec:
-      storageClassName: {{ .Values.storageClassName }}
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: {{ .Values.bitcoind.storage.size }}
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+{{ toYaml .Values.bitcoind.storage.accessModes | indent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.bitcoind.storage.size }}
+{{- if .Values.storageClassName }}
+        storageClassName: {{ .Values.storageClassName }}
+{{- end }}

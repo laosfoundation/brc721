@@ -1,0 +1,37 @@
+{{- $cfg := .Values.brc721 -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: {{ .Release.Name }}
+{{- with $cfg.service.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+  type: {{ $cfg.service.type }}
+  ports:
+    - name: api
+      port: {{ $cfg.service.port }}
+      targetPort: api
+      protocol: TCP
+  selector:
+    app: {{ .Release.Name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-headless
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: api
+      port: {{ $cfg.service.port }}
+      targetPort: api
+      protocol: TCP
+  selector:
+    app: {{ .Release.Name }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: brc721
+description: Deploy the brc721 indexer and HTTP API alongside Bitcoin Core
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

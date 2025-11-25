@@ -1,0 +1,169 @@
+{{- $cfg := .Values.brc721 -}}
+{{- $createSA := $cfg.serviceAccount.create | default true }}
+{{- $saName := ternary (default (printf "%s-sa" .Release.Name) $cfg.serviceAccount.name) (default "default" $cfg.serviceAccount.name) $createSA }}
+{{- $globalTag := default .Chart.AppVersion .Values.tag }}
+{{- $imageTag := default $globalTag $cfg.image.tag }}
+{{- $storageClass := default $.Values.storageClassName $cfg.persistence.storageClassName }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  serviceName: {{ .Release.Name }}-headless
+  replicas: {{ $cfg.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+{{- with $cfg.podLabels }}
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with $cfg.podAnnotations }}
+      annotations:
+{{ toYaml . | indent 8 }}
+{{- end }}
+    spec:
+      serviceAccountName: {{ $saName }}
+{{- with $cfg.podSecurityContext }}
+      securityContext:
+{{ toYaml . | indent 8 }}
+{{- end }}
+      containers:
+        - name: brc721
+          image: {{ printf "%s:%s" $cfg.image.repository $imageTag }}
+          imagePullPolicy: {{ $cfg.image.pullPolicy }}
+          ports:
+            - name: api
+              containerPort: {{ $cfg.service.port }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: {{ $cfg.rustLog | default "info" | quote }}
+            - name: BITCOIN_RPC_URL
+              value: {{ printf "%s://%s:%d" $cfg.rpc.scheme $cfg.rpc.host (int $cfg.rpc.port) | quote }}
+{{- if $cfg.rpc.existingSecret }}
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.rpc.existingSecret }}
+                  key: {{ $cfg.rpc.usernameKey }}
+            - name: BITCOIN_RPC_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.rpc.existingSecret }}
+                  key: {{ $cfg.rpc.passwordKey }}
+{{- else }}
+            - name: BITCOIN_RPC_USER
+              value: {{ $cfg.rpc.user | quote }}
+            - name: BITCOIN_RPC_PASS
+              value: {{ $cfg.rpc.password | quote }}
+{{- end }}
+            - name: BRC721_API_LISTEN
+              value: {{ $cfg.api.listen | quote }}
+{{- if $cfg.apiToken.existingSecret }}
+            - name: BRC721_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.apiToken.existingSecret }}
+                  key: {{ $cfg.apiToken.key }}
+{{- else if $cfg.apiToken.value }}
+            - name: BRC721_API_TOKEN
+              value: {{ $cfg.apiToken.value | quote }}
+{{- end }}
+{{- with $cfg.extraEnv }}
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- with $cfg.extraEnvFrom }}
+          envFrom:
+{{ toYaml . | indent 12 }}
+{{- end }}
+          args:
+            - "--data-dir"
+            - "{{ $cfg.dataDir }}"
+            - "--confirmations"
+            - "{{ $cfg.confirmations }}"
+            - "--batch-size"
+            - "{{ $cfg.batchSize }}"
+            - "--start"
+            - "{{ $cfg.startBlock }}"
+{{- if $cfg.resetOnStart }}
+            - "--reset"
+{{- end }}
+{{- range $arg := $cfg.extraArgs }}
+            - "{{ $arg }}"
+{{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $cfg.dataDir }}
+{{- with $cfg.extraVolumeMounts }}
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- with $cfg.securityContext }}
+          securityContext:
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- if $cfg.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ $cfg.readinessProbe.path }}
+              port: api
+            initialDelaySeconds: {{ $cfg.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ $cfg.readinessProbe.periodSeconds }}
+{{- end }}
+{{- if $cfg.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ $cfg.livenessProbe.path }}
+              port: api
+            initialDelaySeconds: {{ $cfg.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ $cfg.livenessProbe.periodSeconds }}
+{{- end }}
+{{- with $cfg.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- with $cfg.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with $cfg.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with $cfg.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- if or (not $cfg.persistence.enabled) $cfg.extraVolumes }}
+      volumes:
+{{- if not $cfg.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+{{- end }}
+{{- with $cfg.extraVolumes }}
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- end }}
+{{- if $cfg.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+{{- with $cfg.persistence.annotations }}
+        annotations:
+{{ toYaml . | indent 10 }}
+{{- end }}
+      spec:
+        accessModes:
+{{ toYaml $cfg.persistence.accessModes | indent 10 }}
+        resources:
+          requests:
+            storage: {{ $cfg.persistence.size }}
+{{- if $storageClass }}
+        storageClassName: {{ $storageClass }}
+{{- end }}
+{{- end }}
