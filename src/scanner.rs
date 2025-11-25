@@ -43,16 +43,19 @@ impl<C: BitcoinRpc> Scanner<C> {
     }
 
     pub fn with_confirmations(mut self, confirmations: u64) -> Self {
+        log::info!("🧮 Confirmations: {}", confirmations);
         self.confirmations = confirmations;
         self
     }
 
     pub fn with_capacity(mut self, capacity: usize) -> Self {
+        log::info!("🧮 Batch size: {}", capacity);
         self.batch_size = capacity.max(1);
         self
     }
 
     pub fn with_start_from(mut self, height: u64) -> Self {
+        log::info!("🧮 Starting block: {}", height);
         self.current_height = height;
         self
     }
