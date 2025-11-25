@@ -1,0 +1,9 @@
+namespace: laos-bitcoin-dev
+storageClassName: do-block-storage
+chain: regtest
+tag: "main"
+bitcoind:
+  service:
+    type: LoadBalancer
+  storage:
+    size: 100Gi
