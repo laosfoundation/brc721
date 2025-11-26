@@ -1,4 +1,4 @@
-FROM rust:latest as builder
+FROM rust:latest AS builder
 
 WORKDIR /app
 
@@ -19,4 +19,5 @@ USER appuser
 
 ENV RUST_LOG=info
 
-CMD ["brc721"]
+ENTRYPOINT ["brc721"]
+CMD []
