@@ -42,17 +42,31 @@ fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
     .optional()
 }
 
+fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(CollectionKey, String, bool)> {
+    let id: String = row.get(0)?;
+    let evm_collection_address: String = row.get(1)?;
+    let rebaseable_int: i64 = row.get(2)?;
+    let rebaseable = rebaseable_int != 0;
+    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
+}
+
+fn db_load_collection(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<(CollectionKey, String, bool)>> {
+    conn.query_row(
+        "SELECT id, evm_collection_address, rebaseable FROM collections WHERE id = ?1",
+        params![id],
+        map_collection_row,
+    )
+    .optional()
+}
+
 fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<(CollectionKey, String, bool)>> {
     let mut stmt =
         conn.prepare("SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id")?;
     let mapped = stmt
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let evm_collection_address: String = row.get(1)?;
-            let rebaseable_int: i64 = row.get(2)?;
-            let rebaseable = rebaseable_int != 0;
-            Ok((CollectionKey { id }, evm_collection_address, rebaseable))
-        })?
+        .query_map([], map_collection_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(mapped)
 }
@@ -85,6 +99,11 @@ impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
         Ok(db_load_last(&self.conn)?)
     }
+
+    fn load_collection(&self, id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+        Ok(db_load_collection(&self.conn, id)?)
+    }
+
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
         Ok(db_list_collections(&self.conn)?)
     }
@@ -195,6 +214,11 @@ impl StorageRead for SqliteStorage {
     fn load_last(&self) -> Result<Option<Block>> {
         let opt = self.with_conn(db_load_last)?;
         Ok(opt)
+    }
+
+    fn load_collection(&self, id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+        let row = self.with_conn(|conn| db_load_collection(conn, id))?;
+        Ok(row)
     }
 
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
@@ -353,6 +377,12 @@ mod tests {
             false,
         )
         .unwrap();
+
+        let loaded = repo.load_collection("123:0").unwrap().unwrap();
+        assert_eq!(loaded.0.id, "123:0");
+        assert_eq!(loaded.1, "0xaaaa000000000000000000000000000000000000");
+        assert!(loaded.2);
+        assert!(repo.load_collection("missing").unwrap().is_none());
 
         let collections = repo.list_collections().unwrap();
         assert_eq!(collections.len(), 2);

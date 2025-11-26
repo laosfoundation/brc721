@@ -191,6 +191,10 @@ mod tests {
             Ok(self.last.lock().unwrap().clone())
         }
 
+        fn load_collection(&self, _id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+            Ok(None)
+        }
+
         fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
             Ok(Vec::new())
         }

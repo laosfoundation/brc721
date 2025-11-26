@@ -14,6 +14,7 @@ pub struct CollectionKey {
 
 pub trait StorageRead {
     fn load_last(&self) -> Result<Option<Block>>;
+    fn load_collection(&self, id: &str) -> Result<Option<(CollectionKey, String, bool)>>;
     fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>>;
 }
 

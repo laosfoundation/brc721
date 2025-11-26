@@ -109,6 +109,9 @@ mod tests {
         fn load_last(&self) -> Result<Option<crate::storage::Block>> {
             Ok(None)
         }
+        fn load_collection(&self, _id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+            Ok(None)
+        }
         fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
             Ok(vec![])
         }

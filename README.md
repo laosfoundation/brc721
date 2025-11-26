@@ -70,6 +70,13 @@ Endpoints:
   Response:
   {"txid":"<txid>"}
 
+- GET /collection/{id}
+
+  Response (200):
+  {"id":"123:0","evmCollectionAddress":"0x...","rebaseable":true}
+
+  Returns 404 if the id is unknown.
+
 If BRC721_API_TOKEN is set, include either header:
 - x-api-key: <token>
 - Authorization: Bearer <token>

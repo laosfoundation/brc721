@@ -208,6 +208,13 @@ mod tests {
                 }))
         }
 
+        fn load_collection(
+            &self,
+            _id: &str,
+        ) -> anyhow::Result<Option<(CollectionKey, String, bool)>> {
+            Ok(None)
+        }
+
         fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
             Ok(Vec::new())
         }

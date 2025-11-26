@@ -1,6 +1,12 @@
 use std::net::SocketAddr;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
 use serde::Serialize;
 
 use crate::storage::Storage;
@@ -58,6 +64,7 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     let app = Router::new()
         .route("/health", get(health::<S>))
         .route("/state", get(chain_state::<S>))
+        .route("/collection/:id", get(get_collection::<S>))
         .route("/collections", get(list_collections::<S>))
         .with_state(state);
 
@@ -112,4 +119,23 @@ async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
         )
         .collect();
     Json(CollectionsResponse { collections })
+}
+
+async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.storage.load_collection(&id) {
+        Ok(Some((key, evm_collection_address, rebaseable))) => Json(CollectionResponse {
+            id: key.id,
+            evm_collection_address,
+            rebaseable,
+        })
+        .into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(err) => {
+            log::error!("Failed to load collection {}: {:?}", id, err);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
