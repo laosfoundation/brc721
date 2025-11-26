@@ -1,38 +1,38 @@
+use crate::storage::traits::StorageWrite;
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser {
-    storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>,
-}
+pub struct Brc721Parser;
 
 impl Brc721Parser {
-    pub fn new(storage: std::sync::Arc<dyn crate::storage::Storage + Send + Sync>) -> Self {
-        Self { storage }
+    pub fn new() -> Self {
+        Self
     }
 
-    fn digest(
+    fn digest<T: StorageWrite>(
         &self,
+        tx: &T,
         output: &Brc721Output,
         block_height: u64,
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
         match output.message() {
-            Brc721Message::RegisterCollection(data) => crate::parser::register_collection::digest(
-                data,
-                self.storage.as_ref(),
-                block_height,
-                tx_index,
-            ),
+            Brc721Message::RegisterCollection(data) => {
+                crate::parser::register_collection::digest(data, tx, block_height, tx_index)
+            }
         }
     }
 }
 
-impl BlockParser for Brc721Parser {
-    fn parse_block(&self, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
-        for (tx_index, tx) in block.txdata.iter().enumerate() {
-            let Some(first_output) = tx.output.first() else {
+impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
+    fn parse_block(&self, tx: &T, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
+        let hash = block.block_hash();
+        let hash_str = hash.to_string();
+
+        for (tx_index, tx_data) in block.txdata.iter().enumerate() {
+            let Some(first_output) = tx_data.output.first() else {
                 continue;
             };
             let brc721_output = match Brc721Output::from_output(first_output) {
@@ -49,10 +49,21 @@ impl BlockParser for Brc721Parser {
                 tx_index
             );
 
-            if let Err(ref e) = self.digest(&brc721_output, block_height, tx_index as u32) {
+            if let Err(ref e) = self.digest(tx, &brc721_output, block_height, tx_index as u32) {
                 log::warn!("{:?}", e);
             }
         }
+        // Persist last processed block once per block
+        if let Err(e) = tx.save_last(block_height, &hash_str) {
+            log::error!(
+                "storage error saving block {} at height {}: {}",
+                hash,
+                block_height,
+                e
+            );
+            return Err(Brc721Error::StorageError(e.to_string()));
+        }
+
         Ok(())
     }
 }
@@ -60,12 +71,21 @@ impl BlockParser for Brc721Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::traits::{
+        Block as StorageBlock, CollectionKey, StorageRead, StorageTx, StorageWrite,
+    };
+    use crate::storage::Storage;
     use crate::types::Brc721Command;
     use crate::types::BRC721_CODE;
+    use anyhow::anyhow;
+    use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::hashes::Hash;
     use bitcoin::opcodes::all::OP_RETURN;
+    use bitcoin::Network;
     use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+    use ethereum_types::H160;
     use hex::FromHex;
+    use std::sync::{Arc, Mutex};
 
     fn build_payload(addr20: [u8; 20], rebase: u8) -> Vec<u8> {
         let mut v = Vec::with_capacity(1 + 20 + 1);
@@ -130,8 +150,121 @@ mod tests {
         };
         let storage =
             crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
-        let parser = Brc721Parser::new(std::sync::Arc::new(storage));
-        let r = parser.parse_block(&block, 0);
+        storage.init().unwrap();
+        let parser = Brc721Parser::new();
+        let tx = storage.begin_tx().unwrap();
+        let r = parser.parse_block(&tx, &block, 0);
         assert!(r.is_ok());
+        tx.commit().unwrap();
+    }
+
+    struct DummyStorageInner {
+        last_height: Mutex<Option<u64>>,
+        last_hash: Mutex<Option<String>>,
+        fail: bool,
+    }
+
+    #[derive(Clone)]
+    struct DummyStorage {
+        inner: Arc<DummyStorageInner>,
+    }
+
+    impl DummyStorage {
+        fn new(fail: bool) -> Self {
+            Self {
+                inner: Arc::new(DummyStorageInner {
+                    last_height: Mutex::new(None),
+                    last_hash: Mutex::new(None),
+                    fail,
+                }),
+            }
+        }
+    }
+
+    impl StorageTx for DummyStorage {
+        fn commit(self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Storage for DummyStorage {
+        type Tx = DummyStorage;
+
+        fn begin_tx(&self) -> anyhow::Result<Self::Tx> {
+            Ok(self.clone())
+        }
+    }
+
+    impl StorageRead for DummyStorage {
+        fn load_last(&self) -> anyhow::Result<Option<StorageBlock>> {
+            Ok(self
+                .inner
+                .last_height
+                .lock()
+                .unwrap()
+                .map(|h| StorageBlock {
+                    height: h,
+                    hash: String::new(),
+                }))
+        }
+
+        fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl StorageWrite for DummyStorage {
+        fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
+            if self.inner.fail {
+                return Err(anyhow!("fail"));
+            }
+            *self.inner.last_height.lock().unwrap() = Some(height);
+            *self.inner.last_hash.lock().unwrap() = Some(hash.to_string());
+            Ok(())
+        }
+
+        fn save_collection(
+            &self,
+            _key: CollectionKey,
+            _evm_collection_address: H160,
+            _rebaseable: bool,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser) {
+        let storage = DummyStorage::new(fail_storage);
+        let parser = Brc721Parser::new();
+        (storage, parser)
+    }
+
+    #[test]
+    fn parse_block_success_saves_height_and_hash() {
+        let (storage, parser) = make_parser_with_storage(false);
+
+        let block = genesis_block(Network::Regtest);
+        let height = 42;
+        let tx = storage.clone();
+        parser.parse_block(&tx, &block, height).unwrap();
+
+        assert_eq!(*storage.inner.last_height.lock().unwrap(), Some(height));
+        assert_eq!(
+            *storage.inner.last_hash.lock().unwrap(),
+            Some(block.block_hash().to_string())
+        );
+    }
+
+    #[test]
+    fn parse_block_storage_error_returns_error_and_does_not_persist() {
+        let (storage, parser) = make_parser_with_storage(true);
+
+        let block = genesis_block(Network::Regtest);
+        let height = 1;
+        let tx = storage.clone();
+        assert!(parser.parse_block(&tx, &block, height).is_err());
+
+        assert_eq!(*storage.inner.last_height.lock().unwrap(), None);
+        assert_eq!(*storage.inner.last_hash.lock().unwrap(), None);
     }
 }

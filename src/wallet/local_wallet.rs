@@ -23,6 +23,9 @@ impl LocalWallet {
         external: Bip86<Xpriv>,
         internal: Bip86<Xpriv>,
     ) -> Result<LocalWallet> {
+        if !data_dir.as_ref().exists() {
+            std::fs::create_dir_all(&data_dir).context("creating wallet directory")?;
+        }
         let db_path = wallet_db_path(&data_dir);
         let mut conn = Connection::open(&db_path)
             .with_context(|| format!("opening wallet db at {}", db_path.display()))?;

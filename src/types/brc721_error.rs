@@ -14,6 +14,8 @@ pub enum Brc721Error {
     InvalidRebaseFlag(u8),
     #[error("Storage error: {0}")]
     StorageError(String),
+    #[error("Tx error: {0}")]
+    TxError(String),
     #[error("Wallet error: {0}")]
     WalletError(String),
 }

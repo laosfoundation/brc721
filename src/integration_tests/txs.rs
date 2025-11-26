@@ -3,6 +3,7 @@ use crate::{
     wallet::brc721_wallet::Brc721Wallet,
 };
 use age::secrecy::SecretString;
+use bdk_wallet::bip39::{Language, Mnemonic};
 use bitcoin::{Amount, Network};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use corepc_node::Node;
@@ -12,6 +13,10 @@ use url::Url;
 
 #[test]
 fn test_build_tx_creates_signed_tx_with_custom_output() {
+    let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
     let data_dir = TempDir::new().expect("temp dir");
     let node = corepc_node::Node::from_downloaded().unwrap();
     let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
@@ -19,7 +24,7 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
     let mut wallet = Brc721Wallet::create(
         &data_dir,
         Network::Regtest,
-        None,
+        mnemonic,
         SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
@@ -61,6 +66,15 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
 
 #[test]
 fn test_send_amount_between_wallets_via_psbt() {
+    let mnemonic = Mnemonic::parse_in(
+            Language::English,
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ).expect("mnemonic");
+    let mnemonic1 = Mnemonic::parse_in(
+        Language::English,
+        "core basket honey spike miracle appear such orphan hand wire profit dumb",
+    )
+    .expect("mnemonic");
     // Start a regtest node and set up RPC authentication
     let node = Node::from_downloaded().unwrap();
     let auth = Auth::CookieFile(node.params.cookie_file.clone());
@@ -72,7 +86,7 @@ fn test_send_amount_between_wallets_via_psbt() {
     let mut wallet0 = Brc721Wallet::create(
         data_dir0.path(),
         Network::Regtest,
-        None,
+        mnemonic,
         SecretString::from("passphrase".to_string()),
         &node_url,
         auth.clone(),
@@ -100,7 +114,7 @@ fn test_send_amount_between_wallets_via_psbt() {
     let mut wallet1 = Brc721Wallet::create(
         data_dir1.path(),
         Network::Regtest,
-        None,
+        mnemonic1,
         SecretString::from(passphrase.clone()),
         &node_url,
         auth.clone(),

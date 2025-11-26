@@ -1,21 +1,20 @@
 use crate::parser::BlockParser;
 use crate::scanner::{BitcoinRpc, Scanner};
-use crate::storage::Storage;
+use crate::storage::traits::{Storage, StorageTx};
 use anyhow::Result;
 use bitcoin::Block;
-use std::sync::Arc;
 
-pub struct Core<C: BitcoinRpc, P: BlockParser> {
-    storage: Arc<dyn Storage + Send + Sync>,
+pub struct Core<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> {
     scanner: Scanner<C>,
+    storage: S,
     parser: P,
 }
 
-impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
-    pub fn new(storage: Arc<dyn Storage + Send + Sync>, scanner: Scanner<C>, parser: P) -> Self {
+impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
+    pub fn new(scanner: Scanner<C>, storage: S, parser: P) -> Self {
         Self {
-            storage,
             scanner,
+            storage,
             parser,
         }
     }
@@ -33,9 +32,14 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
     pub fn step(&mut self, shutdown: &tokio_util::sync::CancellationToken) -> Result<()> {
         match self.scanner.next_blocks_with_shutdown(shutdown) {
             Ok(blocks) => {
-                for (height, block) in blocks {
-                    self.process_block(height, &block)?;
+                if blocks.is_empty() {
+                    return Ok(());
                 }
+                let tx = self.storage.begin_tx()?;
+                for (height, block) in blocks {
+                    self.process_block(&tx, height, &block)?;
+                }
+                tx.commit()?;
             }
             Err(e) => {
                 log::error!("scanner error: {}", e);
@@ -45,11 +49,11 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
         Ok(())
     }
 
-    fn process_block(&self, height: u64, block: &Block) -> Result<()> {
+    fn process_block(&self, tx: &S::Tx, height: u64, block: &Block) -> Result<()> {
         let hash = block.block_hash();
         log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
-        if let Err(e) = self.parser.parse_block(block, height) {
+        if let Err(e) = self.parser.parse_block(tx, block, height) {
             log::error!(
                 "parsing error of block {} at height {}: {}",
                 hash,
@@ -59,16 +63,6 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
             return Err(e.into());
         }
 
-        if let Err(e) = self.storage.save_last(height, &hash.to_string()) {
-            log::error!(
-                "storage error saving block {} at height {}: {}",
-                hash,
-                height,
-                e
-            );
-            return Err(e);
-        }
-
         Ok(())
     }
 }
@@ -76,60 +70,12 @@ impl<C: BitcoinRpc, P: BlockParser> Core<C, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block as StorageBlock, CollectionKey};
-    use crate::storage::Storage;
+    use crate::storage::traits::{CollectionKey, StorageRead, StorageWrite};
     use crate::types::Brc721Error;
-    use anyhow::anyhow;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::Network;
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
-    use std::sync::Arc;
-    use std::sync::Mutex;
-
-    struct DummyStorage {
-        last_height: Mutex<Option<u64>>,
-        last_hash: Mutex<Option<String>>,
-        fail: bool,
-    }
-
-    impl DummyStorage {
-        fn new(fail: bool) -> Self {
-            Self {
-                last_height: Mutex::new(None),
-                last_hash: Mutex::new(None),
-                fail,
-            }
-        }
-    }
-
-    impl Storage for DummyStorage {
-        fn load_last(&self) -> anyhow::Result<Option<StorageBlock>> {
-            Ok(None)
-        }
-
-        fn save_last(&self, height: u64, hash: &str) -> anyhow::Result<()> {
-            if self.fail {
-                return Err(anyhow!("fail"));
-            }
-            *self.last_height.lock().unwrap() = Some(height);
-            *self.last_hash.lock().unwrap() = Some(hash.to_string());
-            Ok(())
-        }
-
-        fn save_collection(
-            &self,
-            _key: CollectionKey,
-            _evm_collection_address: H160,
-            _rebaseable: bool,
-        ) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
-            Ok(Vec::new())
-        }
-    }
 
     #[derive(Clone)]
     struct DummyRpc;
@@ -156,70 +102,74 @@ mod tests {
         genesis_block(Network::Regtest)
     }
 
-    fn make_core_with_parser<P: BlockParser>(
-        fail_storage: bool,
-        parser: P,
-    ) -> (Arc<DummyStorage>, Core<DummyRpc, P>) {
-        let inner = Arc::new(DummyStorage::new(fail_storage));
-        let storage: Arc<dyn Storage + Send + Sync> = inner.clone();
-        let rpc = DummyRpc;
-        let scanner = Scanner::new(rpc);
-        let core = Core::new(storage, scanner, parser);
-        (inner, core)
+    #[derive(Clone)]
+    struct DummyStorage;
+
+    impl StorageRead for DummyStorage {
+        fn load_last(&self) -> Result<Option<crate::storage::Block>> {
+            Ok(None)
+        }
+        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+            Ok(vec![])
+        }
     }
 
-    struct NoopParser;
-
-    impl BlockParser for NoopParser {
-        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), Brc721Error> {
+    impl StorageWrite for DummyStorage {
+        fn save_last(&self, _height: u64, _hash: &str) -> Result<()> {
+            Ok(())
+        }
+        fn save_collection(
+            &self,
+            _key: CollectionKey,
+            _evm_collection_address: H160,
+            _rebaseable: bool,
+        ) -> Result<()> {
             Ok(())
         }
     }
 
+    impl StorageTx for DummyStorage {
+        fn commit(self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Storage for DummyStorage {
+        type Tx = DummyStorage;
+        fn begin_tx(&self) -> Result<Self::Tx> {
+            Ok(DummyStorage)
+        }
+    }
+
+    fn make_core_with_parser<P: BlockParser<DummyStorage>>(
+        parser: P,
+    ) -> Core<DummyRpc, DummyStorage, P> {
+        let rpc = DummyRpc;
+        let scanner = Scanner::new(rpc);
+        let storage = DummyStorage;
+        Core::new(scanner, storage, parser)
+    }
+
     struct FailingParser;
 
-    impl BlockParser for FailingParser {
-        fn parse_block(&self, _block: &Block, _height: u64) -> Result<(), Brc721Error> {
+    impl BlockParser<DummyStorage> for FailingParser {
+        fn parse_block(
+            &self,
+            _tx: &DummyStorage,
+            _block: &Block,
+            _height: u64,
+        ) -> Result<(), Brc721Error> {
             Err(Brc721Error::InvalidPayload)
         }
     }
 
     #[test]
-    fn process_block_success_saves_height_and_hash() {
-        let (inner, core) = make_core_with_parser(false, NoopParser);
-
-        let block = empty_block();
-        let height = 42;
-        core.process_block(height, &block).unwrap();
-
-        assert_eq!(*inner.last_height.lock().unwrap(), Some(height));
-        assert_eq!(
-            *inner.last_hash.lock().unwrap(),
-            Some(block.block_hash().to_string())
-        );
-    }
-
-    #[test]
-    fn process_block_storage_error_returns_error_and_does_not_persist() {
-        let (inner, core) = make_core_with_parser(true, NoopParser);
-
-        let block = empty_block();
-        let height = 1;
-        assert!(core.process_block(height, &block).is_err());
-
-        assert_eq!(*inner.last_height.lock().unwrap(), None);
-        assert_eq!(*inner.last_hash.lock().unwrap(), None);
-    }
-
-    #[test]
-    fn process_block_parser_error_returns_error_and_does_not_persist() {
-        let (inner, core) = make_core_with_parser(false, FailingParser);
+    fn process_block_parser_error_returns_error() {
+        let core = make_core_with_parser(FailingParser);
 
         let block = empty_block();
         let height = 7;
-        assert!(core.process_block(height, &block).is_err());
-
-        assert_eq!(*inner.last_height.lock().unwrap(), None);
-        assert_eq!(*inner.last_hash.lock().unwrap(), None);
+        let tx = DummyStorage;
+        assert!(core.process_block(&tx, height, &block).is_err());
     }
 }
