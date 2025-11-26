@@ -19,4 +19,5 @@ USER appuser
 
 ENV RUST_LOG=info
 
-CMD ["brc721"]
+ENTRYPOINT ["brc721"]
+CMD []
