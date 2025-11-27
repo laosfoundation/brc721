@@ -9,7 +9,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::storage::Storage;
+use crate::storage::{traits::Collection, Storage};
 
 #[derive(Clone)]
 pub struct AppState<S: Storage> {
@@ -110,13 +110,7 @@ async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
         .list_collections()
         .unwrap_or_default()
         .into_iter()
-        .map(
-            |(key, evm_collection_address, rebaseable)| CollectionResponse {
-                id: key.id,
-                evm_collection_address,
-                rebaseable,
-            },
-        )
+        .map(collection_to_response)
         .collect();
     Json(CollectionsResponse { collections })
 }
@@ -126,16 +120,19 @@ async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.storage.load_collection(&id) {
-        Ok(Some((key, evm_collection_address, rebaseable))) => Json(CollectionResponse {
-            id: key.id,
-            evm_collection_address,
-            rebaseable,
-        })
-        .into_response(),
+        Ok(Some(collection)) => Json(collection_to_response(collection)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(err) => {
             log::error!("Failed to load collection {}: {:?}", id, err);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+fn collection_to_response(collection: Collection) -> CollectionResponse {
+    CollectionResponse {
+        id: collection.key.id,
+        evm_collection_address: collection.evm_collection_address,
+        rebaseable: collection.rebaseable,
     }
 }

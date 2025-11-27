@@ -70,7 +70,7 @@ impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{CollectionKey, StorageRead, StorageWrite};
+    use crate::storage::traits::{Collection, CollectionKey, StorageRead, StorageWrite};
     use crate::types::Brc721Error;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::Network;
@@ -109,10 +109,10 @@ mod tests {
         fn load_last(&self) -> Result<Option<crate::storage::Block>> {
             Ok(None)
         }
-        fn load_collection(&self, _id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+        fn load_collection(&self, _id: &str) -> Result<Option<Collection>> {
             Ok(None)
         }
-        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+        fn list_collections(&self) -> Result<Vec<Collection>> {
             Ok(vec![])
         }
     }

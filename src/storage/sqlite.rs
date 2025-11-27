@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
 use super::{
-    traits::{CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
+    traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
     Block,
 };
 
@@ -42,18 +42,19 @@ fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
     .optional()
 }
 
-fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(CollectionKey, String, bool)> {
+fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Collection> {
     let id: String = row.get(0)?;
     let evm_collection_address: String = row.get(1)?;
     let rebaseable_int: i64 = row.get(2)?;
     let rebaseable = rebaseable_int != 0;
-    Ok((CollectionKey { id }, evm_collection_address, rebaseable))
+    Ok(Collection {
+        key: CollectionKey { id },
+        evm_collection_address,
+        rebaseable,
+    })
 }
 
-fn db_load_collection(
-    conn: &Connection,
-    id: &str,
-) -> rusqlite::Result<Option<(CollectionKey, String, bool)>> {
+fn db_load_collection(conn: &Connection, id: &str) -> rusqlite::Result<Option<Collection>> {
     conn.query_row(
         "SELECT id, evm_collection_address, rebaseable FROM collections WHERE id = ?1",
         params![id],
@@ -62,7 +63,7 @@ fn db_load_collection(
     .optional()
 }
 
-fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<(CollectionKey, String, bool)>> {
+fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<Collection>> {
     let mut stmt =
         conn.prepare("SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id")?;
     let mapped = stmt
@@ -100,11 +101,11 @@ impl StorageRead for SqliteTx {
         Ok(db_load_last(&self.conn)?)
     }
 
-    fn load_collection(&self, id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+    fn load_collection(&self, id: &str) -> Result<Option<Collection>> {
         Ok(db_load_collection(&self.conn, id)?)
     }
 
-    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+    fn list_collections(&self) -> Result<Vec<Collection>> {
         Ok(db_list_collections(&self.conn)?)
     }
 }
@@ -216,12 +217,12 @@ impl StorageRead for SqliteStorage {
         Ok(opt)
     }
 
-    fn load_collection(&self, id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+    fn load_collection(&self, id: &str) -> Result<Option<Collection>> {
         let row = self.with_conn(|conn| db_load_collection(conn, id))?;
         Ok(row)
     }
 
-    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+    fn list_collections(&self) -> Result<Vec<Collection>> {
         let rows = self.with_conn(db_list_collections)?;
         Ok(rows)
     }
@@ -379,25 +380,28 @@ mod tests {
         .unwrap();
 
         let loaded = repo.load_collection("123:0").unwrap().unwrap();
-        assert_eq!(loaded.0.id, "123:0");
-        assert_eq!(loaded.1, "0xaaaa000000000000000000000000000000000000");
-        assert!(loaded.2);
+        assert_eq!(loaded.key.id, "123:0");
+        assert_eq!(
+            loaded.evm_collection_address,
+            "0xaaaa000000000000000000000000000000000000"
+        );
+        assert!(loaded.rebaseable);
         assert!(repo.load_collection("missing").unwrap().is_none());
 
         let collections = repo.list_collections().unwrap();
         assert_eq!(collections.len(), 2);
-        assert_eq!(collections[0].0.id, "123:0");
+        assert_eq!(collections[0].key.id, "123:0");
         assert_eq!(
-            collections[0].1,
+            collections[0].evm_collection_address,
             "0xaaaa000000000000000000000000000000000000"
         );
-        assert!(collections[0].2);
-        assert_eq!(collections[1].0.id, "124:1");
+        assert!(collections[0].rebaseable);
+        assert_eq!(collections[1].key.id, "124:1");
         assert_eq!(
-            collections[1].1,
+            collections[1].evm_collection_address,
             "0xbbbb000000000000000000000000000000000000"
         );
-        assert!(!collections[1].2);
+        assert!(!collections[1].rebaseable);
     }
 
     #[test]

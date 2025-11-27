@@ -158,7 +158,9 @@ pub async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Block, CollectionKey, StorageRead, StorageTx, StorageWrite};
+    use crate::storage::traits::{
+        Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+    };
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
@@ -191,11 +193,11 @@ mod tests {
             Ok(self.last.lock().unwrap().clone())
         }
 
-        fn load_collection(&self, _id: &str) -> Result<Option<(CollectionKey, String, bool)>> {
+        fn load_collection(&self, _id: &str) -> Result<Option<Collection>> {
             Ok(None)
         }
 
-        fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+        fn list_collections(&self) -> Result<Vec<Collection>> {
             Ok(Vec::new())
         }
     }
