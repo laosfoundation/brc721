@@ -72,7 +72,7 @@ impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block as StorageBlock, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        Block as StorageBlock, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
     };
     use crate::storage::Storage;
     use crate::types::Brc721Command;
@@ -208,7 +208,11 @@ mod tests {
                 }))
         }
 
-        fn list_collections(&self) -> anyhow::Result<Vec<(CollectionKey, String, bool)>> {
+        fn load_collection(&self, _id: &CollectionKey) -> anyhow::Result<Option<Collection>> {
+            Ok(None)
+        }
+
+        fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(Vec::new())
         }
     }

@@ -76,6 +76,13 @@ Endpoints:
   Response:
   {"collections":[{"id":"<height:txIndex>","evmCollectionAddress":"0x<20-byte-hex>","rebaseable":true|false}]}
 
+- GET /collection/{id}
+
+  Response (200):
+  {"id":"123:0","evmCollectionAddress":"0x...","rebaseable":true}
+
+  Returns 404 if the id is unknown.
+
 If BRC721_API_TOKEN is set, include either header:
 - x-api-key: <token>
 - Authorization: Bearer <token>

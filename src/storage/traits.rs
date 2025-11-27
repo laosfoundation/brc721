@@ -1,20 +1,18 @@
 use anyhow::Result;
 use ethereum_types::H160;
 
+pub use super::collection::{Collection, CollectionKey};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     pub height: u64,
     pub hash: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CollectionKey {
-    pub id: String,
-}
-
 pub trait StorageRead {
     fn load_last(&self) -> Result<Option<Block>>;
-    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>>;
+    fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>>;
+    fn list_collections(&self) -> Result<Vec<Collection>>;
 }
 
 pub trait StorageWrite {

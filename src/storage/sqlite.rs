@@ -1,10 +1,10 @@
 use anyhow::Result;
 use ethereum_types::H160;
-use rusqlite::{params, Connection, OptionalExtension};
-use std::path::Path;
+use rusqlite::{params, types::Type, Connection, OptionalExtension};
+use std::{path::Path, str::FromStr};
 
 use super::{
-    traits::{CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
+    traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
     Block,
 };
 
@@ -42,17 +42,39 @@ fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
     .optional()
 }
 
-fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<(CollectionKey, String, bool)>> {
+fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Collection> {
+    let id: String = row.get(0)?;
+    let key = CollectionKey::from_str(&id)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
+    let evm_collection_address_str: String = row.get(1)?;
+    let evm_collection_address = H160::from_str(&evm_collection_address_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(err)))?;
+    let rebaseable_int: i64 = row.get(2)?;
+    let rebaseable = rebaseable_int != 0;
+    Ok(Collection {
+        key,
+        evm_collection_address,
+        rebaseable,
+    })
+}
+
+fn db_load_collection(
+    conn: &Connection,
+    key: &CollectionKey,
+) -> rusqlite::Result<Option<Collection>> {
+    conn.query_row(
+        "SELECT id, evm_collection_address, rebaseable FROM collections WHERE id = ?1",
+        params![key.to_string()],
+        map_collection_row,
+    )
+    .optional()
+}
+
+fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<Collection>> {
     let mut stmt =
         conn.prepare("SELECT id, evm_collection_address, rebaseable FROM collections ORDER BY id")?;
     let mapped = stmt
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let evm_collection_address: String = row.get(1)?;
-            let rebaseable_int: i64 = row.get(2)?;
-            let rebaseable = rebaseable_int != 0;
-            Ok((CollectionKey { id }, evm_collection_address, rebaseable))
-        })?
+        .query_map([], map_collection_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(mapped)
 }
@@ -72,7 +94,7 @@ fn db_save_collection(
     evm_collection_address: H160,
     rebaseable: bool,
 ) -> rusqlite::Result<()> {
-    let id = key.id;
+    let id = key.to_string();
     conn.execute(
         "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
                  ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
@@ -85,7 +107,12 @@ impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
         Ok(db_load_last(&self.conn)?)
     }
-    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+
+    fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>> {
+        Ok(db_load_collection(&self.conn, id)?)
+    }
+
+    fn list_collections(&self) -> Result<Vec<Collection>> {
         Ok(db_list_collections(&self.conn)?)
     }
 }
@@ -197,7 +224,12 @@ impl StorageRead for SqliteStorage {
         Ok(opt)
     }
 
-    fn list_collections(&self) -> Result<Vec<(CollectionKey, String, bool)>> {
+    fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>> {
+        let row = self.with_conn(|conn| db_load_collection(conn, id))?;
+        Ok(row)
+    }
+
+    fn list_collections(&self) -> Result<Vec<Collection>> {
         let rows = self.with_conn(db_list_collections)?;
         Ok(rows)
     }
@@ -338,36 +370,47 @@ mod tests {
 
         let repo = repo.begin_tx().unwrap();
         repo.save_collection(
-            CollectionKey {
-                id: "123:0".to_string(),
-            },
+            CollectionKey::new(123, 0),
             H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap(),
             true,
         )
         .unwrap();
         repo.save_collection(
-            CollectionKey {
-                id: "124:1".to_string(),
-            },
+            CollectionKey::new(124, 1),
             H160::from_str("0xbbbb000000000000000000000000000000000000").unwrap(),
             false,
         )
         .unwrap();
 
+        let loaded = repo
+            .load_collection(&CollectionKey::new(123, 0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.key.to_string(), "123:0");
+        assert_eq!(
+            loaded.evm_collection_address,
+            H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap()
+        );
+        assert!(loaded.rebaseable);
+        assert!(repo
+            .load_collection(&CollectionKey::new(999, 9))
+            .unwrap()
+            .is_none());
+
         let collections = repo.list_collections().unwrap();
         assert_eq!(collections.len(), 2);
-        assert_eq!(collections[0].0.id, "123:0");
+        assert_eq!(collections[0].key.to_string(), "123:0");
         assert_eq!(
-            collections[0].1,
-            "0xaaaa000000000000000000000000000000000000"
+            collections[0].evm_collection_address,
+            H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap()
         );
-        assert!(collections[0].2);
-        assert_eq!(collections[1].0.id, "124:1");
+        assert!(collections[0].rebaseable);
+        assert_eq!(collections[1].key.to_string(), "124:1");
         assert_eq!(
-            collections[1].1,
-            "0xbbbb000000000000000000000000000000000000"
+            collections[1].evm_collection_address,
+            H160::from_str("0xbbbb000000000000000000000000000000000000").unwrap()
         );
-        assert!(!collections[1].2);
+        assert!(!collections[1].rebaseable);
     }
 
     #[test]

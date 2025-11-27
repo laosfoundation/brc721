@@ -7,9 +7,7 @@ pub fn digest<S: StorageWrite>(
     block_height: u64,
     tx_index: u32,
 ) -> Result<(), Brc721Error> {
-    let key = CollectionKey {
-        id: format!("{}:{}", block_height, tx_index),
-    };
+    let key = CollectionKey::new(block_height, tx_index);
 
     storage
         .save_collection(key, payload.evm_collection_address, payload.rebaseable)
