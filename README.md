@@ -1,10 +1,24 @@
 # brc721
 
-A simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
+`brc721` is a Rust app that implements the BRC-721 protocol described in the [BRC-721 research paper](https://eprint.iacr.org/2025/641).
+
+It is experimental software with no warranty. See [LICENSE](LICENSE) for more details.
+
+BRC-721 scales the creation, management, and trading of non-fungible tokens (NFTs) on Bitcoin by extending [Bridgeless Minting patterns](https://github.com/freeverseio/laos-whitepaper/blob/main/laos.pdf) previously used on other blockchains.
+
+The protocol leverages on-chain Bitcoin data to handle all aspects of token ownership, including trading, while integrating a secondary consensus system for minting and optionally modifying token metadata. 
+
+To minimize its on-chain footprint, the protocol utilizes the `OP_RETURN` mechanism for ownership records, while complementary NFT-related actions are stored on the LAOS blockchain. All data remains permanently on-chain, with no reliance on bridges or third-party operators.
+
+The `OP_RETURN` pattern is heavily inspired by the [Runes Protocol](https://docs.ordinals.com/runes.html), which greatly simplifies previous patterns based on [Ordinal Theory](https://docs.ordinals.com/), used by [Inscriptions/Ordinals](https://ordinals.com/).
+
+## The app
+
+This is a simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
 
 Storage
 
-- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically.
+- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically
 - No CSV or legacy fallback.
 - Use --reset to delete the database file before starting.
 
@@ -21,13 +35,16 @@ CLI
 - --batch-size SIZE: batch processing size (default 100)
 - --reset: delete DB before start
 - Subcommands:
-  - wallet-init --name <wallet>
-  - wallet-newaddress --name <wallet>
-  - wallet-balance --name <wallet>
-  - collection-create --name <wallet> --evm-collection-address <H160> [--rebaseable] [--fee-rate <sat/vB>]
-  - serve [--bind <addr:port>]  Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
+  - wallet generate                         Prints out a newly generated mnemonic
+  - wallet init --mnemonic "12|24 words"    Initialize wallet with provided mnemonic
+  - wallet address                          Derive and print a new receive address
+  - wallet balance                          Show wallet balances via Core
+  - wallet rescan                           Trigger Core rescan for the watch-only wallet
+  - tx register-collection --collection-address 0x<20-byte-hex> [--rebaseable] [--fee-rate <sat/vB>] [--passphrase <pass>]
+  - tx send-amount --to <addr> --amount-sat <sats> [--fee-rate <sat/vB>] [--passphrase <pass>]
+  - serve [--bind <addr:port>]              Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
 
-HTTP API
+HTTP API (server endpoints)
 
 Start the server (scanner runs concurrently, persisting to SQLite):
 
@@ -44,31 +61,20 @@ export BRC721_API_TOKEN=secret123
 
 Endpoints:
 
-- POST /wallet/init
-
-  Request body:
-  {"name":"default"}
+- GET /health
 
   Response:
-  {"ok":true,"name":"default"}
+  {"status":"ok","uptimeSecs":<number>}
 
-- GET /wallet/{name}/address
-
-  Response:
-  {"address":"bcrt1..."}
-
-- GET /wallet/{name}/balance
+- GET /state
 
   Response:
-  {"balance_btc": 12.345}
+  {"last":{"height":<u64>,"hash":"<hex>"}} or {"last":null}
 
-- POST /collections
-
-  Request body:
-  {"wallet":"default","evm_collection_address":"<0x...40-hex>","rebaseable":false,"fee_rate":1.0}
+- GET /collections
 
   Response:
-  {"txid":"<txid>"}
+  {"collections":[{"id":"<height:txIndex>","evmCollectionAddress":"0x<20-byte-hex>","rebaseable":true|false}]}
 
 - GET /collection/{id}
 
@@ -173,69 +179,3 @@ Troubleshooting
 
 - If you see connection refused, ensure bitcoind is running on regtest and RPC creds/port match .env
 - If auth fails, try using cookie auth instead of user/pass. Typically: BITCOIN_RPC_COOKIE=./.bitcoin-regtest/regtest/.cookie
-
-
-## Testing on a local node
-
-Start a local bitcoin node:
-```bash
-docker compose up -d
-```
-
-Initialize wallet:
-```bash
-DOTENV_PATH=.env.testing cargo run -- wallet init
-```
-
-Example output:
-```
-2025-11-03T15:13:40.078999Z  INFO brc721::commands::wallet: 📡 Watch-only wallet '3afbbca07a285e6520386c328847960ba5c684294e788b602d0f69b5206c4829' ready in Core
-```
-
-Save the Core wallet name (this is just an ID for the wallet, not a receiving address) in a variable for convenience:
-```bash
-WALLET_NAME=3afbbca07a285e6520386c328847960ba5c684294e788b602d0f69b5206c4829
-```
-
-Sanity check on the bitcoin node:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -getinfo
-```
-
-Get one of the addresses in your derivation path (on every run, you will get a different address):
-```bash
-ADDR=$(DOTENV_PATH=.env.testing cargo run -- wallet address 2>&1 | grep -Eo 'bcrt1[0-9a-z]+' | tail -n1)
-echo $ADDR
-```
-
-Mine 101 blocks to that receiving address, so that it has some funds:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev generatetoaddress 101 "$ADDR"
-```
-
-Query the node about balance of ADDR:
-```bash
- docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcwallet="$WALLET_NAME" getbalances
-```
-...expect the following:
-```
-expect mine.trusted ≈ 50.00000000,
-mine.immature ≈ 5000.00000000,
-mine.untrusted_pending = 0.00000000
-```
-
-Query using the app, expect same result:
-```bash
-DOTENV_PATH=.env.testing cargo run -- --network regtest wallet balance
-```
-
-Other sanity checks:
-
-• Verify the watch-only wallet is loaded:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev listwallets
-```
-* Verify the mined-to address belongs to the wallet:
-```bash
-docker exec bitcoind-testnet bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcwallet="$WALLET_NAME" scantxoutset start "[\"addr($ADDR)\"]"
-```
