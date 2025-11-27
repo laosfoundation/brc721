@@ -132,7 +132,7 @@ async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
 fn collection_to_response(collection: Collection) -> CollectionResponse {
     CollectionResponse {
         id: collection.key.to_string(),
-        evm_collection_address: collection.evm_collection_address,
+        evm_collection_address: format!("{:#x}", collection.evm_collection_address),
         rebaseable: collection.rebaseable,
     }
 }

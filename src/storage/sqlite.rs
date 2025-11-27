@@ -46,7 +46,9 @@ fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Collection> {
     let id: String = row.get(0)?;
     let key = CollectionKey::from_str(&id)
         .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
-    let evm_collection_address: String = row.get(1)?;
+    let evm_collection_address_str: String = row.get(1)?;
+    let evm_collection_address = H160::from_str(&evm_collection_address_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(err)))?;
     let rebaseable_int: i64 = row.get(2)?;
     let rebaseable = rebaseable_int != 0;
     Ok(Collection {
@@ -381,7 +383,7 @@ mod tests {
         assert_eq!(loaded.key.to_string(), "123:0");
         assert_eq!(
             loaded.evm_collection_address,
-            "0xaaaa000000000000000000000000000000000000"
+            H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap()
         );
         assert!(loaded.rebaseable);
         assert!(repo.load_collection("missing").unwrap().is_none());
@@ -391,13 +393,13 @@ mod tests {
         assert_eq!(collections[0].key.to_string(), "123:0");
         assert_eq!(
             collections[0].evm_collection_address,
-            "0xaaaa000000000000000000000000000000000000"
+            H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap()
         );
         assert!(collections[0].rebaseable);
         assert_eq!(collections[1].key.to_string(), "124:1");
         assert_eq!(
             collections[1].evm_collection_address,
-            "0xbbbb000000000000000000000000000000000000"
+            H160::from_str("0xbbbb000000000000000000000000000000000000").unwrap()
         );
         assert!(!collections[1].rebaseable);
     }

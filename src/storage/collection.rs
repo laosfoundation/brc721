@@ -1,3 +1,4 @@
+use ethereum_types::H160;
 use std::{fmt, num::ParseIntError, str::FromStr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +78,6 @@ impl FromStr for CollectionKey {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Collection {
     pub key: CollectionKey,
-    pub evm_collection_address: String,
+    pub evm_collection_address: H160,
     pub rebaseable: bool,
 }
