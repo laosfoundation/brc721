@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ethereum_types::H160;
-use rusqlite::{params, Connection, OptionalExtension};
-use std::path::Path;
+use rusqlite::{params, types::Type, Connection, OptionalExtension};
+use std::{path::Path, str::FromStr};
 
 use super::{
     traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
@@ -44,11 +44,13 @@ fn db_load_last(conn: &Connection) -> rusqlite::Result<Option<Block>> {
 
 fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Collection> {
     let id: String = row.get(0)?;
+    let key = CollectionKey::from_str(&id)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
     let evm_collection_address: String = row.get(1)?;
     let rebaseable_int: i64 = row.get(2)?;
     let rebaseable = rebaseable_int != 0;
     Ok(Collection {
-        key: CollectionKey { id },
+        key,
         evm_collection_address,
         rebaseable,
     })
@@ -87,7 +89,7 @@ fn db_save_collection(
     evm_collection_address: H160,
     rebaseable: bool,
 ) -> rusqlite::Result<()> {
-    let id = key.id;
+    let id = key.to_string();
     conn.execute(
         "INSERT INTO collections (id, evm_collection_address, rebaseable) VALUES (?1, ?2, ?3)
                  ON CONFLICT(id) DO UPDATE SET evm_collection_address=excluded.evm_collection_address, rebaseable=excluded.rebaseable",
@@ -363,24 +365,20 @@ mod tests {
 
         let repo = repo.begin_tx().unwrap();
         repo.save_collection(
-            CollectionKey {
-                id: "123:0".to_string(),
-            },
+            CollectionKey::new(123, 0),
             H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap(),
             true,
         )
         .unwrap();
         repo.save_collection(
-            CollectionKey {
-                id: "124:1".to_string(),
-            },
+            CollectionKey::new(124, 1),
             H160::from_str("0xbbbb000000000000000000000000000000000000").unwrap(),
             false,
         )
         .unwrap();
 
         let loaded = repo.load_collection("123:0").unwrap().unwrap();
-        assert_eq!(loaded.key.id, "123:0");
+        assert_eq!(loaded.key.to_string(), "123:0");
         assert_eq!(
             loaded.evm_collection_address,
             "0xaaaa000000000000000000000000000000000000"
@@ -390,13 +388,13 @@ mod tests {
 
         let collections = repo.list_collections().unwrap();
         assert_eq!(collections.len(), 2);
-        assert_eq!(collections[0].key.id, "123:0");
+        assert_eq!(collections[0].key.to_string(), "123:0");
         assert_eq!(
             collections[0].evm_collection_address,
             "0xaaaa000000000000000000000000000000000000"
         );
         assert!(collections[0].rebaseable);
-        assert_eq!(collections[1].key.id, "124:1");
+        assert_eq!(collections[1].key.to_string(), "124:1");
         assert_eq!(
             collections[1].evm_collection_address,
             "0xbbbb000000000000000000000000000000000000"
