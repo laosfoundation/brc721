@@ -109,7 +109,7 @@ mod tests {
         fn load_last(&self) -> Result<Option<crate::storage::Block>> {
             Ok(None)
         }
-        fn load_collection(&self, _id: &str) -> Result<Option<Collection>> {
+        fn load_collection(&self, _key: &CollectionKey) -> Result<Option<Collection>> {
             Ok(None)
         }
         fn list_collections(&self) -> Result<Vec<Collection>> {

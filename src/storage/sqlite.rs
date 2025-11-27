@@ -58,10 +58,13 @@ fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Collection> {
     })
 }
 
-fn db_load_collection(conn: &Connection, id: &str) -> rusqlite::Result<Option<Collection>> {
+fn db_load_collection(
+    conn: &Connection,
+    key: &CollectionKey,
+) -> rusqlite::Result<Option<Collection>> {
     conn.query_row(
         "SELECT id, evm_collection_address, rebaseable FROM collections WHERE id = ?1",
-        params![id],
+        params![key.to_string()],
         map_collection_row,
     )
     .optional()
@@ -105,8 +108,8 @@ impl StorageRead for SqliteTx {
         Ok(db_load_last(&self.conn)?)
     }
 
-    fn load_collection(&self, id: &str) -> Result<Option<Collection>> {
-        Ok(db_load_collection(&self.conn, id)?)
+    fn load_collection(&self, key: &CollectionKey) -> Result<Option<Collection>> {
+        Ok(db_load_collection(&self.conn, key)?)
     }
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
@@ -221,8 +224,8 @@ impl StorageRead for SqliteStorage {
         Ok(opt)
     }
 
-    fn load_collection(&self, id: &str) -> Result<Option<Collection>> {
-        let row = self.with_conn(|conn| db_load_collection(conn, id))?;
+    fn load_collection(&self, key: &CollectionKey) -> Result<Option<Collection>> {
+        let row = self.with_conn(|conn| db_load_collection(conn, key))?;
         Ok(row)
     }
 
@@ -379,14 +382,20 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = repo.load_collection("123:0").unwrap().unwrap();
+        let loaded = repo
+            .load_collection(&CollectionKey::new(123, 0))
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.key.to_string(), "123:0");
         assert_eq!(
             loaded.evm_collection_address,
             H160::from_str("0xaaaa000000000000000000000000000000000000").unwrap()
         );
         assert!(loaded.rebaseable);
-        assert!(repo.load_collection("missing").unwrap().is_none());
+        assert!(repo
+            .load_collection(&CollectionKey::new(999, 9))
+            .unwrap()
+            .is_none());
 
         let collections = repo.list_collections().unwrap();
         assert_eq!(collections.len(), 2);

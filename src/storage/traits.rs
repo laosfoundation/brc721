@@ -11,7 +11,7 @@ pub struct Block {
 
 pub trait StorageRead {
     fn load_last(&self) -> Result<Option<Block>>;
-    fn load_collection(&self, id: &str) -> Result<Option<Collection>>;
+    fn load_collection(&self, key: &CollectionKey) -> Result<Option<Collection>>;
     fn list_collections(&self) -> Result<Vec<Collection>>;
 }
 

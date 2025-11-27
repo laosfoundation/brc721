@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, str::FromStr};
 
 use axum::{
     extract::{Path, State},
@@ -9,7 +9,10 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::storage::{traits::Collection, Storage};
+use crate::storage::{
+    traits::{Collection, CollectionKey},
+    Storage,
+};
 
 #[derive(Clone)]
 pub struct AppState<S: Storage> {
@@ -119,7 +122,14 @@ async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    match state.storage.load_collection(&id) {
+    let key = match CollectionKey::from_str(&id) {
+        Ok(key) => key,
+        Err(err) => {
+            log::warn!("Invalid collection id {}: {}", id, err);
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+    };
+    match state.storage.load_collection(&key) {
         Ok(Some(collection)) => Json(collection_to_response(collection)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(err) => {
