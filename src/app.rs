@@ -193,7 +193,7 @@ mod tests {
             Ok(self.last.lock().unwrap().clone())
         }
 
-        fn load_collection(&self, _key: &CollectionKey) -> Result<Option<Collection>> {
+        fn load_collection(&self, _id: &CollectionKey) -> Result<Option<Collection>> {
             Ok(None)
         }
 

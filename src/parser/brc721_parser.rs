@@ -208,7 +208,7 @@ mod tests {
                 }))
         }
 
-        fn load_collection(&self, _key: &CollectionKey) -> anyhow::Result<Option<Collection>> {
+        fn load_collection(&self, _id: &CollectionKey) -> anyhow::Result<Option<Collection>> {
             Ok(None)
         }
 

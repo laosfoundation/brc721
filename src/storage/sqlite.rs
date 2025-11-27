@@ -108,8 +108,8 @@ impl StorageRead for SqliteTx {
         Ok(db_load_last(&self.conn)?)
     }
 
-    fn load_collection(&self, key: &CollectionKey) -> Result<Option<Collection>> {
-        Ok(db_load_collection(&self.conn, key)?)
+    fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>> {
+        Ok(db_load_collection(&self.conn, id)?)
     }
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
@@ -224,8 +224,8 @@ impl StorageRead for SqliteStorage {
         Ok(opt)
     }
 
-    fn load_collection(&self, key: &CollectionKey) -> Result<Option<Collection>> {
-        let row = self.with_conn(|conn| db_load_collection(conn, key))?;
+    fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>> {
+        let row = self.with_conn(|conn| db_load_collection(conn, id))?;
         Ok(row)
     }
 
