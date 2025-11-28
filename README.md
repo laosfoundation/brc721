@@ -17,4 +17,4 @@ This architecture ensures that the protocol follows an **always-on-chain approac
 
 For detailed operational instructions, setup steps, and protocol references, consult the [project wiki](https://github.com/laosfoundation/brc721/wiki).
 
-**Disclaimer:** This is experimental software released under the MIT License (`LICENSE`) and comes with no warranties or guarantees of any kind.
+**Disclaimer:** This is experimental software released under the GPLv3 License (`LICENSE`) and comes with no warranties or guarantees of any kind.
