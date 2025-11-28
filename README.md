@@ -1,181 +1,20 @@
-# brc721
+## BRC721: Scalable Non-Fungible Tokens on Bitcoin
 
-`brc721` is a Rust app that implements the BRC-721 protocol described in the [BRC-721 research paper](https://eprint.iacr.org/2025/641).
+This project implements the BRC721 protocol, also referred to as the **Bridgeless or Bitcoin ERC721** standard, which is designed for enabling the secure and scalable management of **Non-Fungible Tokens (NFTs) on Bitcoin**. For the complete cryptographic specification see the [BRC721 research paper](https://eprint.iacr.org/2025/641).
 
-It is experimental software with no warranty. See [LICENSE](LICENSE) for more details.
+The core idea of BRC721 is to provide a scalable solution for the creation, management, and trading of NFTs on Bitcoin while maintaining a **minimal on-chain footprint**. This approach significantly improves upon methods like Inscriptions, which face inherent limitations in scalability and cost due to Bitcoin's block size constraints.
 
-BRC-721 scales the creation, management, and trading of non-fungible tokens (NFTs) on Bitcoin by extending [Bridgeless Minting patterns](https://github.com/freeverseio/laos-whitepaper/blob/main/laos.pdf) previously used on other blockchains.
+BRC721 achieves this efficiency and scalability by leveraging a **dual-consensus system** based on the **Bridgeless Minting pattern**:
 
-The protocol leverages on-chain Bitcoin data to handle all aspects of token ownership, including trading, while integrating a secondary consensus system for minting and optionally modifying token metadata. 
+1.  **Ownership on Bitcoin:** All aspects of token ownership, including trading, lending, and transfers, remain **fully on-chain** within the Bitcoin network. Ownership relies on the Bitcoin UTXO structure and requires explicit Bitcoin signatures from rightful owners. To minimize space usage on Bitcoin, ownership records utilize the **OP RETURN mechanism**.
+2.  **Metadata on LAOS:** The bulk of the data, particularly asset metadata, is offloaded to a separate, verifiable consensus system: the **LAOS Network**. LAOS is an Ethereum Virtual Machine (EVM)-compatible blockchain built as a Parachain on Polkadot, which provides programmability for managing NFT metadata.
 
-To minimize its on-chain footprint, the protocol utilizes the `OP_RETURN` mechanism for ownership records, while complementary NFT-related actions are stored on the LAOS blockchain. All data remains permanently on-chain, with no reliance on bridges or third-party operators.
+This architecture ensures that the protocol follows an **always-on-chain approach**, providing strong guarantees for Data Availability (DA) and the prevention of invalid transactions by leveraging the security of both Bitcoin and the LAOS Network (which is secured by Polkadot’s relay chain). BRC721 tokens are compatible with existing Bitcoin wallets, simplifying user adoption.
 
-The `OP_RETURN` pattern is heavily inspired by the [Runes Protocol](https://docs.ordinals.com/runes.html), which greatly simplifies previous patterns based on [Ordinal Theory](https://docs.ordinals.com/), used by [Inscriptions/Ordinals](https://ordinals.com/).
+***
 
-## The app
+*A simple analogy for BRC721’s architecture is that of a secure bank vault and an archive library. Bitcoin acts as the bank vault, securely holding the title deeds (ownership) for the NFT using its robust security mechanisms. Meanwhile, the LAOS Network acts as the external, programmable archive library, storing the detailed content and rules (metadata) associated with that title deed. The system ensures that the title deed always points directly to the correct content, even though the content itself is stored elsewhere, maximizing efficiency while maintaining high security.*
 
-This is a simple Rust app that connects to a Bitcoin Core node and streams blocks, persists collections to SQLite, and now exposes a minimal HTTP API to drive wallet operations and create collections.
+For detailed operational instructions, setup steps, and protocol references, consult the [project wiki](https://github.com/laosfoundation/brc721/wiki).
 
-Storage
-
-- SQLite (rusqlite) at ./.brc721/brc721.sqlite, created automatically
-- No CSV or legacy fallback.
-- Use --reset to delete the database file before starting.
-
-Environment
-
-- BITCOIN_RPC_URL, BITCOIN_RPC_USER/PASS or BITCOIN_RPC_COOKIE
-- BRC721_DB_PATH (optional, default ./.brc721/brc721.sqlite)
-- BRC721_API_BIND (optional, default 127.0.0.1:8080)
-- BRC721_API_TOKEN (optional auth token; if set, requests must send x-api-key: <token> or Authorization: Bearer <token>)
-
-CLI
-
-- --confirmations N: process up to tip - N (default 3)
-- --batch-size SIZE: batch processing size (default 100)
-- --reset: delete DB before start
-- Subcommands:
-  - wallet generate                         Prints out a newly generated mnemonic
-  - wallet init --mnemonic "12|24 words"    Initialize wallet with provided mnemonic
-  - wallet address                          Derive and print a new receive address
-  - wallet balance                          Show wallet balances via Core
-  - wallet rescan                           Trigger Core rescan for the watch-only wallet
-  - tx register-collection --collection-address 0x<20-byte-hex> [--rebaseable] [--fee-rate <sat/vB>] [--passphrase <pass>]
-  - tx send-amount --to <addr> --amount-sat <sats> [--fee-rate <sat/vB>] [--passphrase <pass>]
-  - serve [--bind <addr:port>]              Start the HTTP API (defaults to BRC721_API_BIND or 127.0.0.1:8080)
-
-HTTP API (server endpoints)
-
-Start the server (scanner runs concurrently, persisting to SQLite):
-
-```
-# start API and the background scanner together
-cargo run -- serve --bind 127.0.0.1:8080
-# pass debug and confirmations flags to control scanner verbosity/lag
-cargo run -- -d -c 3 serve --bind 127.0.0.1:8080
-# or via env
-BRC721_API_BIND=0.0.0.0:8080 cargo run -- serve
-# optional auth
-export BRC721_API_TOKEN=secret123
-```
-
-Endpoints:
-
-- GET /health
-
-  Response:
-  {"status":"ok","uptimeSecs":<number>}
-
-- GET /state
-
-  Response:
-  {"last":{"height":<u64>,"hash":"<hex>"}} or {"last":null}
-
-- GET /collections
-
-  Response:
-  {"collections":[{"id":"<height:txIndex>","evmCollectionAddress":"0x<20-byte-hex>","rebaseable":true|false}]}
-
-- GET /collection/{id}
-
-  Response (200):
-  {"id":"123:0","evmCollectionAddress":"0x...","rebaseable":true}
-
-  Returns 404 if the id is unknown.
-
-If BRC721_API_TOKEN is set, include either header:
-- x-api-key: <token>
-- Authorization: Bearer <token>
-
-Local testing with Bitcoin Core (regtest)
-
-Option A: Native install
-
-- Requirements: Bitcoin Core v26+ installed and on PATH
-- Start a fresh regtest node with RPC enabled:
-
-```
-bitcoind -regtest -datadir=.bitcoin-regtest -fallbackfee=0.0001 -server=1 -txindex=1 -rpcallowip=127.0.0.1 -rpcuser=dev -rpcpassword=dev -rpcport=18443 -port=18444 -daemon
-```
-
-- Configure the app to point at regtest:
-
-Create a .env (or edit existing):
-
-```
-BITCOIN_RPC_URL=http://127.0.0.1:18443
-BITCOIN_RPC_USER=dev
-BITCOIN_RPC_PASS=dev
-```
-
-- Generate some blocks so there is data:
-
-```
-bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -rpcport=18443 -generate 101
-```
-
-- Run the scanner or API:
-
-```
-# scanner
-cargo run
-# API server
-cargo run -- serve --bind 127.0.0.1:8080
-```
-
-Option B: Docker (recommended for quick setup)
-
-- Requirements: Docker + Docker Compose
-- Start regtest node in Docker:
-
-```
-docker compose up -d
-```
-
-This uses bitcoin/bitcoin with configs under docker/bitcoin/*. RPC is mapped to 127.0.0.1:18443.
-
-- Configure the app:
-
-```
-cp .env.example .env
-BITCOIN_RPC_URL=http://127.0.0.1:18443
-BITCOIN_RPC_USER=dev
-BITCOIN_RPC_PASS=dev
-```
-
-- Create wallet and generate blocks inside the container:
-
-```
-docker compose exec bitcoind bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev createwallet default
-docker compose exec bitcoind bitcoin-cli -regtest -rpcuser=dev -rpcpassword=dev -generate 101
-```
-
-- Run the app/tests against Docker node:
-
-```
-# scanner
-cargo run
-# api
-cargo run -- serve
-# tests
-cargo test -- --nocapture
-```
-
-- Stop and clean up:
-
-```
-docker compose down
-```
-
-Integration test helper
-
-- You can also run a simple smoke test that connects to the regtest node and asserts it can read the tip and a block header. Make sure the node is running and has blocks.
-
-```
-cargo test -- --nocapture
-```
-
-Troubleshooting
-
-- If you see connection refused, ensure bitcoind is running on regtest and RPC creds/port match .env
-- If auth fails, try using cookie auth instead of user/pass. Typically: BITCOIN_RPC_COOKIE=./.bitcoin-regtest/regtest/.cookie
+**Disclaimer:** This is experimental software released under the GPLv3 License (`LICENSE`) and comes with no warranties or guarantees of any kind.
