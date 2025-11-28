@@ -22,6 +22,9 @@ impl Brc721Parser {
             Brc721Message::RegisterCollection(data) => {
                 crate::parser::register_collection::digest(data, tx, block_height, tx_index)
             }
+            Brc721Message::RegisterOwnership(data) => {
+                crate::parser::register_ownership::digest(data, tx, block_height, tx_index)
+            }
         }
     }
 }
