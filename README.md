@@ -15,4 +15,4 @@ This architecture ensures that the protocol follows an **always-on-chain approac
 
 *A simple analogy for BRC721’s architecture is that of a secure bank vault and an archive library. Bitcoin acts as the bank vault, securely holding the title deeds (ownership) for the NFT using its robust security mechanisms. Meanwhile, the LAOS Network acts as the external, programmable archive library, storing the detailed content and rules (metadata) associated with that title deed. The system ensures that the title deed always points directly to the correct content, even though the content itself is stored elsewhere, maximizing efficiency while maintaining high security.*
 
-For detailed operational instructions, setup steps, and protocol references, consult the project wiki.
+For detailed operational instructions, setup steps, and protocol references, consult the [project wiki](https://github.com/laosfoundation/brc721/wiki).
