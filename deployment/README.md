@@ -1,6 +1,6 @@
 ## BRC721: Scalable Non-Fungible Tokens on Bitcoin
 
-This project implements the BRC721 protocol, also referred to as the **Bridgeless or Bitcoin ERC721** standard, which is designed for enabling the secure and scalable management of **Non-Fungible Tokens (NFTs) on Bitcoin** [1, 2].
+This project implements the BRC721 protocol, also referred to as the **Bridgeless or Bitcoin ERC721** standard, which is designed for enabling the secure and scalable management of **Non-Fungible Tokens (NFTs) on Bitcoin** [1, 2]. For the complete cryptographic specification see the BRC721 research paper: https://eprint.iacr.org/2025/641.
 
 The core idea of BRC721 is to provide a scalable solution for the creation, management, and trading of NFTs on Bitcoin while maintaining a **minimal on-chain footprint** [2, 3]. This approach significantly improves upon methods like Inscriptions, which face inherent limitations in scalability and cost due to Bitcoin's block size constraints [4].
 
@@ -16,3 +16,5 @@ This architecture ensures that the protocol follows an **always-on-chain approac
 *A simple analogy for BRC721’s architecture is that of a secure bank vault and an archive library. Bitcoin acts as the bank vault, securely holding the title deeds (ownership) for the NFT using its robust security mechanisms. Meanwhile, the LAOS Network acts as the external, programmable archive library, storing the detailed content and rules (metadata) associated with that title deed. The system ensures that the title deed always points directly to the correct content, even though the content itself is stored elsewhere, maximizing efficiency while maintaining high security.*
 
 For detailed operational instructions, setup steps, and protocol references, consult the project wiki located under `brc721.wiki/`.
+
+**Disclaimer:** This is experimental software released under the MIT License (`LICENSE`) and comes with no warranties or guarantees of any kind.
