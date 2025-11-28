@@ -1,15 +1,17 @@
-use super::RegisterCollectionData;
+use super::{RegisterCollectionData, RegisterOwnershipData};
 use crate::types::{Brc721Command, Brc721Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Brc721Message {
     RegisterCollection(RegisterCollectionData),
+    RegisterOwnership(RegisterOwnershipData),
 }
 
 impl Brc721Message {
     pub fn command(&self) -> Brc721Command {
         match self {
             Brc721Message::RegisterCollection(_) => Brc721Command::RegisterCollection,
+            Brc721Message::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
         }
     }
 
@@ -19,6 +21,7 @@ impl Brc721Message {
 
         match self {
             Brc721Message::RegisterCollection(data) => out.extend(data.to_bytes()),
+            Brc721Message::RegisterOwnership(data) => out.extend(data.to_bytes()),
         };
 
         out
@@ -37,6 +40,9 @@ impl TryFrom<&[u8]> for Brc721Message {
             Brc721Command::RegisterCollection => {
                 Brc721Message::RegisterCollection(RegisterCollectionData::try_from(rest)?)
             }
+            Brc721Command::RegisterOwnership => {
+                Brc721Message::RegisterOwnership(RegisterOwnershipData::try_from(rest)?)
+            }
         };
 
         Ok(msg)
@@ -46,7 +52,10 @@ impl TryFrom<&[u8]> for Brc721Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::RegisterCollectionData;
+    use crate::types::{
+        BitcoinCollectionId, RegisterCollectionData, RegisterOwnershipData, SlotMapping, SlotNumber,
+        SlotRange,
+    };
     use crate::types::{Brc721Command, Brc721Error};
     use ethereum_types::H160;
 
@@ -60,6 +69,18 @@ mod tests {
         let msg = Brc721Message::RegisterCollection(data);
 
         assert_eq!(msg.command(), Brc721Command::RegisterCollection);
+    }
+
+    #[test]
+    fn command_matches_register_ownership_variant() {
+        let collection_id = BitcoinCollectionId::new(123, 4);
+        let slot = SlotNumber::new(1).unwrap();
+        let mapping = SlotMapping::new(1, vec![SlotRange::single(slot)]).unwrap();
+        let payload =
+            RegisterOwnershipData::new(collection_id, vec![mapping]).expect("valid payload");
+        let msg = Brc721Message::RegisterOwnership(payload);
+
+        assert_eq!(msg.command(), Brc721Command::RegisterOwnership);
     }
 
     #[test]
@@ -83,6 +104,30 @@ mod tests {
 
         // roundtrip
         let parsed = Brc721Message::try_from(bytes.as_slice()).expect("parsing should succeed");
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn to_bytes_and_from_bytes_roundtrip_register_ownership() {
+        let collection_id = BitcoinCollectionId::new(200, 9);
+        let slot_a = SlotNumber::new(5).unwrap();
+        let slot_b = SlotNumber::new(10).unwrap();
+        let mapping = SlotMapping::new(
+            1,
+            vec![
+                SlotRange::single(slot_a),
+                SlotRange::interval(slot_a, slot_b).unwrap(),
+            ],
+        )
+        .unwrap();
+        let data =
+            RegisterOwnershipData::new(collection_id, vec![mapping]).expect("valid payload");
+        let msg = Brc721Message::RegisterOwnership(data.clone());
+
+        let bytes = msg.to_bytes();
+        assert!(bytes.len() > 1);
+
+        let parsed = Brc721Message::try_from(bytes.as_slice()).expect("parse ownership");
         assert_eq!(parsed, msg);
     }
 

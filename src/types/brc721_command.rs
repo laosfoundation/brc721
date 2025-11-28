@@ -4,6 +4,7 @@ use super::Brc721Error;
 #[repr(u8)]
 pub enum Brc721Command {
     RegisterCollection = 0x00,
+    RegisterOwnership = 0x01,
 }
 
 impl std::convert::TryFrom<u8> for Brc721Command {
@@ -12,6 +13,7 @@ impl std::convert::TryFrom<u8> for Brc721Command {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x00 => Ok(Brc721Command::RegisterCollection),
+            0x01 => Ok(Brc721Command::RegisterOwnership),
             x => Err(Brc721Error::UnknownCommand(x)),
         }
     }
@@ -35,11 +37,18 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_invalid_command() {
+    fn test_try_from_register_ownership() {
         let value = 0x01u8;
         let cmd = Brc721Command::try_from(value);
+        assert_eq!(cmd, Ok(Brc721Command::RegisterOwnership));
+    }
+
+    #[test]
+    fn test_try_from_invalid_command() {
+        let value = 0xFFu8;
+        let cmd = Brc721Command::try_from(value);
         match cmd {
-            Err(Brc721Error::UnknownCommand(x)) => assert_eq!(x, 0x01),
+            Err(Brc721Error::UnknownCommand(x)) => assert_eq!(x, 0xFF),
             _ => panic!("Expected UnknownCommand error."),
         }
     }
@@ -49,5 +58,8 @@ mod tests {
         let cmd = Brc721Command::RegisterCollection;
         let value: u8 = cmd.into();
         assert_eq!(value, 0x00);
+
+        let ownership: u8 = Brc721Command::RegisterOwnership.into();
+        assert_eq!(ownership, 0x01);
     }
 }
