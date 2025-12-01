@@ -1,5 +1,4 @@
 use bitcoin::Address;
-use bitcoincore_rpc::Auth;
 use std::process::Command as ProcCommand;
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -23,10 +22,6 @@ pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
             "-rpcpassword=dev".to_string(),
             "-fallbackfee=0.0002".to_string(),
         ])
-}
-
-pub fn auth() -> Auth {
-    Auth::UserPass("dev".into(), "dev".into())
 }
 
 pub fn rpc_url(container: &Container<GenericImage>) -> String {
