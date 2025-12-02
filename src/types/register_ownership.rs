@@ -33,7 +33,7 @@ impl BitcoinCollectionId {
         self.tx_index
     }
 
-    pub fn to_bytes(&self) -> [u8; Self::LEN] {
+    pub fn to_bytes(self) -> [u8; Self::LEN] {
         let mut buf = [0u8; Self::LEN];
         buf[..4].copy_from_slice(&self.block_height.to_be_bytes());
         buf[4..].copy_from_slice(&self.tx_index.to_be_bytes());
@@ -124,7 +124,7 @@ impl TokenId {
         self.h160_address
     }
 
-    pub fn to_bytes(&self) -> [u8; TOKEN_ID_BYTES] {
+    pub fn to_bytes(self) -> [u8; TOKEN_ID_BYTES] {
         let mut buf = [0u8; TOKEN_ID_BYTES];
         buf[..SLOT_NUMBER_BYTES].copy_from_slice(&self.slot_number.to_bytes());
         buf[SLOT_NUMBER_BYTES..].copy_from_slice(self.h160_address.as_bytes());
