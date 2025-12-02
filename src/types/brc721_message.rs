@@ -53,8 +53,8 @@ impl TryFrom<&[u8]> for Brc721Message {
 mod tests {
     use super::*;
     use crate::types::{
-        BitcoinCollectionId, RegisterCollectionData, RegisterOwnershipData, SlotMapping, SlotNumber,
-        SlotRange,
+        BitcoinCollectionId, RegisterCollectionData, RegisterOwnershipData, SlotMapping,
+        SlotNumber, SlotRange,
     };
     use crate::types::{Brc721Command, Brc721Error};
     use ethereum_types::H160;
@@ -120,8 +120,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let data =
-            RegisterOwnershipData::new(collection_id, vec![mapping]).expect("valid payload");
+        let data = RegisterOwnershipData::new(collection_id, vec![mapping]).expect("valid payload");
         let msg = Brc721Message::RegisterOwnership(data.clone());
 
         let bytes = msg.to_bytes();
