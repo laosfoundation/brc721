@@ -35,6 +35,67 @@ impl RemoteWallet {
         Ok(())
     }
 
+    pub fn load_wallet(&self) -> Result<()> {
+        let root = self.root_client()?;
+        if !self.wallet_exists_on_disk(&root)? {
+            return Ok(());
+        }
+
+        let loaded_wallets: Vec<String> = root.list_wallets().context("list wallets")?;
+        if loaded_wallets.contains(&self.watch_name) {
+            return Ok(());
+        }
+
+        let result: serde_json::Value = root
+            .call::<serde_json::Value>("loadwallet", &[serde_json::json!(self.watch_name)])
+            .with_context(|| format!("loadwallet '{}'", self.watch_name))?;
+
+        let loaded_name = result
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if loaded_name != self.watch_name {
+            return Err(anyhow::anyhow!(
+                "loaded wallet mismatch: expected '{}', got '{}'",
+                self.watch_name,
+                loaded_name
+            ));
+        }
+
+        if let Some(warning) = result
+            .get("warning")
+            .and_then(|value| value.as_str())
+            .filter(|warning| !warning.is_empty())
+        {
+            return Err(anyhow::anyhow!("loadwallet warning: {warning}"));
+        }
+
+        Ok(())
+    }
+
+    pub fn unload_wallet(&self) -> Result<()> {
+        let root = self.root_client()?;
+        if !self.wallet_exists_on_disk(&root)? {
+            return Ok(());
+        }
+
+        let loaded_wallets: Vec<String> = root.list_wallets().context("list wallets")?;
+        if !loaded_wallets.contains(&self.watch_name) {
+            return Ok(());
+        }
+
+        root.call::<serde_json::Value>("unloadwallet", &[serde_json::json!(self.watch_name)])
+            .with_context(|| format!("unloadwallet '{}'", self.watch_name))?;
+
+        Ok(())
+    }
+
+    pub fn loaded_wallets(&self) -> Result<Vec<String>> {
+        let root = self.root_client()?;
+        root.list_wallets().context("list wallets")
+    }
+
     pub fn setup(&self, external_desc: String, internal_desc: String) -> Result<()> {
         let root = self.root_client()?;
         let existing_wallets: Vec<String> = root.list_wallets().context("list wallets")?;
@@ -170,6 +231,24 @@ impl RemoteWallet {
 
     fn root_client(&self) -> Result<Client> {
         Client::new(self.rpc_url.as_ref(), self.auth.clone()).context("create root client")
+    }
+
+    fn wallet_exists_on_disk(&self, root: &Client) -> Result<bool> {
+        let response: serde_json::Value = root
+            .call::<serde_json::Value>("listwalletdir", &[])
+            .context("listwalletdir")?;
+        let wallets = response
+            .get("wallets")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| anyhow::anyhow!("unexpected listwalletdir response: {response:?}"))?;
+
+        Ok(wallets.iter().any(|entry| {
+            entry
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(|name| self.watch_name == name)
+                .unwrap_or(false)
+        }))
     }
 }
 
@@ -338,6 +417,38 @@ mod tests {
         assert_eq!(
             psbt.unsigned_tx.output[0].clone().script_pubkey,
             output.script_pubkey
+        );
+    }
+
+    #[test]
+    fn load_wallet_loads_unloaded_wallet() {
+        let node = corepc_node::Node::from_downloaded().unwrap();
+        let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
+        let node_url = url::Url::parse(&node.rpc_url()).unwrap();
+        let wallet = create_wallet();
+        let watch_name = "watch_only";
+        let remote_wallet = RemoteWallet::new(watch_name.to_string(), &node_url, auth.clone());
+        let external = wallet.public_descriptor(KeychainKind::External).to_string();
+        let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
+        remote_wallet
+            .setup(external, internal)
+            .expect("setup watch-only wallet");
+
+        remote_wallet.unload_wallet().expect("unload wallet");
+
+        let root = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
+        let loaded_wallets = root.list_wallets().expect("list wallets");
+        assert!(
+            !loaded_wallets.contains(&watch_name.to_string()),
+            "wallet should be unloaded before load_wallet call"
+        );
+
+        remote_wallet.load_wallet().expect("load wallet");
+
+        let loaded_wallets = root.list_wallets().expect("list wallets");
+        assert!(
+            loaded_wallets.contains(&watch_name.to_string()),
+            "load_wallet should load the wallet into Core"
         );
     }
 }
