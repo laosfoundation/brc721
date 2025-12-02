@@ -18,6 +18,9 @@ impl CommandRunner for cli::WalletCmd {
             cli::WalletCmd::Address => run_address(ctx),
             cli::WalletCmd::Balance => run_balance(ctx),
             cli::WalletCmd::Rescan => run_rescan(ctx),
+            cli::WalletCmd::Info => run_info(ctx),
+            cli::WalletCmd::Load => run_load(ctx),
+            cli::WalletCmd::Unload => run_unload(ctx),
         }
     }
 }
@@ -84,6 +87,38 @@ fn run_rescan(ctx: &context::Context) -> Result<()> {
         .rescan_watch_only()
         .context("rescan watch-only wallet")?;
     log::info!("🔄 Rescan started for watch-only wallet '{}'", wallet.id());
+    Ok(())
+}
+
+fn run_info(ctx: &context::Context) -> Result<()> {
+    let wallet = load_wallet(ctx)?;
+    let loaded_wallets = wallet.loaded_core_wallets().context("list Core wallets")?;
+
+    log::info!("🆔 Local wallet id: {}", wallet.id());
+    if loaded_wallets.is_empty() {
+        log::info!("📂 Bitcoin Core has no wallets loaded");
+    } else {
+        log::info!(
+            "📂 Bitcoin Core loaded wallets: {}",
+            loaded_wallets.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn run_load(ctx: &context::Context) -> Result<()> {
+    let wallet = load_wallet(ctx)?;
+    wallet.load_watch_only().context("load watch-only wallet")?;
+    log::info!("📡 Watch-only wallet '{}' loaded in Core", wallet.id());
+    Ok(())
+}
+
+fn run_unload(ctx: &context::Context) -> Result<()> {
+    let wallet = load_wallet(ctx)?;
+    wallet
+        .unload_watch_only()
+        .context("unload watch-only wallet")?;
+    log::info!("🛑 Watch-only wallet '{}' unloaded from Core", wallet.id());
     Ok(())
 }
 
