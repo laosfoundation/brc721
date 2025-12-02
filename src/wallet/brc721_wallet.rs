@@ -50,6 +50,9 @@ impl Brc721Wallet {
     ) -> Result<Brc721Wallet> {
         let local = LocalWallet::load(&data_dir, network)?;
         let remote = RemoteWallet::new(local.id(), rpc_url, auth);
+        remote
+            .load_wallet()
+            .context("load remote bitcoin core wallet")?;
         Ok(Self {
             local,
             remote,
@@ -71,6 +74,18 @@ impl Brc721Wallet {
 
     pub fn rescan_watch_only(&self) -> Result<()> {
         self.remote.rescan()
+    }
+
+    pub fn load_watch_only(&self) -> Result<()> {
+        self.remote.load_wallet()
+    }
+
+    pub fn unload_watch_only(&self) -> Result<()> {
+        self.remote.unload_wallet()
+    }
+
+    pub fn loaded_core_wallets(&self) -> Result<Vec<String>> {
+        self.remote.loaded_wallets()
     }
 
     pub fn setup_watch_only(&self) -> Result<()> {

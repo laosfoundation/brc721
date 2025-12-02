@@ -1,5 +1,4 @@
 use bitcoin::Address;
-use bitcoincore_rpc::Auth;
 use std::process::Command as ProcCommand;
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -10,22 +9,19 @@ pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
     GenericImage::new("bitcoin/bitcoin", "latest")
         .with_wait_for(WaitFor::message_on_stdout("Binding RPC on address"))
         .with_wait_for(WaitFor::message_on_stdout("init message: Done loading"))
-        .with_exposed_port(ContainerPort::Tcp(18443))
+        .with_mapped_port(18443, ContainerPort::Tcp(18443))
         .with_cmd(vec![
             "bitcoind".to_string(),
             "-regtest=1".to_string(),
             "-server=1".to_string(),
             "-txindex=1".to_string(),
+            "-printtoconsole=1".to_string(),
             "-rpcbind=0.0.0.0".to_string(),
             "-rpcallowip=0.0.0.0/0".to_string(),
             "-rpcuser=dev".to_string(),
             "-rpcpassword=dev".to_string(),
             "-fallbackfee=0.0002".to_string(),
         ])
-}
-
-pub fn auth() -> Auth {
-    Auth::UserPass("dev".into(), "dev".into())
 }
 
 pub fn rpc_url(container: &Container<GenericImage>) -> String {

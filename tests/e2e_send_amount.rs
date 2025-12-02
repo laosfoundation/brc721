@@ -1,4 +1,4 @@
-use bitcoincore_rpc::{Client, RpcApi};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
 
@@ -9,7 +9,7 @@ fn e2e_send_amount() {
     let image = common::bitcoind_image();
     let container = image.start().expect("start bitcoind container");
     let rpc_url = common::rpc_url(&container);
-    let auth = common::auth();
+    let auth = Auth::UserPass("dev".into(), "dev".into());
 
     let root_client = Client::new(&rpc_url, auth.clone()).expect("rpc client initial");
 

@@ -50,4 +50,19 @@ pub enum WalletCmd {
         long_about = "Ask Bitcoin Core to rescan the blockchain for the watch-only wallet's descriptors."
     )]
     Rescan,
+    #[command(
+        about = "Show local wallet id and Core loaded wallets",
+        long_about = "Display the local wallet identifier along with the list of wallets that Bitcoin Core currently has loaded."
+    )]
+    Info,
+    #[command(
+        about = "Load the watch-only wallet in Core",
+        long_about = "Attach the watch-only wallet to Bitcoin Core if it's present on disk but not currently loaded."
+    )]
+    Load,
+    #[command(
+        about = "Unload the watch-only wallet from Core",
+        long_about = "Detach the watch-only wallet from Bitcoin Core without deleting its data."
+    )]
+    Unload,
 }
