@@ -1,6 +1,6 @@
-use crate::storage::traits::StorageWrite;
+use crate::storage::traits::{StorageRead, StorageWrite};
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
-use bitcoin::Block;
+use bitcoin::{Block, Transaction};
 
 use crate::parser::BlockParser;
 
@@ -11,22 +11,30 @@ impl Brc721Parser {
         Self
     }
 
-    fn digest<T: StorageWrite>(
+    fn digest<T: StorageRead + StorageWrite>(
         &self,
-        tx: &T,
+        storage: &T,
+        bitcoin_tx: &Transaction,
         output: &Brc721Output,
         block_height: u64,
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
         match output.message() {
             Brc721Message::RegisterCollection(data) => {
-                crate::parser::register_collection::digest(data, tx, block_height, tx_index)
+                crate::parser::register_collection::digest(data, storage, block_height, tx_index)
             }
+            Brc721Message::RegisterOwnership(data) => crate::parser::register_ownership::digest(
+                data,
+                storage,
+                bitcoin_tx,
+                block_height,
+                tx_index,
+            ),
         }
     }
 }
 
-impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
+impl<T: StorageRead + StorageWrite> BlockParser<T> for Brc721Parser {
     fn parse_block(&self, tx: &T, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
@@ -49,7 +57,9 @@ impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
                 tx_index
             );
 
-            if let Err(ref e) = self.digest(tx, &brc721_output, block_height, tx_index as u32) {
+            if let Err(ref e) =
+                self.digest(tx, tx_data, &brc721_output, block_height, tx_index as u32)
+            {
                 log::warn!("{:?}", e);
             }
         }
@@ -73,6 +83,7 @@ mod tests {
     use super::*;
     use crate::storage::traits::{
         Block as StorageBlock, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        TokenKey, TokenOwnership,
     };
     use crate::storage::Storage;
     use crate::types::Brc721Command;
@@ -215,6 +226,10 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(Vec::new())
         }
+
+        fn load_token(&self, _key: &TokenKey) -> anyhow::Result<Option<TokenOwnership>> {
+            Ok(None)
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -233,6 +248,10 @@ mod tests {
             _evm_collection_address: H160,
             _rebaseable: bool,
         ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn save_token(&self, _token: &TokenOwnership) -> anyhow::Result<()> {
             Ok(())
         }
     }

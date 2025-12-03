@@ -70,7 +70,9 @@ impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::traits::{Collection, CollectionKey, StorageRead, StorageWrite};
+    use crate::storage::traits::{
+        Collection, CollectionKey, StorageRead, StorageWrite, TokenKey, TokenOwnership,
+    };
     use crate::types::Brc721Error;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::Network;
@@ -115,6 +117,9 @@ mod tests {
         fn list_collections(&self) -> Result<Vec<Collection>> {
             Ok(vec![])
         }
+        fn load_token(&self, _key: &TokenKey) -> Result<Option<TokenOwnership>> {
+            Ok(None)
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -127,6 +132,10 @@ mod tests {
             _evm_collection_address: H160,
             _rebaseable: bool,
         ) -> Result<()> {
+            Ok(())
+        }
+
+        fn save_token(&self, _token: &TokenOwnership) -> Result<()> {
             Ok(())
         }
     }

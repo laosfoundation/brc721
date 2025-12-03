@@ -2,6 +2,7 @@ use anyhow::Result;
 use ethereum_types::H160;
 
 pub use super::collection::{Collection, CollectionKey};
+pub use super::token::{TokenKey, TokenOwnership};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -13,6 +14,7 @@ pub trait StorageRead {
     fn load_last(&self) -> Result<Option<Block>>;
     fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>>;
     fn list_collections(&self) -> Result<Vec<Collection>>;
+    fn load_token(&self, key: &TokenKey) -> Result<Option<TokenOwnership>>;
 }
 
 pub trait StorageWrite {
@@ -23,6 +25,7 @@ pub trait StorageWrite {
         evm_collection_address: H160,
         rebaseable: bool,
     ) -> Result<()>;
+    fn save_token(&self, token: &TokenOwnership) -> Result<()>;
 }
 
 pub trait StorageTx: StorageRead + StorageWrite {

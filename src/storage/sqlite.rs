@@ -1,14 +1,17 @@
 use anyhow::Result;
+use bitcoin::{OutPoint, Txid};
 use ethereum_types::H160;
 use rusqlite::{params, types::Type, Connection, OptionalExtension};
-use std::{path::Path, str::FromStr};
+use std::{io, path::Path, str::FromStr};
 
 use super::{
+    token::{TokenKey, TokenOwnership},
     traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
     Block,
 };
+use crate::types::{SlotNumber, TokenId};
 
-const DB_SCHEMA_VERSION: i64 = 1;
+const DB_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -103,6 +106,110 @@ fn db_save_collection(
     Ok(())
 }
 
+fn blob_length_error(column: usize, expected: usize, actual: usize) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        Type::Blob,
+        Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("expected {expected} bytes, got {actual}"),
+        )),
+    )
+}
+
+fn blob_to_array<const N: usize>(blob: Vec<u8>, column: usize) -> rusqlite::Result<[u8; N]> {
+    if blob.len() != N {
+        return Err(blob_length_error(column, N, blob.len()));
+    }
+    let mut out = [0u8; N];
+    out.copy_from_slice(&blob);
+    Ok(out)
+}
+
+fn db_load_token(conn: &Connection, key: &TokenKey) -> rusqlite::Result<Option<TokenOwnership>> {
+    let mut stmt = conn.prepare(
+        "SELECT collection_id, slot, initial_owner_h160, owner_txid, owner_vout, block_height, tx_index
+         FROM token_ownerships
+         WHERE collection_id = ?1 AND slot = ?2 AND initial_owner_h160 = ?3",
+    )?;
+    stmt.query_row(
+        (
+            key.collection.to_string(),
+            key.token_id.slot().to_be_bytes().to_vec(),
+            key.token_id.initial_owner().to_vec(),
+        ),
+        map_token_row,
+    )
+    .optional()
+}
+
+fn db_save_token(conn: &Connection, token: &TokenOwnership) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO token_ownerships (
+            collection_id,
+            slot,
+            initial_owner_h160,
+            owner_txid,
+            owner_vout,
+            block_height,
+            tx_index
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            token.key.collection.to_string(),
+            token.key.token_id.slot().to_be_bytes().to_vec(),
+            token.key.token_id.initial_owner().to_vec(),
+            token.owner_outpoint.txid.to_string(),
+            token.owner_outpoint.vout as i64,
+            token.registered_block_height as i64,
+            token.registered_tx_index as i64
+        ],
+    )?;
+    Ok(())
+}
+
+fn map_token_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenOwnership> {
+    let collection_id: String = row.get(0)?;
+    let slot_blob: Vec<u8> = row.get(1)?;
+    let owner_blob: Vec<u8> = row.get(2)?;
+    let owner_txid_hex: String = row.get(3)?;
+    let owner_vout: i64 = row.get(4)?;
+    let block_height: i64 = row.get(5)?;
+    let tx_index: i64 = row.get(6)?;
+
+    let collection = CollectionKey::from_str(&collection_id)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
+
+    if owner_vout < 0 {
+        return Err(rusqlite::Error::IntegralValueOutOfRange(4, owner_vout));
+    }
+    if block_height < 0 {
+        return Err(rusqlite::Error::IntegralValueOutOfRange(5, block_height));
+    }
+    if tx_index < 0 {
+        return Err(rusqlite::Error::IntegralValueOutOfRange(6, tx_index));
+    }
+
+    let slot_bytes = blob_to_array::<12>(slot_blob, 1)?;
+    let slot = SlotNumber::from_be_bytes(&slot_bytes)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(1, Type::Blob, Box::new(err)))?;
+    let owner_bytes = blob_to_array::<20>(owner_blob, 2)?;
+    let token_id = TokenId::new(slot, owner_bytes);
+
+    let txid = Txid::from_str(&owner_txid_hex)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(err)))?;
+    let outpoint = OutPoint {
+        txid,
+        vout: owner_vout as u32,
+    };
+
+    Ok(TokenOwnership {
+        key: TokenKey::new(collection, token_id),
+        owner_outpoint: outpoint,
+        registered_block_height: block_height as u64,
+        registered_tx_index: tx_index as u32,
+    })
+}
+
 impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
         Ok(db_load_last(&self.conn)?)
@@ -114,6 +221,10 @@ impl StorageRead for SqliteTx {
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
         Ok(db_list_collections(&self.conn)?)
+    }
+
+    fn load_token(&self, key: &TokenKey) -> Result<Option<TokenOwnership>> {
+        Ok(db_load_token(&self.conn, key)?)
     }
 }
 
@@ -135,6 +246,10 @@ impl StorageWrite for SqliteTx {
             rebaseable,
         )?)
     }
+
+    fn save_token(&self, token: &TokenOwnership) -> Result<()> {
+        Ok(db_save_token(&self.conn, token)?)
+    }
 }
 
 impl Storage for SqliteStorage {
@@ -145,6 +260,7 @@ impl Storage for SqliteStorage {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
+        Self::migrate(&conn)?;
 
         conn.execute("BEGIN IMMEDIATE", [])?;
 
@@ -205,6 +321,37 @@ impl SqliteStorage {
                 evm_collection_address TEXT NOT NULL,
                 rebaseable INTEGER NOT NULL
             );
+            CREATE TABLE token_ownerships (
+                collection_id TEXT NOT NULL,
+                slot BLOB NOT NULL CHECK(length(slot) = 12),
+                initial_owner_h160 BLOB NOT NULL CHECK(length(initial_owner_h160) = 20),
+                owner_txid TEXT NOT NULL,
+                owner_vout INTEGER NOT NULL,
+                block_height INTEGER NOT NULL,
+                tx_index INTEGER NOT NULL,
+                PRIMARY KEY (collection_id, slot, initial_owner_h160)
+            );
+            CREATE INDEX token_owner_outpoint_idx ON token_ownerships(owner_txid, owner_vout);
+        "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            return Ok(());
+        }
+
+        if version == 1 {
+            conn.execute_batch(
+                r#"
+            CREATE TABLE token_ownerships (
+                collection_id TEXT NOT NULL,
+                slot BLOB NOT NULL CHECK(length(slot) = 12),
+                initial_owner_h160 BLOB NOT NULL CHECK(length(initial_owner_h160) = 20),
+                owner_txid TEXT NOT NULL,
+                owner_vout INTEGER NOT NULL,
+                block_height INTEGER NOT NULL,
+                tx_index INTEGER NOT NULL,
+                PRIMARY KEY (collection_id, slot, initial_owner_h160)
+            );
+            CREATE INDEX token_owner_outpoint_idx ON token_ownerships(owner_txid, owner_vout);
         "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
@@ -233,12 +380,20 @@ impl StorageRead for SqliteStorage {
         let rows = self.with_conn(db_list_collections)?;
         Ok(rows)
     }
+
+    fn load_token(&self, key: &TokenKey) -> Result<Option<TokenOwnership>> {
+        let row = self.with_conn(|conn| db_load_token(conn, key))?;
+        Ok(row)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::sqlite::DB_SCHEMA_VERSION;
+    use crate::storage::traits::{TokenKey, TokenOwnership};
+    use crate::types::{SlotNumber, TokenId};
+    use bitcoin::Txid;
     use rusqlite::{Connection, OptionalExtension};
     use std::{
         str::FromStr,
@@ -448,5 +603,91 @@ mod tests {
         let last = repo.load_last().unwrap().unwrap();
         assert_eq!(last.height, 200);
         assert_eq!(last.hash, "hash200");
+    }
+
+    #[test]
+    fn sqlite_migrates_from_version_one() {
+        let path = unique_temp_file("brc721_migrate_v1", "db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+            CREATE TABLE chain_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                height INTEGER NOT NULL,
+                hash TEXT NOT NULL
+            );
+            CREATE TABLE collections (
+                id TEXT PRIMARY KEY,
+                evm_collection_address TEXT NOT NULL,
+                rebaseable INTEGER NOT NULL
+            );
+            PRAGMA user_version = 1;
+        "#,
+            )
+            .unwrap();
+        }
+
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, DB_SCHEMA_VERSION);
+        let has_table = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='token_ownerships'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(has_table.as_deref(), Some("token_ownerships"));
+    }
+
+    fn sample_token(collection: CollectionKey) -> TokenOwnership {
+        let slot = SlotNumber::new(5).unwrap();
+        let mut owner = [0u8; 20];
+        owner[19] = 0xAA;
+        let token_id = TokenId::new(slot, owner);
+        TokenOwnership {
+            key: TokenKey::new(collection, token_id),
+            owner_outpoint: OutPoint {
+                txid: Txid::from_str(
+                    "5a02c7bb0a55dfc8f915cb490df29262552d2b2c69f0a7f2bd908d1c8d3f9abc",
+                )
+                .unwrap(),
+                vout: 1,
+            },
+            registered_block_height: 100,
+            registered_tx_index: 2,
+        }
+    }
+
+    #[test]
+    fn sqlite_save_and_load_token() {
+        let path = unique_temp_file("brc721_save_token", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let collection = CollectionKey::new(10, 0);
+        let token = sample_token(collection.clone());
+
+        let tx = repo.begin_tx().unwrap();
+        tx.save_token(&token).unwrap();
+        let loaded = tx
+            .load_token(&token.key)
+            .unwrap()
+            .expect("token should exist");
+        assert_eq!(loaded, token);
+        tx.commit().unwrap();
+
+        let fetched = repo
+            .load_token(&token.key)
+            .unwrap()
+            .expect("token via storage");
+        assert_eq!(fetched, token);
     }
 }

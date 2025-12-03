@@ -1,15 +1,17 @@
-use super::RegisterCollectionData;
+use super::{RegisterCollectionData, RegisterOwnershipData};
 use crate::types::{Brc721Command, Brc721Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Brc721Message {
     RegisterCollection(RegisterCollectionData),
+    RegisterOwnership(RegisterOwnershipData),
 }
 
 impl Brc721Message {
     pub fn command(&self) -> Brc721Command {
         match self {
             Brc721Message::RegisterCollection(_) => Brc721Command::RegisterCollection,
+            Brc721Message::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
         }
     }
 
@@ -19,6 +21,7 @@ impl Brc721Message {
 
         match self {
             Brc721Message::RegisterCollection(data) => out.extend(data.to_bytes()),
+            Brc721Message::RegisterOwnership(data) => out.extend(data.to_bytes()),
         };
 
         out
@@ -37,6 +40,9 @@ impl TryFrom<&[u8]> for Brc721Message {
             Brc721Command::RegisterCollection => {
                 Brc721Message::RegisterCollection(RegisterCollectionData::try_from(rest)?)
             }
+            Brc721Command::RegisterOwnership => {
+                Brc721Message::RegisterOwnership(RegisterOwnershipData::try_from(rest)?)
+            }
         };
 
         Ok(msg)
@@ -46,8 +52,10 @@ impl TryFrom<&[u8]> for Brc721Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::RegisterCollectionData;
     use crate::types::{Brc721Command, Brc721Error};
+    use crate::types::{
+        OwnershipGroup, RegisterCollectionData, RegisterOwnershipData, SlotNumber, SlotRange,
+    };
     use ethereum_types::H160;
 
     #[test]
@@ -60,6 +68,12 @@ mod tests {
         let msg = Brc721Message::RegisterCollection(data);
 
         assert_eq!(msg.command(), Brc721Command::RegisterCollection);
+    }
+
+    #[test]
+    fn command_matches_variant_register_ownership() {
+        let msg = Brc721Message::RegisterOwnership(sample_register_ownership_data());
+        assert_eq!(msg.command(), Brc721Command::RegisterOwnership);
     }
 
     #[test]
@@ -126,5 +140,28 @@ mod tests {
             }
             other => panic!("expected InvalidLength(_, _), got {:?}", other),
         }
+    }
+
+    fn sample_register_ownership_data() -> RegisterOwnershipData {
+        RegisterOwnershipData {
+            collection_block_height: 42,
+            collection_tx_index: 1,
+            groups: vec![OwnershipGroup {
+                output_index: 1,
+                slot_ranges: vec![SlotRange::new(
+                    SlotNumber::new(0).unwrap(),
+                    SlotNumber::new(10).unwrap(),
+                )
+                .unwrap()],
+            }],
+        }
+    }
+
+    #[test]
+    fn to_bytes_and_from_bytes_roundtrip_register_ownership() {
+        let msg = Brc721Message::RegisterOwnership(sample_register_ownership_data());
+        let bytes = msg.to_bytes();
+        let parsed = Brc721Message::try_from(bytes.as_slice()).expect("ownership parsing");
+        assert_eq!(parsed, msg);
     }
 }
