@@ -1,21 +1,24 @@
-use anyhow::{Context, Result};
-use bitcoin::{Address, ScriptBuf, Transaction, TxOut};
+use anyhow::{anyhow, Context, Result};
+use bitcoin::{Address, Network, ScriptBuf, Transaction, TxOut};
 use bitcoin::{Amount, Psbt};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
+use hex;
 use url::Url;
 
 pub struct RemoteWallet {
     watch_name: String,
     rpc_url: Url,
     auth: Auth,
+    network: Network,
 }
 
 impl RemoteWallet {
-    pub fn new(watch_name: String, rpc_url: &Url, auth: Auth) -> Self {
+    pub fn new(watch_name: String, rpc_url: &Url, auth: Auth, network: Network) -> Self {
         Self {
             watch_name,
             rpc_url: rpc_url.clone(),
             auth,
+            network,
         }
     }
 
@@ -185,32 +188,69 @@ impl RemoteWallet {
         Ok(psbt)
     }
 
-    pub fn create_psbt_from_txout(&self, output: TxOut, fee_rate: Option<f64>) -> Result<Psbt> {
+    pub fn create_psbt_from_txouts(
+        &self,
+        outputs: &[TxOut],
+        fee_rate: Option<f64>,
+    ) -> Result<Psbt> {
         let client = self.watch_client()?;
+        if outputs.is_empty() {
+            return Err(anyhow!("at least one output is required"));
+        }
 
-        let script = output.script_pubkey;
-        let dummy = bitcoin::script::ScriptBuf::from(vec![0u8; script.len() - 2]);
+        let mut outputs_json = Vec::with_capacity(outputs.len());
+        let mut op_return_script: Option<ScriptBuf> = None;
+
+        for txout in outputs {
+            if txout.script_pubkey.is_op_return() {
+                if op_return_script.is_some() {
+                    return Err(anyhow!("multiple OP_RETURN outputs are not supported"));
+                }
+                let dummy_len = txout.script_pubkey.as_bytes().len().saturating_sub(2);
+                let dummy_payload = vec![0u8; dummy_len];
+                outputs_json.push(serde_json::json!({
+                    "data": hex::encode(dummy_payload)
+                }));
+                op_return_script = Some(txout.script_pubkey.clone());
+                continue;
+            }
+
+            if let Ok(address) = Address::from_script(&txout.script_pubkey, self.network) {
+                outputs_json.push(serde_json::json!({ address.to_string(): txout.value.to_btc() }));
+                continue;
+            }
+
+            return Err(anyhow!(
+                "unsupported script in custom outputs: {}",
+                txout.script_pubkey
+            ));
+        }
+
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);
         }
+
         let funded: serde_json::Value = client
             .call(
                 "walletcreatefundedpsbt",
                 &[
                     serde_json::json!([]),
-                    serde_json::json!([{"data": dummy}]),
+                    serde_json::Value::Array(outputs_json),
                     serde_json::json!(0),
                     options,
                     serde_json::json!(true),
                 ],
             )
-            .context("walletcreatefundedpsbt from raw tx data")?;
+            .context("walletcreatefundedpsbt custom outputs")?;
         let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
-        psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
-        psbt = move_opreturn_first(psbt);
+        if let Some(script) = op_return_script {
+            psbt = substitute_first_opreturn_script(psbt, script).context("opreturn swap")?;
+            psbt = move_opreturn_first(psbt);
+        }
+
         Ok(psbt)
     }
 
@@ -250,68 +290,6 @@ impl RemoteWallet {
                 .unwrap_or(false)
         }))
     }
-}
-
-fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
-    let opret_index_opt = psbt
-        .unsigned_tx
-        .output
-        .iter()
-        .position(|txout| txout.script_pubkey.is_op_return());
-
-    let Some(opret_index) = opret_index_opt else {
-        return psbt;
-    };
-
-    if opret_index == 0 {
-        return psbt;
-    }
-
-    // Reorder unsigned_tx.output
-    let mut new_tx_outputs = Vec::with_capacity(psbt.unsigned_tx.output.len());
-    let opret_txout = psbt.unsigned_tx.output[opret_index].clone();
-    new_tx_outputs.push(opret_txout);
-
-    for (i, txout) in psbt.unsigned_tx.output.iter().enumerate() {
-        if i != opret_index {
-            new_tx_outputs.push(txout.clone());
-        }
-    }
-    psbt.unsigned_tx.output = new_tx_outputs;
-
-    // Reorder PSBT outputs metadata consistently
-    let mut new_psbt_outputs = Vec::with_capacity(psbt.outputs.len());
-    let opret_meta = psbt.outputs[opret_index].clone();
-    new_psbt_outputs.push(opret_meta);
-
-    for (i, out_meta) in psbt.outputs.iter().enumerate() {
-        if i != opret_index {
-            new_psbt_outputs.push(out_meta.clone());
-        }
-    }
-    psbt.outputs = new_psbt_outputs;
-
-    psbt
-}
-
-/// Substitute the script of the first OP_RETURN output in a PSBT while keeping the amount unchanged.
-/// If no OP_RETURN output exists, the PSBT is returned unchanged.
-fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
-    let idx_opt = psbt
-        .unsigned_tx
-        .output
-        .iter()
-        .position(|txout| txout.script_pubkey.is_op_return());
-
-    let Some(idx) = idx_opt else {
-        return Ok(psbt);
-    };
-
-    let original_amount = psbt.unsigned_tx.output[idx].value;
-    psbt.unsigned_tx.output[idx].script_pubkey = new_script.clone();
-    psbt.unsigned_tx.output[idx].value = original_amount;
-
-    Ok(psbt)
 }
 
 #[cfg(test)]
@@ -357,7 +335,12 @@ mod tests {
         let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
         let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let mut wallet = create_wallet();
-        let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth.clone());
+        let remote_wallet = RemoteWallet::new(
+            "watch_only".to_string(),
+            &node_url,
+            auth.clone(),
+            Network::Regtest,
+        );
         let addr = wallet.reveal_next_address(KeychainKind::External);
         let external = wallet.public_descriptor(KeychainKind::External).to_string();
         let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
@@ -374,7 +357,7 @@ mod tests {
         };
 
         remote_wallet
-            .create_psbt_from_txout(output, None)
+            .create_psbt_from_txouts(&[output], None)
             .expect("psbt");
     }
 
@@ -384,7 +367,12 @@ mod tests {
         let auth = bitcoincore_rpc::Auth::CookieFile(node.params.cookie_file.clone());
         let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let mut wallet = create_wallet();
-        let remote_wallet = RemoteWallet::new("watch_only".to_string(), &node_url, auth.clone());
+        let remote_wallet = RemoteWallet::new(
+            "watch_only".to_string(),
+            &node_url,
+            auth.clone(),
+            Network::Regtest,
+        );
         let addr = wallet.reveal_next_address(KeychainKind::External);
         let external = wallet.public_descriptor(KeychainKind::External).to_string();
         let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
@@ -410,7 +398,7 @@ mod tests {
         assert_eq!(output.script_pubkey.len(), 4);
 
         let psbt = remote_wallet
-            .create_psbt_from_txout(output.clone(), None)
+            .create_psbt_from_txouts(&[output.clone()], None)
             .expect("psbt");
 
         assert_eq!(psbt.unsigned_tx.output.len(), 2);
@@ -427,7 +415,12 @@ mod tests {
         let node_url = url::Url::parse(&node.rpc_url()).unwrap();
         let wallet = create_wallet();
         let watch_name = "watch_only";
-        let remote_wallet = RemoteWallet::new(watch_name.to_string(), &node_url, auth.clone());
+        let remote_wallet = RemoteWallet::new(
+            watch_name.to_string(),
+            &node_url,
+            auth.clone(),
+            Network::Regtest,
+        );
         let external = wallet.public_descriptor(KeychainKind::External).to_string();
         let internal = wallet.public_descriptor(KeychainKind::Internal).to_string();
         remote_wallet
@@ -451,4 +444,58 @@ mod tests {
             "load_wallet should load the wallet into Core"
         );
     }
+}
+
+fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
+    let opret_index_opt = psbt
+        .unsigned_tx
+        .output
+        .iter()
+        .position(|txout| txout.script_pubkey.is_op_return());
+
+    let Some(opret_index) = opret_index_opt else {
+        return psbt;
+    };
+
+    if opret_index == 0 {
+        return psbt;
+    }
+
+    let mut new_outputs = Vec::with_capacity(psbt.unsigned_tx.output.len());
+    let opret_txout = psbt.unsigned_tx.output[opret_index].clone();
+    new_outputs.push(opret_txout);
+    for (idx, txout) in psbt.unsigned_tx.output.iter().enumerate() {
+        if idx != opret_index {
+            new_outputs.push(txout.clone());
+        }
+    }
+    psbt.unsigned_tx.output = new_outputs;
+
+    let mut new_psbt_outputs = Vec::with_capacity(psbt.outputs.len());
+    let opret_meta = psbt.outputs[opret_index].clone();
+    new_psbt_outputs.push(opret_meta);
+    for (idx, meta) in psbt.outputs.iter().enumerate() {
+        if idx != opret_index {
+            new_psbt_outputs.push(meta.clone());
+        }
+    }
+    psbt.outputs = new_psbt_outputs;
+    psbt
+}
+
+fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Result<Psbt> {
+    let idx_opt = psbt
+        .unsigned_tx
+        .output
+        .iter()
+        .position(|txout| txout.script_pubkey.is_op_return());
+
+    let Some(idx) = idx_opt else {
+        return Err(anyhow!("no OP_RETURN output found in PSBT"));
+    };
+
+    let amount = psbt.unsigned_tx.output[idx].value;
+    psbt.unsigned_tx.output[idx].script_pubkey = new_script;
+    psbt.unsigned_tx.output[idx].value = amount;
+    Ok(psbt)
 }

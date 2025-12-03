@@ -303,5 +303,4 @@ mod tests {
             other => panic!("unexpected error: {:?}", other),
         }
     }
-
 }

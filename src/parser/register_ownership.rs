@@ -148,10 +148,10 @@ mod tests {
     use crate::storage::traits::{CollectionKey, Storage, StorageTx, StorageWrite, TokenKey};
     use crate::storage::SqliteStorage;
     use crate::types::{OwnershipGroup, SlotRange};
-    use ethereum_types::H160;
     use bitcoin::{Amount, OutPoint, PublicKey, ScriptBuf, Transaction, TxIn, TxOut, Witness};
-    use tempfile::TempDir;
+    use ethereum_types::H160;
     use std::str::FromStr;
+    use tempfile::TempDir;
 
     fn sample_transaction() -> Transaction {
         let mut witness = Witness::new();

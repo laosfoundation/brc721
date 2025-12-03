@@ -3,7 +3,7 @@ use age::secrecy::SecretString;
 use anyhow::{Context, Result};
 use bdk_wallet::template::Bip86;
 use bdk_wallet::{bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind};
-use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
+use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt, TxOut};
 use bitcoincore_rpc::json;
 use bitcoincore_rpc::Auth;
 use std::path::Path;
@@ -30,7 +30,7 @@ impl Brc721Wallet {
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 
         let local = LocalWallet::create(&data_dir, network, external, internal)?;
-        let remote = RemoteWallet::new(local.id(), rpc_url, auth);
+        let remote = RemoteWallet::new(local.id(), rpc_url, auth, network);
 
         let signer = Signer::new(&data_dir, network);
         signer.store_master_key(&master_xprv, &passphrase)?;
@@ -49,7 +49,7 @@ impl Brc721Wallet {
         auth: Auth,
     ) -> Result<Brc721Wallet> {
         let local = LocalWallet::load(&data_dir, network)?;
-        let remote = RemoteWallet::new(local.id(), rpc_url, auth);
+        let remote = RemoteWallet::new(local.id(), rpc_url, auth, network);
         remote
             .load_wallet()
             .context("load remote bitcoin core wallet")?;
@@ -114,10 +114,22 @@ impl Brc721Wallet {
         fee_rate: Option<f64>,
         passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
+        self.build_custom_tx(vec![output], fee_rate, passphrase)
+    }
+
+    pub fn build_custom_tx(
+        &self,
+        outputs: Vec<TxOut>,
+        fee_rate: Option<f64>,
+        passphrase: SecretString,
+    ) -> Result<bitcoin::Transaction> {
+        if outputs.is_empty() {
+            return Err(anyhow::anyhow!("at least one output is required"));
+        }
         let psbt = self
             .remote
-            .create_psbt_from_txout(output, fee_rate)
-            .context("create psbt from outputs")?;
+            .create_psbt_from_txouts(&outputs, fee_rate)
+            .context("create psbt from custom outputs")?;
 
         self.sign(psbt, &passphrase)
     }
