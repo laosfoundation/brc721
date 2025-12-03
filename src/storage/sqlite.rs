@@ -420,8 +420,7 @@ mod tests {
         repo.init().unwrap();
 
         let tx = repo.begin_tx().unwrap();
-        let duplicate_addr =
-            H160::from_str("0xcccc000000000000000000000000000000000000").unwrap();
+        let duplicate_addr = H160::from_str("0xcccc000000000000000000000000000000000000").unwrap();
         tx.save_collection(CollectionKey::new(200, 0), duplicate_addr, true)
             .unwrap();
         tx.save_collection(CollectionKey::new(201, 1), duplicate_addr, false)
