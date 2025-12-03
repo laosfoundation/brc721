@@ -414,6 +414,28 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_allows_duplicate_evm_collection_addresses() {
+        let path = unique_temp_file("brc721_dup_addr", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let tx = repo.begin_tx().unwrap();
+        let duplicate_addr = H160::from_str("0xcccc000000000000000000000000000000000000").unwrap();
+        tx.save_collection(CollectionKey::new(200, 0), duplicate_addr, true)
+            .unwrap();
+        tx.save_collection(CollectionKey::new(201, 1), duplicate_addr, false)
+            .unwrap();
+        tx.commit().unwrap();
+
+        let collections = repo.list_collections().unwrap();
+        assert_eq!(collections.len(), 2);
+        assert_eq!(collections[0].key.to_string(), "200:0");
+        assert_eq!(collections[1].key.to_string(), "201:1");
+        assert_eq!(collections[0].evm_collection_address, duplicate_addr);
+        assert_eq!(collections[1].evm_collection_address, duplicate_addr);
+    }
+
+    #[test]
     fn sqlite_transaction_commit_persists_data() {
         let path = unique_temp_file("brc721_tx_commit", "db");
         let repo = SqliteStorage::new(&path);
