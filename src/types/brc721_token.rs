@@ -36,13 +36,13 @@ impl Brc721Token {
         self.h160_address
     }
 
-    pub fn to_u256(&self) -> U256 {
+    pub fn to_u256(self) -> U256 {
         let slot = U256::from(self.slot_number) << Self::ADDRESS_BITS;
         let addr = U256::from_big_endian(self.h160_address.as_bytes());
         slot | addr
     }
 
-    pub fn to_bytes(&self) -> [u8; Self::LEN] {
+    pub fn to_bytes(self) -> [u8; Self::LEN] {
         self.to_u256().to_big_endian()
     }
 }

@@ -143,7 +143,7 @@ fn parse_token_id(token_id: &str) -> Result<Brc721Token, TokenIdParseError> {
         return Err(TokenIdParseError::Empty);
     }
 
-    let normalized = if hex_part.len() % 2 != 0 {
+    let normalized = if hex_part.len().rem_euclid(2) != 0 {
         let mut padded = String::with_capacity(hex_part.len() + 1);
         padded.push('0');
         padded.push_str(hex_part);
