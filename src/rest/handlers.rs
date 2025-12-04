@@ -1,13 +1,11 @@
-use std::{fmt, net::SocketAddr, str::FromStr};
+use std::{fmt, str::FromStr};
 
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
-    Json, Router,
+    Json,
 };
-use serde::Serialize;
 
 use crate::{
     storage::{
@@ -17,110 +15,15 @@ use crate::{
     types::{Brc721Error, Brc721Token},
 };
 
-#[derive(Clone)]
-pub struct AppState<S: Storage> {
-    pub storage: S,
-    pub started_at: std::time::SystemTime,
-}
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-    uptime_secs: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ChainStateResponse {
-    last: Option<LastBlock>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CollectionResponse {
-    id: String,
-    evm_collection_address: String,
-    rebaseable: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CollectionsResponse {
-    collections: Vec<CollectionResponse>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TokenOwnerResponse {
-    collection_id: String,
-    token_id: String,
-    ownership_status: OwnershipStatus,
-    owner: TokenOwnerDetails,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum OwnershipStatus {
-    InitialOwner,
-    #[allow(dead_code)]
-    RegisteredOwner,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-enum TokenOwnerDetails {
-    InitialOwner {
-        #[serde(rename = "h160Address")]
-        h160_address: String,
+use super::{
+    models::{
+        ChainStateResponse, CollectionResponse, CollectionsResponse, HealthResponse, LastBlock,
+        OwnershipStatus, TokenOwnerDetails, TokenOwnerResponse,
     },
-    #[allow(dead_code)]
-    RegisteredOwner {
-        #[serde(rename = "outpoint")]
-        outpoint: String,
-    },
-}
+    AppState,
+};
 
-#[derive(Serialize)]
-struct LastBlock {
-    height: u64,
-    hash: String,
-}
-
-pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
-    addr: SocketAddr,
-    storage: S,
-    shutdown: tokio_util::sync::CancellationToken,
-) -> anyhow::Result<()> {
-    log::info!("🌐 REST service on http://{}", addr);
-
-    let state = AppState {
-        storage,
-        started_at: std::time::SystemTime::now(),
-    };
-
-    let app = Router::new()
-        .route("/health", get(health::<S>))
-        .route("/state", get(chain_state::<S>))
-        .route("/collection/:id", get(get_collection::<S>))
-        .route("/collections", get(list_collections::<S>))
-        .route(
-            "/api/v1/brc721/collections/:collection_id/tokens/:token_id/owner",
-            get(get_token_owner::<S>),
-        )
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.cancelled().await;
-            log::info!("🛑 REST shutdown requested");
-        })
-        .await?;
-    log::info!("👋 REST server exited");
-    Ok(())
-}
-
-async fn health<S: Storage + Clone + Send + Sync + 'static>(
+pub async fn health<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
     let uptime_secs = state.started_at.elapsed().map(|d| d.as_secs()).unwrap_or(0);
@@ -133,7 +36,7 @@ async fn health<S: Storage + Clone + Send + Sync + 'static>(
     )
 }
 
-async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
+pub async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
     let last = state.storage.load_last().ok().flatten().map(|b| LastBlock {
@@ -143,7 +46,7 @@ async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
     Json(ChainStateResponse { last })
 }
 
-async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
+pub async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
     let collections = state
@@ -156,7 +59,7 @@ async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
     Json(CollectionsResponse { collections })
 }
 
-async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
+pub async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
@@ -177,15 +80,7 @@ async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
     }
 }
 
-fn collection_to_response(collection: Collection) -> CollectionResponse {
-    CollectionResponse {
-        id: collection.key.to_string(),
-        evm_collection_address: format!("{:#x}", collection.evm_collection_address),
-        rebaseable: collection.rebaseable,
-    }
-}
-
-async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
+pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
     Path((collection_id, token_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
@@ -223,6 +118,14 @@ async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         },
     })
     .into_response()
+}
+
+fn collection_to_response(collection: Collection) -> CollectionResponse {
+    CollectionResponse {
+        id: collection.key.to_string(),
+        evm_collection_address: format!("{:#x}", collection.evm_collection_address),
+        rebaseable: collection.rebaseable,
+    }
 }
 
 fn parse_token_id(token_id: &str) -> Result<Brc721Token, TokenIdParseError> {
