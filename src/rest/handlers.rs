@@ -303,7 +303,7 @@ mod tests {
     ) -> axum::response::Response {
         let router = Router::new()
             .route(
-                "/api/v1/brc721/collections/:collection_id/tokens/:token_id/owner",
+                "/collections/:collection_id/tokens/:token_id/owner",
                 get(get_token_owner::<TestStorage>),
             )
             .with_state(AppState {
@@ -315,7 +315,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri(format!(
-                        "/api/v1/brc721/collections/{}/tokens/{}/owner",
+                        "/collections/{}/tokens/{}/owner",
                         collection_id, token_id
                     ))
                     .method("GET")

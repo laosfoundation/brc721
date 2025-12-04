@@ -33,7 +33,7 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
         .route("/collection/:id", get(get_collection::<S>))
         .route("/collections", get(list_collections::<S>))
         .route(
-            "/api/v1/brc721/collections/:collection_id/tokens/:token_id/owner",
+            "/collections/:collection_id/tokens/:token_id/owner",
             get(get_token_owner::<S>),
         )
         .with_state(state);
