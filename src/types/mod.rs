@@ -5,7 +5,6 @@ mod brc721_output;
 mod brc721_token;
 mod register_collection;
 
-#[allow(unused_imports)]
 pub use self::brc721_token::Brc721Token;
 use bitcoin::opcodes;
 pub use brc721_command::Brc721Command;
