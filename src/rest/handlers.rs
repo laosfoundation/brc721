@@ -18,7 +18,7 @@ use crate::{
 use super::{
     models::{
         ChainStateResponse, CollectionResponse, CollectionsResponse, HealthResponse, LastBlock,
-        OwnershipStatus, TokenOwnerDetails, TokenOwnerResponse,
+        OwnershipStatus, TokenOwnerResponse,
     },
     AppState,
 };
@@ -113,9 +113,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         collection_id: key.to_string(),
         token_id: format!("0x{}", hex::encode(token.to_bytes())),
         ownership_status: OwnershipStatus::InitialOwner,
-        owner: TokenOwnerDetails::InitialOwner {
-            h160_address: format!("{:#x}", token.h160_address()),
-        },
+        h160_address: format!("{:#x}", token.h160_address()),
     })
     .into_response()
 }
@@ -267,10 +265,7 @@ mod tests {
 
         assert_eq!(payload.collection_id, collection_id);
         assert_eq!(payload.token_id, token_hex);
-        assert!(matches!(
-            payload.owner,
-            TokenOwnerDetails::InitialOwner { .. }
-        ));
+        assert_eq!(payload.h160_address, format!("{:#x}", token.h160_address()));
     }
 
     #[tokio::test]

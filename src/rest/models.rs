@@ -38,7 +38,8 @@ pub struct TokenOwnerResponse {
     pub collection_id: String,
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
-    pub owner: TokenOwnerDetails,
+    #[serde(rename = "h160Address")]
+    pub h160_address: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,18 +48,4 @@ pub enum OwnershipStatus {
     InitialOwner,
     #[allow(dead_code)]
     RegisteredOwner,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum TokenOwnerDetails {
-    InitialOwner {
-        #[serde(rename = "h160Address")]
-        h160_address: String,
-    },
-    #[allow(dead_code)]
-    RegisteredOwner {
-        #[serde(rename = "outpoint")]
-        outpoint: String,
-    },
 }
