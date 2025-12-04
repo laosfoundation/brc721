@@ -1,18 +1,18 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub uptime_secs: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChainStateResponse {
     pub last: Option<LastBlock>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionResponse {
     pub id: String,
@@ -20,19 +20,19 @@ pub struct CollectionResponse {
     pub rebaseable: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionsResponse {
     pub collections: Vec<CollectionResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct LastBlock {
     pub height: u64,
     pub hash: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenOwnerResponse {
     pub collection_id: String,
@@ -41,7 +41,7 @@ pub struct TokenOwnerResponse {
     pub owner: TokenOwnerDetails,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OwnershipStatus {
     InitialOwner,
@@ -49,7 +49,7 @@ pub enum OwnershipStatus {
     RegisteredOwner,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TokenOwnerDetails {
     InitialOwner {

@@ -191,7 +191,25 @@ impl std::error::Error for TokenIdParseError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+        Router,
+    };
     use ethereum_types::H160;
+    use http_body_util::BodyExt;
+    use std::{
+        sync::{Arc, RwLock},
+        time::SystemTime,
+    };
+    use tower::ServiceExt;
+
+    use crate::storage::{
+        traits::{Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite},
+        Storage,
+    };
+    use anyhow::anyhow;
 
     fn sample_address() -> H160 {
         H160::from([
@@ -231,6 +249,161 @@ mod tests {
                 assert_eq!(bytes, Brc721Token::LEN + 1);
             }
             other => panic!("expected TooLong error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_token_owner_returns_initial_owner_payload() {
+        let collection = sample_collection();
+        let storage = TestStorage::with_collection(collection.clone());
+        let token = sample_token();
+        let token_hex = format!("0x{}", hex::encode(token.to_bytes()));
+        let collection_id = collection.key.to_string();
+
+        let response = issue_owner_request(storage, &collection_id, &token_hex).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.token_id, token_hex);
+        assert!(matches!(
+            payload.owner,
+            TokenOwnerDetails::InitialOwner { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn get_token_owner_rejects_bad_token_id() {
+        let collection = sample_collection();
+        let storage = TestStorage::with_collection(collection.clone());
+        let response = issue_owner_request(storage, &collection.key.to_string(), "not-hex").await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn get_token_owner_returns_404_for_unknown_collection() {
+        let storage = TestStorage::default();
+        let token_hex = format!("0x{}", hex::encode(sample_token().to_bytes()));
+        let response = issue_owner_request(storage, "850123:0", &token_hex).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn sample_token() -> Brc721Token {
+        Brc721Token::new(42, sample_address()).expect("valid token")
+    }
+
+    fn sample_collection() -> Collection {
+        Collection {
+            key: CollectionKey::new(850123, 0),
+            evm_collection_address: sample_address(),
+            rebaseable: false,
+        }
+    }
+
+    async fn issue_owner_request(
+        storage: TestStorage,
+        collection_id: &str,
+        token_id: &str,
+    ) -> axum::response::Response {
+        let router = Router::new()
+            .route(
+                "/api/v1/brc721/collections/:collection_id/tokens/:token_id/owner",
+                get(get_token_owner::<TestStorage>),
+            )
+            .with_state(AppState {
+                storage,
+                started_at: SystemTime::now(),
+            });
+
+        router
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/v1/brc721/collections/{}/tokens/{}/owner",
+                        collection_id, token_id
+                    ))
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[derive(Clone, Default)]
+    struct TestStorage {
+        collections: Arc<RwLock<Vec<Collection>>>,
+    }
+
+    impl TestStorage {
+        fn with_collection(collection: Collection) -> Self {
+            let storage = Self::default();
+            {
+                let mut guard = storage.collections.write().unwrap();
+                guard.push(collection);
+            }
+            storage
+        }
+    }
+
+    impl StorageRead for TestStorage {
+        fn load_last(&self) -> anyhow::Result<Option<Block>> {
+            Ok(None)
+        }
+
+        fn load_collection(&self, id: &CollectionKey) -> anyhow::Result<Option<Collection>> {
+            let collections = self.collections.read().unwrap();
+            Ok(collections.iter().find(|c| &c.key == id).cloned())
+        }
+
+        fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
+            Ok(self.collections.read().unwrap().clone())
+        }
+    }
+
+    impl Storage for TestStorage {
+        type Tx = NoopTx;
+
+        fn begin_tx(&self) -> anyhow::Result<Self::Tx> {
+            Err(anyhow!("transactions not supported in test storage"))
+        }
+    }
+
+    struct NoopTx;
+
+    impl StorageRead for NoopTx {
+        fn load_last(&self) -> anyhow::Result<Option<Block>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn load_collection(&self, _id: &CollectionKey) -> anyhow::Result<Option<Collection>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
+            Err(anyhow!("not implemented"))
+        }
+    }
+
+    impl StorageWrite for NoopTx {
+        fn save_last(&self, _height: u64, _hash: &str) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn save_collection(
+            &self,
+            _key: CollectionKey,
+            _evm_collection_address: H160,
+            _rebaseable: bool,
+        ) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+    }
+
+    impl StorageTx for NoopTx {
+        fn commit(self) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 }
