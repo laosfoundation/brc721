@@ -35,3 +35,5 @@ bdk_bitcoind_rpc = "0.22.0"
 corepc-node = { version = "0.8.0", features = ["26_2", "download"] }
 tempfile = "3.10"
 testcontainers = { version = "0.22", features = ["blocking"] }
+tower = "0.5"
+http-body-util = "0.1"
