@@ -30,7 +30,7 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     let app = Router::new()
         .route("/health", get(health::<S>))
         .route("/state", get(chain_state::<S>))
-        .route("/collection/:id", get(get_collection::<S>))
+        .route("/collections/:id", get(get_collection::<S>))
         .route("/collections", get(list_collections::<S>))
         .route(
             "/collections/:collection_id/tokens/:token_id",
