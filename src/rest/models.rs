@@ -27,6 +27,11 @@ pub struct CollectionsResponse {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct ErrorResponse {
+    pub message: &'static str,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct LastBlock {
     pub height: u64,
     pub hash: String,
@@ -38,8 +43,7 @@ pub struct TokenOwnerResponse {
     pub collection_id: String,
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
-    #[serde(rename = "h160Address")]
-    pub h160_address: String,
+    pub owner: String,
 }
 
 #[derive(Serialize, Deserialize)]

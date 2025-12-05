@@ -17,8 +17,8 @@ use crate::{
 
 use super::{
     models::{
-        ChainStateResponse, CollectionResponse, CollectionsResponse, HealthResponse, LastBlock,
-        OwnershipStatus, TokenOwnerResponse,
+        ChainStateResponse, CollectionResponse, CollectionsResponse, ErrorResponse, HealthResponse,
+        LastBlock, OwnershipStatus, TokenOwnerResponse,
     },
     AppState,
 };
@@ -113,9 +113,18 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         collection_id: key.to_string(),
         token_id: format!("0x{}", hex::encode(token.to_bytes())),
         ownership_status: OwnershipStatus::InitialOwner,
-        h160_address: format!("{:#x}", token.h160_address()),
+        owner: format!("{:#x}", token.h160_address()),
     })
     .into_response()
+}
+
+pub async fn not_found() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            message: "endpoint not found",
+        }),
+    )
 }
 
 fn collection_to_response(collection: Collection) -> CollectionResponse {
@@ -265,7 +274,7 @@ mod tests {
 
         assert_eq!(payload.collection_id, collection_id);
         assert_eq!(payload.token_id, token_hex);
-        assert_eq!(payload.h160_address, format!("{:#x}", token.h160_address()));
+        assert_eq!(payload.owner, format!("{:#x}", token.h160_address()));
     }
 
     #[tokio::test]
@@ -303,7 +312,7 @@ mod tests {
     ) -> axum::response::Response {
         let router = Router::new()
             .route(
-                "/collections/:collection_id/tokens/:token_id/owner",
+                "/collections/:collection_id/tokens/:token_id",
                 get(get_token_owner::<TestStorage>),
             )
             .with_state(AppState {
@@ -315,7 +324,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri(format!(
-                        "/collections/{}/tokens/{}/owner",
+                        "/collections/{}/tokens/{}",
                         collection_id, token_id
                     ))
                     .method("GET")
