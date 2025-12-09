@@ -176,7 +176,9 @@ impl fmt::Display for TokenIdParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TokenIdParseError::Empty => write!(f, "token id is empty"),
-            TokenIdParseError::InvalidDecimal(err) => write!(f, "invalid decimal token id: {}", err),
+            TokenIdParseError::InvalidDecimal(err) => {
+                write!(f, "invalid decimal token id: {}", err)
+            }
             TokenIdParseError::TokenDecode(err) => write!(f, "invalid token encoding: {}", err),
         }
     }
@@ -226,7 +228,7 @@ mod tests {
 
     #[test]
     fn parse_token_id_rejects_oversized_values() {
-        let oversized = format!("{}0", U256::MAX.to_string());
+        let oversized = format!("{}0", U256::MAX);
         let err = parse_token_id(&oversized).unwrap_err();
         assert!(matches!(err, TokenIdParseError::InvalidDecimal(_)));
     }
