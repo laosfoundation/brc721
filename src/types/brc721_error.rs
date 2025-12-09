@@ -12,6 +12,8 @@ pub enum Brc721Error {
     UnknownCommand(u8),
     #[error("invalid rebase flag: {0}")]
     InvalidRebaseFlag(u8),
+    #[error("slot number too large for 96 bits: {0}")]
+    InvalidSlotNumber(u128),
     #[error("Storage error: {0}")]
     StorageError(String),
     #[error("Tx error: {0}")]

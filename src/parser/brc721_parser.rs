@@ -148,11 +148,12 @@ mod tests {
             header,
             txdata: vec![tx],
         };
+        let temp_dir = tempfile::tempdir().expect("create temp dir for db");
         let storage =
-            crate::storage::SqliteStorage::new(std::env::temp_dir().join("test_db.sqlite"));
-        storage.init().unwrap();
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_parser_test.db"));
+        storage.init().expect("init the database");
         let parser = Brc721Parser::new();
-        let tx = storage.begin_tx().unwrap();
+        let tx = storage.begin_tx().expect("init the tx");
         let r = parser.parse_block(&tx, &block, 0);
         assert!(r.is_ok());
         tx.commit().unwrap();
