@@ -28,7 +28,7 @@ pub struct CollectionsResponse {
 
 #[derive(Serialize, Deserialize)]
 pub struct ErrorResponse {
-    pub message: &'static str,
+    pub message: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,7 +44,6 @@ pub struct TokenOwnerResponse {
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
     pub owner_h160: String,
-    pub owner_bitcoin: String,
 }
 
 #[derive(Serialize, Deserialize)]

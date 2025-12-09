@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use bitcoin::hashes::{hash160, Hash};
+use ethereum_types::U256;
 
 use crate::{
     storage::{
@@ -106,18 +106,23 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         Ok(token) => token,
         Err(err) => {
             log::warn!("Invalid token id {}: {}", token_id, err);
-            return StatusCode::BAD_REQUEST.into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    message: "invalid token id".to_string(),
+                }),
+            )
+                .into_response();
         }
     };
 
-    let (owner_h160, owner_bitcoin) = owner_addresses(&token);
+    let owner_h160 = format_owner_h160(&token);
 
     Json(TokenOwnerResponse {
         collection_id: key.to_string(),
         token_id: format_token_id(&token),
         ownership_status: OwnershipStatus::InitialOwner,
         owner_h160,
-        owner_bitcoin,
     })
     .into_response()
 }
@@ -126,7 +131,7 @@ pub async fn not_found() -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
         Json(ErrorResponse {
-            message: "endpoint not found",
+            message: "endpoint not found".to_string(),
         }),
     )
 }
@@ -145,73 +150,33 @@ fn parse_token_id(token_id: &str) -> Result<Brc721Token, TokenIdParseError> {
         return Err(TokenIdParseError::Empty);
     }
 
-    let hex_part = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-        .unwrap_or(trimmed);
+    let value = U256::from_dec_str(trimmed).map_err(TokenIdParseError::InvalidDecimal)?;
 
-    if hex_part.is_empty() {
-        return Err(TokenIdParseError::Empty);
-    }
-
-    let normalized = if hex_part.len().rem_euclid(2) != 0 {
-        let mut padded = String::with_capacity(hex_part.len() + 1);
-        padded.push('0');
-        padded.push_str(hex_part);
-        padded
-    } else {
-        hex_part.to_owned()
-    };
-
-    let byte_len = normalized.len() / 2;
-    if byte_len > Brc721Token::LEN {
-        return Err(TokenIdParseError::TooLong(byte_len));
-    }
-
-    let decoded = hex::decode(&normalized).map_err(TokenIdParseError::InvalidHex)?;
-    let mut padded = [0u8; Brc721Token::LEN];
-    let start = Brc721Token::LEN - decoded.len();
-    padded[start..].copy_from_slice(&decoded);
-
-    Brc721Token::try_from(padded).map_err(TokenIdParseError::TokenDecode)
+    Brc721Token::try_from(value).map_err(TokenIdParseError::TokenDecode)
 }
 
 fn format_token_id(token: &Brc721Token) -> String {
-    let encoded = hex::encode(token.to_bytes());
-    let trimmed = encoded.trim_start_matches('0');
-    let normalized = if trimmed.is_empty() { "0" } else { trimmed };
-    format!("0x{}", normalized)
+    token.to_u256().to_string()
 }
 
-fn format_bitcoin_addr(token: &Brc721Token) -> String {
-    let hashed = hash160::Hash::hash(token.h160_address().as_bytes());
-    let hashed_bytes: &[u8] = hashed.as_ref();
-    format!("0x{}", hex::encode(hashed_bytes))
-}
-
-fn owner_addresses(token: &Brc721Token) -> (String, String) {
-    (
-        format!("{:#x}", token.h160_address()),
-        format_bitcoin_addr(token),
-    )
+fn format_owner_h160(token: &Brc721Token) -> String {
+    format!("{:#x}", token.h160_address())
 }
 
 #[derive(Debug)]
 enum TokenIdParseError {
     Empty,
-    TooLong(usize),
-    InvalidHex(hex::FromHexError),
+    InvalidDecimal(U256FromDecStrError),
     TokenDecode(Brc721Error),
 }
+
+type U256FromDecStrError = ethereum_types::FromDecStrErr;
 
 impl fmt::Display for TokenIdParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TokenIdParseError::Empty => write!(f, "token id is empty"),
-            TokenIdParseError::TooLong(len) => {
-                write!(f, "token id is too long: {} bytes", len)
-            }
-            TokenIdParseError::InvalidHex(err) => write!(f, "invalid hex token id: {}", err),
+            TokenIdParseError::InvalidDecimal(err) => write!(f, "invalid decimal token id: {}", err),
             TokenIdParseError::TokenDecode(err) => write!(f, "invalid token encoding: {}", err),
         }
     }
@@ -228,7 +193,7 @@ mod tests {
         routing::get,
         Router,
     };
-    use ethereum_types::H160;
+    use ethereum_types::{H160, U256};
     use http_body_util::BodyExt;
     use std::{
         sync::{Arc, RwLock},
@@ -250,23 +215,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_token_id_accepts_prefixed_hex() {
+    fn parse_token_id_accepts_decimal() {
         let slot: u128 = 0x0000_abcd_ef01_2345_6789_abcd;
         let token = Brc721Token::new(slot, sample_address()).expect("valid token");
-        let encoded = format!("0x{}", hex::encode(token.to_bytes()));
-
-        let parsed = parse_token_id(&encoded).expect("parse success");
-        assert_eq!(parsed, token);
-    }
-
-    #[test]
-    fn parse_token_id_accepts_unprefixed_and_short_hex() {
-        let slot: u128 = 42;
-        let token = Brc721Token::new(slot, sample_address()).expect("valid token");
-        let mut encoded = hex::encode(token.to_bytes());
-        while encoded.starts_with('0') {
-            encoded.remove(0);
-        }
+        let encoded = token.to_u256().to_string();
 
         let parsed = parse_token_id(&encoded).expect("parse success");
         assert_eq!(parsed, token);
@@ -274,13 +226,9 @@ mod tests {
 
     #[test]
     fn parse_token_id_rejects_oversized_values() {
-        let oversized = "11".repeat(Brc721Token::LEN + 1);
-        match parse_token_id(&oversized) {
-            Err(TokenIdParseError::TooLong(bytes)) => {
-                assert_eq!(bytes, Brc721Token::LEN + 1);
-            }
-            other => panic!("expected TooLong error, got {:?}", other),
-        }
+        let oversized = format!("{}0", U256::MAX.to_string());
+        let err = parse_token_id(&oversized).unwrap_err();
+        assert!(matches!(err, TokenIdParseError::InvalidDecimal(_)));
     }
 
     #[tokio::test]
@@ -288,41 +236,38 @@ mod tests {
         let collection = sample_collection();
         let storage = TestStorage::with_collection(collection.clone());
         let token = sample_token();
-        let padded_token_hex = format!("0x{}", hex::encode(token.to_bytes()));
-        let token_hex = format_token_id(&token);
-        let expected_bitcoin_addr = format_bitcoin_addr(&token);
+        let token_decimal = format_token_id(&token);
+        let expected_owner_h160 = format_owner_h160(&token);
         let collection_id = collection.key.to_string();
 
-        let response = issue_owner_request(storage, &collection_id, &token_hex).await;
+        let response = issue_owner_request(storage, &collection_id, &token_decimal).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
         let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
 
-        assert!(padded_token_hex.starts_with("0x00"));
-        assert!(!token_hex.starts_with("0x00"));
-        assert_ne!(
-            token_hex, padded_token_hex,
-            "expected token id to be trimmed"
-        );
         assert_eq!(payload.collection_id, collection_id);
-        assert_eq!(payload.token_id, token_hex);
-        assert_eq!(payload.owner_h160, format!("{:#x}", token.h160_address()));
-        assert_eq!(payload.owner_bitcoin, expected_bitcoin_addr);
+        assert_eq!(payload.token_id, token_decimal);
+        assert_eq!(payload.owner_h160, expected_owner_h160);
     }
 
     #[tokio::test]
     async fn get_token_owner_rejects_bad_token_id() {
         let collection = sample_collection();
         let storage = TestStorage::with_collection(collection.clone());
-        let response = issue_owner_request(storage, &collection.key.to_string(), "not-hex").await;
+        let response =
+            issue_owner_request(storage, &collection.key.to_string(), "not-a-number").await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: ErrorResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(payload.message, "invalid token id");
     }
 
     #[tokio::test]
     async fn get_token_owner_returns_404_for_unknown_collection() {
         let storage = TestStorage::default();
-        let token_hex = format!("0x{}", hex::encode(sample_token().to_bytes()));
-        let response = issue_owner_request(storage, "850123:0", &token_hex).await;
+        let token_decimal = format_token_id(&sample_token());
+        let response = issue_owner_request(storage, "850123:0", &token_decimal).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
