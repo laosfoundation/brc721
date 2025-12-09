@@ -111,7 +111,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
 
     Json(TokenOwnerResponse {
         collection_id: key.to_string(),
-        token_id: format!("0x{}", hex::encode(token.to_bytes())),
+        token_id: format_token_id(&token),
         ownership_status: OwnershipStatus::InitialOwner,
         owner: format!("{:#x}", token.h160_address()),
     })
@@ -170,6 +170,13 @@ fn parse_token_id(token_id: &str) -> Result<Brc721Token, TokenIdParseError> {
     padded[start..].copy_from_slice(&decoded);
 
     Brc721Token::try_from(padded).map_err(TokenIdParseError::TokenDecode)
+}
+
+fn format_token_id(token: &Brc721Token) -> String {
+    let encoded = hex::encode(token.to_bytes());
+    let trimmed = encoded.trim_start_matches('0');
+    let normalized = if trimmed.is_empty() { "0" } else { trimmed };
+    format!("0x{}", normalized)
 }
 
 #[derive(Debug)]
@@ -264,7 +271,8 @@ mod tests {
         let collection = sample_collection();
         let storage = TestStorage::with_collection(collection.clone());
         let token = sample_token();
-        let token_hex = format!("0x{}", hex::encode(token.to_bytes()));
+        let padded_token_hex = format!("0x{}", hex::encode(token.to_bytes()));
+        let token_hex = format_token_id(&token);
         let collection_id = collection.key.to_string();
 
         let response = issue_owner_request(storage, &collection_id, &token_hex).await;
@@ -272,6 +280,9 @@ mod tests {
         let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
         let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
 
+        assert!(padded_token_hex.starts_with("0x00"));
+        assert!(!token_hex.starts_with("0x00"));
+        assert_ne!(token_hex, padded_token_hex, "expected token id to be trimmed");
         assert_eq!(payload.collection_id, collection_id);
         assert_eq!(payload.token_id, token_hex);
         assert_eq!(payload.owner, format!("{:#x}", token.h160_address()));
