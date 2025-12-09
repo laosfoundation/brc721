@@ -43,7 +43,8 @@ pub struct TokenOwnerResponse {
     pub collection_id: String,
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
-    pub owner: String,
+    pub owner_h160: String,
+    pub owner_bitcoin: String,
 }
 
 #[derive(Serialize, Deserialize)]

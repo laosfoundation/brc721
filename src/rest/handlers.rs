@@ -6,6 +6,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use bitcoin::hashes::{hash160, Hash};
 
 use crate::{
     storage::{
@@ -109,11 +110,14 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         }
     };
 
+    let (owner_h160, owner_bitcoin) = owner_addresses(&token);
+
     Json(TokenOwnerResponse {
         collection_id: key.to_string(),
         token_id: format_token_id(&token),
         ownership_status: OwnershipStatus::InitialOwner,
-        owner: format!("{:#x}", token.h160_address()),
+        owner_h160,
+        owner_bitcoin,
     })
     .into_response()
 }
@@ -177,6 +181,19 @@ fn format_token_id(token: &Brc721Token) -> String {
     let trimmed = encoded.trim_start_matches('0');
     let normalized = if trimmed.is_empty() { "0" } else { trimmed };
     format!("0x{}", normalized)
+}
+
+fn format_bitcoin_addr(token: &Brc721Token) -> String {
+    let hashed = hash160::Hash::hash(token.h160_address().as_bytes());
+    let hashed_bytes: &[u8] = hashed.as_ref();
+    format!("0x{}", hex::encode(hashed_bytes))
+}
+
+fn owner_addresses(token: &Brc721Token) -> (String, String) {
+    (
+        format!("{:#x}", token.h160_address()),
+        format_bitcoin_addr(token),
+    )
 }
 
 #[derive(Debug)]
@@ -273,6 +290,7 @@ mod tests {
         let token = sample_token();
         let padded_token_hex = format!("0x{}", hex::encode(token.to_bytes()));
         let token_hex = format_token_id(&token);
+        let expected_bitcoin_addr = format_bitcoin_addr(&token);
         let collection_id = collection.key.to_string();
 
         let response = issue_owner_request(storage, &collection_id, &token_hex).await;
@@ -282,10 +300,14 @@ mod tests {
 
         assert!(padded_token_hex.starts_with("0x00"));
         assert!(!token_hex.starts_with("0x00"));
-        assert_ne!(token_hex, padded_token_hex, "expected token id to be trimmed");
+        assert_ne!(
+            token_hex, padded_token_hex,
+            "expected token id to be trimmed"
+        );
         assert_eq!(payload.collection_id, collection_id);
         assert_eq!(payload.token_id, token_hex);
-        assert_eq!(payload.owner, format!("{:#x}", token.h160_address()));
+        assert_eq!(payload.owner_h160, format!("{:#x}", token.h160_address()));
+        assert_eq!(payload.owner_bitcoin, expected_bitcoin_addr);
     }
 
     #[tokio::test]
