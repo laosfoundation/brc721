@@ -53,8 +53,8 @@ impl TryFrom<&[u8]> for Brc721Message {
 mod tests {
     use super::*;
     use crate::types::register_ownership::{OwnershipGroup, SlotRange};
-    use crate::types::{RegisterCollectionData, RegisterOwnershipData};
     use crate::types::{Brc721Command, Brc721Error};
+    use crate::types::{RegisterCollectionData, RegisterOwnershipData};
     use ethereum_types::H160;
 
     #[test]
@@ -166,7 +166,10 @@ mod tests {
                 },
                 OwnershipGroup {
                     output_index: 2,
-                    ranges: vec![SlotRange { start: 100, end: 105 }],
+                    ranges: vec![SlotRange {
+                        start: 100,
+                        end: 105,
+                    }],
                 },
             ],
         )
@@ -184,9 +187,19 @@ mod tests {
         let bytes = vec![
             Brc721Command::RegisterOwnership.into(),
             // collection height (8 bytes)
-            0, 0, 0, 0, 0, 0, 0, 1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
             // collection tx index (4 bytes)
-            0, 0, 0, 2,
+            0,
+            0,
+            0,
+            2,
             // group count
             0,
         ];
