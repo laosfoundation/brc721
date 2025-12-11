@@ -4,6 +4,7 @@ mod brc721_message;
 mod brc721_output;
 mod brc721_token;
 mod register_collection;
+mod register_ownership;
 
 pub use self::brc721_token::Brc721Token;
 use bitcoin::opcodes;
@@ -12,5 +13,6 @@ pub use brc721_error::Brc721Error;
 pub use brc721_message::Brc721Message;
 pub use brc721_output::Brc721Output;
 pub use register_collection::RegisterCollectionData;
+pub use register_ownership::RegisterOwnershipData;
 
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
