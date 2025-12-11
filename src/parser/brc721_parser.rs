@@ -22,6 +22,9 @@ impl Brc721Parser {
             Brc721Message::RegisterCollection(data) => {
                 crate::parser::register_collection::digest(data, tx, block_height, tx_index)
             }
+            Brc721Message::RegisterOwnership(data) => {
+                crate::parser::register_ownership::digest(data, tx, block_height, tx_index)
+            }
         }
     }
 }
@@ -38,7 +41,16 @@ impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
             let brc721_output = match Brc721Output::from_output(first_output) {
                 Ok(output) => output,
                 Err(e) => {
-                    log::debug!("Skipping output: {:?}", e);
+                    if e == Brc721Error::InvalidPayload {
+                        log::debug!("Skipping output: {:?}", e);
+                    } else {
+                        log::warn!(
+                            "Invalid BRC-721 message at block {} tx {}: {:?}",
+                            block_height,
+                            tx_index,
+                            e
+                        );
+                    }
                     continue;
                 }
             };

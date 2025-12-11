@@ -1,15 +1,17 @@
-use super::RegisterCollectionData;
+use super::{RegisterCollectionData, RegisterOwnershipData};
 use crate::types::{Brc721Command, Brc721Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Brc721Message {
     RegisterCollection(RegisterCollectionData),
+    RegisterOwnership(RegisterOwnershipData),
 }
 
 impl Brc721Message {
     pub fn command(&self) -> Brc721Command {
         match self {
             Brc721Message::RegisterCollection(_) => Brc721Command::RegisterCollection,
+            Brc721Message::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
         }
     }
 
@@ -19,6 +21,7 @@ impl Brc721Message {
 
         match self {
             Brc721Message::RegisterCollection(data) => out.extend(data.to_bytes()),
+            Brc721Message::RegisterOwnership(data) => out.extend(data.to_bytes()),
         };
 
         out
@@ -37,6 +40,9 @@ impl TryFrom<&[u8]> for Brc721Message {
             Brc721Command::RegisterCollection => {
                 Brc721Message::RegisterCollection(RegisterCollectionData::try_from(rest)?)
             }
+            Brc721Command::RegisterOwnership => {
+                Brc721Message::RegisterOwnership(RegisterOwnershipData::try_from(rest)?)
+            }
         };
 
         Ok(msg)
@@ -46,7 +52,8 @@ impl TryFrom<&[u8]> for Brc721Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::RegisterCollectionData;
+    use crate::types::register_ownership::{OwnershipGroup, SlotRange};
+    use crate::types::{RegisterCollectionData, RegisterOwnershipData};
     use crate::types::{Brc721Command, Brc721Error};
     use ethereum_types::H160;
 
@@ -60,6 +67,22 @@ mod tests {
         let msg = Brc721Message::RegisterCollection(data);
 
         assert_eq!(msg.command(), Brc721Command::RegisterCollection);
+    }
+
+    #[test]
+    fn command_matches_register_ownership_variant() {
+        let data = RegisterOwnershipData::new(
+            840_000,
+            2,
+            vec![OwnershipGroup {
+                output_index: 1,
+                ranges: vec![SlotRange { start: 0, end: 10 }],
+            }],
+        )
+        .expect("valid ownership data");
+        let msg = Brc721Message::RegisterOwnership(data);
+
+        assert_eq!(msg.command(), Brc721Command::RegisterOwnership);
     }
 
     #[test]
@@ -125,6 +148,53 @@ mod tests {
                 assert_eq!(actual, 0);
             }
             other => panic!("expected InvalidLength(_, _), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn to_bytes_and_from_bytes_roundtrip_register_ownership() {
+        let data = RegisterOwnershipData::new(
+            123,
+            1,
+            vec![
+                OwnershipGroup {
+                    output_index: 1,
+                    ranges: vec![
+                        SlotRange { start: 0, end: 5 },
+                        SlotRange { start: 10, end: 20 },
+                    ],
+                },
+                OwnershipGroup {
+                    output_index: 2,
+                    ranges: vec![SlotRange { start: 100, end: 105 }],
+                },
+            ],
+        )
+        .expect("valid ownership data");
+        let msg = Brc721Message::RegisterOwnership(data.clone());
+
+        let bytes = msg.to_bytes();
+        let parsed = Brc721Message::try_from(bytes.as_slice()).expect("parsing should succeed");
+
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn from_bytes_rejects_register_ownership_with_zero_groups() {
+        let bytes = vec![
+            Brc721Command::RegisterOwnership.into(),
+            // collection height (8 bytes)
+            0, 0, 0, 0, 0, 0, 0, 1,
+            // collection tx index (4 bytes)
+            0, 0, 0, 2,
+            // group count
+            0,
+        ];
+
+        let res = Brc721Message::try_from(bytes.as_slice());
+        match res {
+            Err(Brc721Error::InvalidGroupCount(0)) => {}
+            other => panic!("expected InvalidGroupCount, got {:?}", other),
         }
     }
 }
