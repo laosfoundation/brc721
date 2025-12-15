@@ -9,7 +9,7 @@ pub fn bitcoind_image() -> ContainerRequest<GenericImage> {
     GenericImage::new("bitcoin/bitcoin", "latest")
         .with_wait_for(WaitFor::message_on_stdout("Binding RPC on address"))
         .with_wait_for(WaitFor::message_on_stdout("init message: Done loading"))
-        .with_mapped_port(18443, ContainerPort::Tcp(18443))
+        .with_exposed_port(ContainerPort::Tcp(18443))
         .with_cmd(vec![
             "bitcoind".to_string(),
             "-regtest=1".to_string(),
