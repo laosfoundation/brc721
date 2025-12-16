@@ -1,6 +1,7 @@
 use crate::storage::traits::StorageWrite;
 use crate::types::{Brc721Error, Brc721Message, Brc721Output};
 use bitcoin::Block;
+use bitcoin::Transaction;
 
 use crate::parser::BlockParser;
 
@@ -11,62 +12,88 @@ impl Brc721Parser {
         Self
     }
 
-    fn digest<T: StorageWrite>(
+    fn parse_tx<T: StorageWrite>(
         &self,
-        tx: &T,
-        output: &Brc721Output,
+        storage: &T,
+        bitcoin_tx: &Transaction,
+        block_height: u64,
+        tx_index: u32,
+    ) {
+        let Some(first_tx_out) = bitcoin_tx.output.first() else {
+            return;
+        };
+
+        let brc721_output = match Brc721Output::from_output(first_tx_out) {
+            Ok(output) => output,
+            Err(e) => {
+                if e == Brc721Error::InvalidPayload {
+                    return;
+                }
+                log::warn!(
+                    "Invalid BRC-721 message at block {} tx {}: {:?}",
+                    block_height,
+                    tx_index,
+                    e
+                );
+                return;
+            }
+        };
+
+        log::info!(
+            "📦 Found BRC-721 message at block {}, tx {}",
+            block_height,
+            tx_index
+        );
+
+        if let Err(ref e) = self.digest_brc721_message(
+            storage,
+            brc721_output.message(),
+            bitcoin_tx,
+            block_height,
+            tx_index,
+        ) {
+            log::warn!("{:?}", e);
+        }
+    }
+
+    fn digest_brc721_message<T: StorageWrite>(
+        &self,
+        storage: &T,
+        message: &Brc721Message,
+        bitcoin_tx: &Transaction,
         block_height: u64,
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
-        match output.message() {
+        match message {
             Brc721Message::RegisterCollection(data) => {
-                crate::parser::register_collection::digest(data, tx, block_height, tx_index)
+                crate::parser::register_collection::digest(data, storage, block_height, tx_index)
             }
-            Brc721Message::RegisterOwnership(data) => {
-                crate::parser::register_ownership::digest(data, tx, block_height, tx_index)
-            }
+            Brc721Message::RegisterOwnership(data) => crate::parser::register_ownership::digest(
+                data,
+                storage,
+                bitcoin_tx,
+                block_height,
+                tx_index,
+            ),
         }
     }
 }
 
 impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
-    fn parse_block(&self, tx: &T, block: &Block, block_height: u64) -> Result<(), Brc721Error> {
+    fn parse_block(
+        &self,
+        storage: &T,
+        block: &Block,
+        block_height: u64,
+    ) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
 
-        for (tx_index, tx_data) in block.txdata.iter().enumerate() {
-            let Some(first_output) = tx_data.output.first() else {
-                continue;
-            };
-            let brc721_output = match Brc721Output::from_output(first_output) {
-                Ok(output) => output,
-                Err(e) => {
-                    if e == Brc721Error::InvalidPayload {
-                        log::debug!("Skipping output: {:?}", e);
-                    } else {
-                        log::warn!(
-                            "Invalid BRC-721 message at block {} tx {}: {:?}",
-                            block_height,
-                            tx_index,
-                            e
-                        );
-                    }
-                    continue;
-                }
-            };
-
-            log::info!(
-                "📦 Found BRC-721 tx at block {}, tx {}",
-                block_height,
-                tx_index
-            );
-
-            if let Err(ref e) = self.digest(tx, &brc721_output, block_height, tx_index as u32) {
-                log::warn!("{:?}", e);
-            }
+        for (tx_index, bitcoin_tx) in block.txdata.iter().enumerate() {
+            self.parse_tx(storage, bitcoin_tx, block_height, tx_index as u32);
         }
         // Persist last processed block once per block
-        if let Err(e) = tx.save_last(block_height, &hash_str) {
+        if let Err(e) = storage.save_last(block_height, &hash_str) {
             log::error!(
                 "storage error saving block {} at height {}: {}",
                 hash,
