@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
-use crate::types::{Brc721Message, Brc721Output, RegisterCollectionData};
+use crate::types::{Brc721Message, Brc721Output, RegisterCollectionData, RegisterOwnershipData};
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use age::secrecy::SecretString;
@@ -30,6 +30,10 @@ impl CommandRunner for cli::TxCmd {
                 fee_rate,
                 passphrase,
             } => run_send_amount(ctx, to, *amount_sat, *fee_rate, passphrase.clone()),
+            cli::TxCmd::RegisterOwnership {
+                fee_rate,
+                passphrase,
+            } => run_register_ownership(ctx, *fee_rate, passphrase.clone()),
         }
     }
 }
@@ -59,6 +63,28 @@ fn run_register_collection(
         "✅ Registered collection {:#x}, rebaseable: {}, txid: {}",
         evm_collection_address,
         rebaseable,
+        txid
+    );
+    Ok(())
+}
+
+fn run_register_ownership(
+    ctx: &context::Context,
+    fee_rate: Option<f64>,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let wallet = load_wallet(ctx)?;
+    let msg = Brc721Message::RegisterOwnership(RegisterOwnershipData::dummy());
+    let output = Brc721Output::new(msg).into_txout().unwrap();
+
+    let passphrase = resolve_passphrase(passphrase);
+    let tx = wallet
+        .build_tx(output, fee_rate, passphrase)
+        .context("build tx")?;
+    let txid = wallet.broadcast(&tx)?;
+
+    log::info!(
+        "✅ Registered ownership (dummy payload, cmd=0x01), txid: {}",
         txid
     );
     Ok(())

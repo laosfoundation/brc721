@@ -37,6 +37,26 @@ pub enum TxCmd {
         passphrase: Option<String>,
     },
     #[command(
+        about = "Register BRC-721 collection ownership (dummy payload)",
+        long_about = "Create and broadcast a transaction that registers BRC-721 collection ownership. This initial implementation sends a dummy payload using command code 0x01."
+    )]
+    RegisterOwnership {
+        #[arg(
+            long = "fee-rate",
+            value_name = "SAT/VB",
+            required = false,
+            help = "Fee rate in sat/vB (optional)"
+        )]
+        fee_rate: Option<f64>,
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Passphrase for signing",
+            required = false
+        )]
+        passphrase: Option<String>,
+    },
+    #[command(
         about = "Send a specific amount to an address",
         long_about = "Build and broadcast a transaction that sends the specified amount to the provided target address. Optionally set a custom fee rate (sat/vB)."
     )]

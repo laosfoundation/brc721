@@ -37,6 +37,18 @@ impl RegisterOwnershipData {
         Ok(data)
     }
 
+    pub fn dummy() -> Self {
+        Self::new(
+            0,
+            0,
+            vec![OwnershipGroup {
+                output_index: 1,
+                ranges: vec![SlotRange { start: 0, end: 0 }],
+            }],
+        )
+        .expect("dummy register ownership payload must be valid")
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         self.validate()
             .expect("register ownership payload must be valid before serialization");
@@ -222,6 +234,14 @@ mod tests {
     #[test]
     fn roundtrip_register_ownership_data() {
         let data = sample_payload();
+        let bytes = data.to_bytes();
+        let parsed = RegisterOwnershipData::try_from(bytes.as_slice()).expect("parse succeeds");
+        assert_eq!(parsed, data);
+    }
+
+    #[test]
+    fn dummy_payload_is_valid_and_roundtrips() {
+        let data = RegisterOwnershipData::dummy();
         let bytes = data.to_bytes();
         let parsed = RegisterOwnershipData::try_from(bytes.as_slice()).expect("parse succeeds");
         assert_eq!(parsed, data);

@@ -15,7 +15,7 @@ pub enum Command {
     },
     #[command(
         about = "Transaction-related commands",
-        long_about = "Build and submit protocol transactions, such as registering BRC-721 collections."
+        long_about = "Build and submit protocol transactions, such as registering BRC-721 collections and ownership."
     )]
     Tx {
         #[command(subcommand)]
