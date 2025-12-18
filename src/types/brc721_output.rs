@@ -171,7 +171,7 @@ mod tests {
         let res = Brc721Output::from_output(&txout);
 
         // This depends on how Brc721Error is modeled,
-        // but the idea is that it propagates the error from Brc721Message::from_bytes
+        // but the idea is that it propagates the error from Brc721Payload::try_from
         match res {
             Err(Brc721Error::InvalidLength(_, _)) => {}
             Err(e) => panic!("expected InvalidLength(..), got {:?}", e),

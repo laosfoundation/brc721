@@ -1,5 +1,5 @@
 use crate::storage::traits::StorageWrite;
-use crate::types::{parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx};
+use crate::types::{parse_brc721_tx, Brc721Command, Brc721Error, Brc721Payload, Brc721Tx};
 use bitcoin::Block;
 use bitcoin::Transaction;
 
@@ -34,7 +34,7 @@ impl Brc721Parser {
         };
 
         log::info!(
-            "📦 Found BRC-721 message at block {}, tx {}",
+            "📦 Found BRC-721 tx at block {}, tx {}",
             block_height,
             tx_index
         );
@@ -53,18 +53,28 @@ impl Brc721Parser {
         brc721_tx.validate()?;
 
         match brc721_tx.payload() {
-            Brc721Payload::RegisterCollection(_) => crate::parser::register_collection::digest(
-                brc721_tx,
-                storage,
-                block_height,
-                tx_index,
-            ),
-            Brc721Payload::RegisterOwnership(_) => crate::parser::register_ownership::digest(
-                brc721_tx,
-                storage,
-                block_height,
-                tx_index,
-            ),
+            Brc721Payload::RegisterCollection(payload) => {
+                crate::parser::register_collection::digest(
+                    payload,
+                    brc721_tx,
+                    storage,
+                    block_height,
+                    tx_index,
+                )
+            }
+            Brc721Payload::RegisterOwnership(payload) => {
+                log::error!(
+                    "register-ownership not supported yet (block {} tx {}, collection {}:{}, groups={})",
+                    block_height,
+                    tx_index,
+                    payload.collection_height,
+                    payload.collection_tx_index,
+                    payload.groups.len()
+                );
+                Err(Brc721Error::UnsupportedCommand {
+                    cmd: Brc721Command::RegisterOwnership,
+                })
+            }
         }
     }
 }

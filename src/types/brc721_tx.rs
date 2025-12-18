@@ -10,26 +10,16 @@ use bitcoin::Transaction;
 /// envelope keeps the full transaction available for validation/digestion.
 pub struct Brc721Tx<'a> {
     op_return: Brc721Output,
-    bitcoin_tx: &'a Transaction,
+    tx: &'a Transaction,
 }
 
 impl<'a> Brc721Tx<'a> {
     pub fn validate(&self) -> Result<(), Brc721Error> {
-        self.payload().validate_in_tx(self.bitcoin_tx)
+        self.payload().validate_in_tx(self.tx)
     }
 
     pub fn payload(&self) -> &Brc721Payload {
         self.op_return.payload()
-    }
-
-    #[allow(dead_code)]
-    pub fn bitcoin_tx(&self) -> &'a Transaction {
-        self.bitcoin_tx
-    }
-
-    #[allow(dead_code)]
-    pub fn op_return(&self) -> &Brc721Output {
-        &self.op_return
     }
 }
 
@@ -44,7 +34,7 @@ pub fn parse_brc721_tx(bitcoin_tx: &Transaction) -> Result<Option<Brc721Tx<'_>>,
     match Brc721Output::from_output(first_tx_out) {
         Ok(op_return) => Ok(Some(Brc721Tx {
             op_return,
-            bitcoin_tx,
+            tx: bitcoin_tx,
         })),
         Err(Brc721Error::InvalidPayload) => Ok(None),
         Err(e) => Err(e),
