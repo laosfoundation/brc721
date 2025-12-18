@@ -3,23 +3,23 @@ use crate::types::{Brc721Command, Brc721Error};
 use bitcoin::Transaction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Brc721Message {
+pub enum Brc721Payload {
     RegisterCollection(RegisterCollectionData),
     RegisterOwnership(RegisterOwnershipData),
 }
 
-impl Brc721Message {
+impl Brc721Payload {
     pub fn command(&self) -> Brc721Command {
         match self {
-            Brc721Message::RegisterCollection(_) => Brc721Command::RegisterCollection,
-            Brc721Message::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
+            Brc721Payload::RegisterCollection(_) => Brc721Command::RegisterCollection,
+            Brc721Payload::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
         }
     }
 
     pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
         match self {
-            Brc721Message::RegisterCollection(_) => Ok(()),
-            Brc721Message::RegisterOwnership(data) => data.validate_in_tx(bitcoin_tx),
+            Brc721Payload::RegisterCollection(_) => Ok(()),
+            Brc721Payload::RegisterOwnership(data) => data.validate_in_tx(bitcoin_tx),
         }
     }
 
@@ -28,15 +28,15 @@ impl Brc721Message {
         out.push(self.command().into());
 
         match self {
-            Brc721Message::RegisterCollection(data) => out.extend(data.to_bytes()),
-            Brc721Message::RegisterOwnership(data) => out.extend(data.to_bytes()),
+            Brc721Payload::RegisterCollection(data) => out.extend(data.to_bytes()),
+            Brc721Payload::RegisterOwnership(data) => out.extend(data.to_bytes()),
         };
 
         out
     }
 }
 
-impl TryFrom<&[u8]> for Brc721Message {
+impl TryFrom<&[u8]> for Brc721Payload {
     type Error = Brc721Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -46,10 +46,10 @@ impl TryFrom<&[u8]> for Brc721Message {
 
         let msg = match cmd {
             Brc721Command::RegisterCollection => {
-                Brc721Message::RegisterCollection(RegisterCollectionData::try_from(rest)?)
+                Brc721Payload::RegisterCollection(RegisterCollectionData::try_from(rest)?)
             }
             Brc721Command::RegisterOwnership => {
-                Brc721Message::RegisterOwnership(RegisterOwnershipData::try_from(rest)?)
+                Brc721Payload::RegisterOwnership(RegisterOwnershipData::try_from(rest)?)
             }
         };
 
@@ -72,7 +72,7 @@ mod tests {
             evm_collection_address: addr,
             rebaseable: true,
         };
-        let msg = Brc721Message::RegisterCollection(data);
+        let msg = Brc721Payload::RegisterCollection(data);
 
         assert_eq!(msg.command(), Brc721Command::RegisterCollection);
     }
@@ -88,7 +88,7 @@ mod tests {
             }],
         )
         .expect("valid ownership data");
-        let msg = Brc721Message::RegisterOwnership(data);
+        let msg = Brc721Payload::RegisterOwnership(data);
 
         assert_eq!(msg.command(), Brc721Command::RegisterOwnership);
     }
@@ -100,7 +100,7 @@ mod tests {
             evm_collection_address: addr,
             rebaseable: true,
         };
-        let msg = Brc721Message::RegisterCollection(data.clone());
+        let msg = Brc721Payload::RegisterCollection(data.clone());
 
         let bytes = msg.to_bytes();
 
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(cmd, Brc721Command::RegisterCollection);
 
         // roundtrip
-        let parsed = Brc721Message::try_from(bytes.as_slice()).expect("parsing should succeed");
+        let parsed = Brc721Payload::try_from(bytes.as_slice()).expect("parsing should succeed");
         assert_eq!(parsed, msg);
     }
 
@@ -121,7 +121,7 @@ mod tests {
     fn from_bytes_fails_on_empty_slice() {
         let bytes: [u8; 0] = [];
 
-        let res = Brc721Message::try_from(bytes.as_slice());
+        let res = Brc721Payload::try_from(bytes.as_slice());
 
         match res {
             Err(Brc721Error::ScriptTooShort) => {}
@@ -134,7 +134,7 @@ mod tests {
         // first byte = non-existent command, remaining bytes are random data
         let bytes = vec![0xFF, 0x00, 0x01];
 
-        let res = Brc721Message::try_from(bytes.as_slice());
+        let res = Brc721Payload::try_from(bytes.as_slice());
 
         match res {
             Err(Brc721Error::UnknownCommand(0xFF)) => {}
@@ -148,7 +148,7 @@ mod tests {
         let bytes = vec![Brc721Command::RegisterCollection.into()];
         // no payload, so `rest` will be empty
 
-        let res = Brc721Message::try_from(bytes.as_slice());
+        let res = Brc721Payload::try_from(bytes.as_slice());
 
         match res {
             Err(Brc721Error::InvalidLength(expected, actual)) => {
@@ -182,10 +182,10 @@ mod tests {
             ],
         )
         .expect("valid ownership data");
-        let msg = Brc721Message::RegisterOwnership(data.clone());
+        let msg = Brc721Payload::RegisterOwnership(data.clone());
 
         let bytes = msg.to_bytes();
-        let parsed = Brc721Message::try_from(bytes.as_slice()).expect("parsing should succeed");
+        let parsed = Brc721Payload::try_from(bytes.as_slice()).expect("parsing should succeed");
 
         assert_eq!(parsed, msg);
     }
@@ -212,7 +212,7 @@ mod tests {
             0,
         ];
 
-        let res = Brc721Message::try_from(bytes.as_slice());
+        let res = Brc721Payload::try_from(bytes.as_slice());
         match res {
             Err(Brc721Error::InvalidGroupCount(0)) => {}
             other => panic!("expected InvalidGroupCount, got {:?}", other),

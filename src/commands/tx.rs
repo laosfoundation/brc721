@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
-use crate::types::{Brc721Message, Brc721Output, RegisterCollectionData, RegisterOwnershipData};
+use crate::types::{Brc721Output, Brc721Payload, RegisterCollectionData, RegisterOwnershipData};
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use age::secrecy::SecretString;
@@ -50,8 +50,8 @@ fn run_register_collection(
         evm_collection_address,
         rebaseable,
     };
-    let msg = Brc721Message::RegisterCollection(msg);
-    let output = Brc721Output::new(msg).into_txout().unwrap();
+    let payload = Brc721Payload::RegisterCollection(msg);
+    let output = Brc721Output::new(payload).into_txout().unwrap();
 
     let passphrase = resolve_passphrase(passphrase);
     let tx = wallet
@@ -74,8 +74,8 @@ fn run_register_ownership(
     passphrase: Option<String>,
 ) -> Result<()> {
     let wallet = load_wallet(ctx)?;
-    let msg = Brc721Message::RegisterOwnership(RegisterOwnershipData::dummy());
-    let output = Brc721Output::new(msg).into_txout().unwrap();
+    let payload = Brc721Payload::RegisterOwnership(RegisterOwnershipData::dummy());
+    let output = Brc721Output::new(payload).into_txout().unwrap();
 
     let passphrase = resolve_passphrase(passphrase);
     let tx = wallet

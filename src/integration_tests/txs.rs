@@ -1,5 +1,5 @@
 use crate::{
-    types::{Brc721Message, Brc721Output, RegisterCollectionData},
+    types::{Brc721Output, Brc721Payload, RegisterCollectionData},
     wallet::brc721_wallet::Brc721Wallet,
 };
 use age::secrecy::SecretString;
@@ -37,7 +37,7 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         .address;
     let client = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
     client.generate_to_address(101, &address).expect("mint");
-    let output = Brc721Output::new(Brc721Message::RegisterCollection(RegisterCollectionData {
+    let output = Brc721Output::new(Brc721Payload::RegisterCollection(RegisterCollectionData {
         evm_collection_address: H160::default(),
         rebaseable: false,
     }))

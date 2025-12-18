@@ -1,4 +1,4 @@
-use crate::types::{Brc721Error, Brc721Message, Brc721Output};
+use crate::types::{Brc721Error, Brc721Output, Brc721Payload};
 use bitcoin::Transaction;
 
 /// A parsed BRC-721 transaction envelope.
@@ -14,12 +14,22 @@ pub struct Brc721Tx<'a> {
 }
 
 impl<'a> Brc721Tx<'a> {
-    pub fn message(&self) -> &Brc721Message {
-        self.op_return.message()
+    pub fn validate(&self) -> Result<(), Brc721Error> {
+        self.payload().validate_in_tx(self.bitcoin_tx)
     }
 
+    pub fn payload(&self) -> &Brc721Payload {
+        self.op_return.payload()
+    }
+
+    #[allow(dead_code)]
     pub fn bitcoin_tx(&self) -> &'a Transaction {
         self.bitcoin_tx
+    }
+
+    #[allow(dead_code)]
+    pub fn op_return(&self) -> &Brc721Output {
+        &self.op_return
     }
 }
 
@@ -38,5 +48,72 @@ pub fn parse_brc721_tx(bitcoin_tx: &Transaction) -> Result<Option<Brc721Tx<'_>>,
         })),
         Err(Brc721Error::InvalidPayload) => Ok(None),
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Brc721Command, RegisterCollectionData, BRC721_CODE};
+    use bitcoin::absolute;
+    use bitcoin::opcodes::all::OP_RETURN;
+    use bitcoin::script::{Builder, PushBytesBuf};
+    use bitcoin::{transaction, Amount, ScriptBuf, Transaction, TxOut};
+    use ethereum_types::H160;
+
+    fn brc721_txout_for_payload(payload: &Brc721Payload) -> TxOut {
+        let bytes = payload.to_bytes();
+        let pb = PushBytesBuf::try_from(bytes).expect("payload should fit pushbytes");
+        let script = Builder::new()
+            .push_opcode(OP_RETURN)
+            .push_opcode(BRC721_CODE)
+            .push_slice(pb)
+            .into_script();
+        TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: script,
+        }
+    }
+
+    fn empty_txout() -> TxOut {
+        TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: ScriptBuf::new(),
+        }
+    }
+
+    fn dummy_tx(outputs: Vec<TxOut>) -> Transaction {
+        Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![],
+            output: outputs,
+        }
+    }
+
+    #[test]
+    fn parse_brc721_tx_accepts_op_return_at_vout0() {
+        let payload = Brc721Payload::RegisterCollection(RegisterCollectionData {
+            evm_collection_address: H160::from_low_u64_be(1),
+            rebaseable: false,
+        });
+        let tx = dummy_tx(vec![brc721_txout_for_payload(&payload), empty_txout()]);
+        let parsed = parse_brc721_tx(&tx).expect("parse should succeed");
+        let parsed = parsed.expect("expected Some(Brc721Tx)");
+        assert_eq!(
+            parsed.payload().command(),
+            Brc721Command::RegisterCollection
+        );
+    }
+
+    #[test]
+    fn parse_brc721_tx_rejects_op_return_not_at_vout0() {
+        let payload = Brc721Payload::RegisterCollection(RegisterCollectionData {
+            evm_collection_address: H160::from_low_u64_be(1),
+            rebaseable: false,
+        });
+        let tx = dummy_tx(vec![empty_txout(), brc721_txout_for_payload(&payload)]);
+        let parsed = parse_brc721_tx(&tx).expect("parse should succeed");
+        assert!(parsed.is_none());
     }
 }

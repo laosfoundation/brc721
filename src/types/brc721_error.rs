@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use super::Brc721Command;
+
 #[derive(Debug, Error, PartialEq)]
 pub enum Brc721Error {
     #[error("script too short")]
@@ -10,6 +12,8 @@ pub enum Brc721Error {
     InvalidLength(usize, usize),
     #[error("unknown command: got {0}")]
     UnknownCommand(u8),
+    #[error("unsupported command: {cmd:?}")]
+    UnsupportedCommand { cmd: Brc721Command },
     #[error("invalid rebase flag: {0}")]
     InvalidRebaseFlag(u8),
     #[error("slot number too large for 96 bits: {0}")]
