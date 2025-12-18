@@ -1,5 +1,5 @@
 use crate::storage::traits::StorageWrite;
-use crate::types::{Brc721Error, Brc721Message, Brc721Output};
+use crate::types::{parse_brc721_tx, Brc721Error, Brc721Message, Brc721Tx};
 use bitcoin::Block;
 use bitcoin::Transaction;
 
@@ -19,16 +19,10 @@ impl Brc721Parser {
         block_height: u64,
         tx_index: u32,
     ) {
-        let Some(first_tx_out) = bitcoin_tx.output.first() else {
-            return;
-        };
-
-        let brc721_output = match Brc721Output::from_output(first_tx_out) {
-            Ok(output) => output,
+        let brc721_tx: Brc721Tx<'_> = match parse_brc721_tx(bitcoin_tx) {
+            Ok(Some(tx)) => tx,
+            Ok(None) => return,
             Err(e) => {
-                if e == Brc721Error::InvalidPayload {
-                    return;
-                }
                 log::warn!(
                     "Invalid BRC-721 message at block {} tx {}: {:?}",
                     block_height,
@@ -45,13 +39,15 @@ impl Brc721Parser {
             tx_index
         );
 
-        if let Err(ref e) = self.digest_brc721_message(
-            storage,
-            brc721_output.message(),
-            bitcoin_tx,
-            block_height,
-            tx_index,
-        ) {
+        let message = brc721_tx.message();
+        if let Err(ref e) = message.validate_in_tx(brc721_tx.bitcoin_tx()) {
+            log::warn!("{:?}", e);
+            return;
+        }
+
+        if let Err(ref e) =
+            self.digest_brc721_message(storage, message, bitcoin_tx, block_height, tx_index)
+        {
             log::warn!("{:?}", e);
         }
     }
@@ -65,9 +61,13 @@ impl Brc721Parser {
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
         match message {
-            Brc721Message::RegisterCollection(data) => {
-                crate::parser::register_collection::digest(data, storage, block_height, tx_index)
-            }
+            Brc721Message::RegisterCollection(data) => crate::parser::register_collection::digest(
+                data,
+                storage,
+                bitcoin_tx,
+                block_height,
+                tx_index,
+            ),
             Brc721Message::RegisterOwnership(data) => crate::parser::register_ownership::digest(
                 data,
                 storage,

@@ -1,5 +1,6 @@
 use super::{RegisterCollectionData, RegisterOwnershipData};
 use crate::types::{Brc721Command, Brc721Error};
+use bitcoin::Transaction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Brc721Message {
@@ -12,6 +13,13 @@ impl Brc721Message {
         match self {
             Brc721Message::RegisterCollection(_) => Brc721Command::RegisterCollection,
             Brc721Message::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
+        }
+    }
+
+    pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
+        match self {
+            Brc721Message::RegisterCollection(_) => Ok(()),
+            Brc721Message::RegisterOwnership(data) => data.validate_in_tx(bitcoin_tx),
         }
     }
 

@@ -3,6 +3,7 @@ mod brc721_error;
 mod brc721_message;
 mod brc721_output;
 mod brc721_token;
+mod brc721_tx;
 mod register_collection;
 mod register_ownership;
 
@@ -12,6 +13,7 @@ pub use brc721_command::Brc721Command;
 pub use brc721_error::Brc721Error;
 pub use brc721_message::Brc721Message;
 pub use brc721_output::Brc721Output;
+pub use brc721_tx::{parse_brc721_tx, Brc721Tx};
 pub use register_collection::RegisterCollectionData;
 pub use register_ownership::RegisterOwnershipData;
 

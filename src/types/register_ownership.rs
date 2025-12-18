@@ -1,4 +1,5 @@
 use crate::types::{Brc721Error, Brc721Token};
+use bitcoin::Transaction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotRange {
@@ -35,6 +36,19 @@ impl RegisterOwnershipData {
         };
         data.validate()?;
         Ok(data)
+    }
+
+    pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
+        let output_count = bitcoin_tx.output.len();
+        for group in &self.groups {
+            if group.output_index as usize >= output_count {
+                return Err(Brc721Error::TxError(format!(
+                    "register-ownership output_index {} out of bounds (tx outputs={})",
+                    group.output_index, output_count
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub fn dummy() -> Self {
@@ -245,6 +259,27 @@ mod tests {
         let bytes = data.to_bytes();
         let parsed = RegisterOwnershipData::try_from(bytes.as_slice()).expect("parse succeeds");
         assert_eq!(parsed, data);
+    }
+
+    #[test]
+    fn validate_in_tx_rejects_out_of_bounds_output_index() {
+        use bitcoin::{absolute, transaction, Amount, ScriptBuf, TxOut};
+
+        let data = RegisterOwnershipData::dummy(); // output_index = 1
+        let tx = bitcoin::Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![],
+            output: vec![TxOut {
+                value: Amount::from_sat(0),
+                script_pubkey: ScriptBuf::new(),
+            }],
+        };
+
+        match data.validate_in_tx(&tx) {
+            Err(Brc721Error::TxError(_)) => {}
+            other => panic!("expected TxError, got {:?}", other),
+        }
     }
 
     #[test]

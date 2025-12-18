@@ -1,9 +1,11 @@
 use crate::storage::traits::{CollectionKey, StorageWrite};
 use crate::types::{Brc721Error, RegisterCollectionData};
+use bitcoin::Transaction;
 
 pub fn digest<S: StorageWrite>(
     payload: &RegisterCollectionData,
     storage: &S,
+    _bitcoin_tx: &Transaction,
     block_height: u64,
     tx_index: u32,
 ) -> Result<(), Brc721Error> {
