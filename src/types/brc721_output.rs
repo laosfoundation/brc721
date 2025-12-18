@@ -1,4 +1,4 @@
-use super::{Brc721Message, BRC721_CODE};
+use super::{Brc721Payload, BRC721_CODE};
 use crate::types::Brc721Error;
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::opcodes;
@@ -8,28 +8,28 @@ use bitcoin::{Amount, ScriptBuf, TxOut};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Brc721Output {
     value: Amount,
-    message: Brc721Message,
+    payload: Brc721Payload,
 }
 
 impl Brc721Output {
-    pub fn new(message: Brc721Message) -> Self {
+    pub fn new(payload: Brc721Payload) -> Self {
         Self {
             value: Amount::from_sat(0),
-            message,
+            payload,
         }
     }
 
     pub fn from_output(output: &TxOut) -> Result<Self, Brc721Error> {
         let payload = extract_payload(&output.script_pubkey).ok_or(Brc721Error::InvalidPayload)?;
-        let message = Brc721Message::try_from(payload.as_slice())?;
+        let brc721_payload = Brc721Payload::try_from(payload.as_slice())?;
         Ok(Self {
             value: output.value,
-            message,
+            payload: brc721_payload,
         })
     }
 
     pub fn into_txout(self) -> Result<TxOut, Brc721Error> {
-        let bytes = self.message.to_bytes();
+        let bytes = self.payload.to_bytes();
         let pb = PushBytesBuf::try_from(bytes).map_err(|_| Brc721Error::InvalidPayload)?;
         let script = Builder::new()
             .push_opcode(opcodes::all::OP_RETURN)
@@ -42,8 +42,8 @@ impl Brc721Output {
         })
     }
 
-    pub fn message(&self) -> &Brc721Message {
-        &self.message
+    pub fn payload(&self) -> &Brc721Payload {
+        &self.payload
     }
 }
 
@@ -124,17 +124,18 @@ mod tests {
     fn from_output_roundtrip_ok() {
         // 1) Build a valid payload
         let payload = build_register_collection_payload();
-        let message = Brc721Message::try_from(payload.as_slice()).expect("valid message");
+        let brc721_payload =
+            Brc721Payload::try_from(payload.as_slice()).expect("valid brc721 payload");
 
         // 2) Create a Brc721Output and convert it into a TxOut
-        let output = Brc721Output::new(message.clone());
+        let output = Brc721Output::new(brc721_payload.clone());
         let txout = output.into_txout().expect("into_txout should succeed");
 
         // 3) Parse back from the TxOut
         let parsed = Brc721Output::from_output(&txout).expect("from_output should succeed");
 
         // 4) Check that the message matches
-        assert_eq!(parsed.message(), &message);
+        assert_eq!(parsed.payload(), &brc721_payload);
 
         // 5) Check that the value is 0 sat (as defined by new())
         assert_eq!(txout.value, Amount::from_sat(0));
@@ -170,7 +171,7 @@ mod tests {
         let res = Brc721Output::from_output(&txout);
 
         // This depends on how Brc721Error is modeled,
-        // but the idea is that it propagates the error from Brc721Message::from_bytes
+        // but the idea is that it propagates the error from Brc721Payload::try_from
         match res {
             Err(Brc721Error::InvalidLength(_, _)) => {}
             Err(e) => panic!("expected InvalidLength(..), got {:?}", e),

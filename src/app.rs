@@ -3,7 +3,7 @@ use crate::{
     scanner::{self, BitcoinRpc},
     storage::{self, Storage},
 };
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::{anyhow, Context as AnyhowContext, Result};
 use bitcoincore_rpc::Client;
 use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
@@ -55,7 +55,7 @@ impl App {
     fn spawn_core_indexer<C: BitcoinRpc + Send + Sync + 'static>(
         &mut self,
         client: C,
-    ) -> Result<JoinHandle<()>> {
+    ) -> Result<JoinHandle<Result<()>>> {
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let start_block = determine_start_block(&storage, self.config.start)?;
 
@@ -67,11 +67,10 @@ impl App {
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
-        let handle = tokio::task::spawn_blocking(move || {
+        let handle = tokio::task::spawn_blocking(move || -> Result<()> {
             let mut core = core::Core::new(scanner, storage, parser);
-            if let Err(e) = core.run(token) {
-                log::error!("Core indexer failed: {:#}", e);
-            }
+            core.run(token)?;
+            Ok(())
         });
 
         Ok(handle)
@@ -80,12 +79,29 @@ impl App {
     async fn wait_for_shutdown(
         &self,
         rest_task: &mut JoinHandle<()>,
-        core_task: &mut JoinHandle<()>,
+        core_task: &mut JoinHandle<Result<()>>,
     ) -> Result<()> {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => log::info!("🧨 Ctrl-C received, shutting down..."),
-            _ = &mut *rest_task => log::error!("REST task exited unexpectedly"),
-            _ = &mut *core_task => log::error!("Core task exited unexpectedly"),
+            _ = &mut *rest_task => {
+                self.shutdown.cancel();
+                log::error!("REST task exited unexpectedly");
+                if !core_task.is_finished() {
+                    let _ = core_task.await;
+                }
+                return Err(anyhow!("REST task exited unexpectedly"));
+            },
+            res = &mut *core_task => {
+                self.shutdown.cancel();
+                if !rest_task.is_finished() {
+                    let _ = rest_task.await;
+                }
+                match res {
+                    Ok(Ok(())) => return Err(anyhow!("Core task exited unexpectedly")),
+                    Ok(Err(e)) => return Err(e),
+                    Err(join_err) => return Err(anyhow!(join_err).context("core task join error")),
+                }
+            },
         }
 
         // Broadcast shutdown signal
@@ -341,6 +357,7 @@ mod tests {
         // 2. Simulates a task that runs until shutdown is signaled
         let mut core_task = tokio::spawn(async move {
             token.cancelled().await;
+            Ok::<(), anyhow::Error>(())
         });
 
         // Should return:
@@ -349,7 +366,7 @@ mod tests {
         // 3. core_task sees cancellation and finishes
         // 4. wait_for_shutdown awaits core_task and returns
         let res = app.wait_for_shutdown(&mut rest_task, &mut core_task).await;
-        assert!(res.is_ok());
+        assert!(res.is_err());
 
         // Verify shutdown signal was sent
         assert!(app.shutdown.is_cancelled());

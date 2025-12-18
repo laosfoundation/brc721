@@ -1,8 +1,9 @@
 use crate::storage::traits::{CollectionKey, StorageWrite};
-use crate::types::{Brc721Error, RegisterCollectionData};
+use crate::types::{Brc721Error, Brc721Tx, RegisterCollectionData};
 
 pub fn digest<S: StorageWrite>(
     payload: &RegisterCollectionData,
+    _brc721_tx: &Brc721Tx<'_>,
     storage: &S,
     block_height: u64,
     tx_index: u32,
