@@ -36,10 +36,14 @@ impl<C: BitcoinRpc> Brc721Parser<C> {
             }
         };
 
+        let cmd = brc721_tx.payload().command();
+        let cmd_byte: u8 = cmd.into();
         log::info!(
-            "📦 Found BRC-721 tx at block {}, tx {}",
+            "📦 Found BRC-721 tx at block {}, tx {} (cmd={:?} 0x{:02x})",
             block_height,
-            tx_index
+            tx_index,
+            cmd,
+            cmd_byte
         );
 
         match self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index) {
