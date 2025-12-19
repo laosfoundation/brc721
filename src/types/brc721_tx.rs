@@ -21,6 +21,10 @@ impl<'a> Brc721Tx<'a> {
     pub fn payload(&self) -> &Brc721Payload {
         self.op_return.payload()
     }
+
+    pub fn bitcoin_tx(&self) -> &'a Transaction {
+        self.tx
+    }
 }
 
 /// Parse a BRC-721 transaction envelope from a Bitcoin transaction.

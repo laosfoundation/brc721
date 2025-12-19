@@ -93,6 +93,13 @@ mod tests {
             unimplemented!()
         }
 
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
+            unimplemented!()
+        }
+
         fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
             unimplemented!()
         }

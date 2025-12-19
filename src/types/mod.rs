@@ -16,5 +16,7 @@ pub use brc721_payload::Brc721Payload;
 pub use brc721_tx::{parse_brc721_tx, Brc721Tx};
 pub use register_collection::RegisterCollectionData;
 pub use register_ownership::RegisterOwnershipData;
+#[allow(unused_imports)]
+pub use register_ownership::{OwnershipGroup, SlotRange};
 
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;

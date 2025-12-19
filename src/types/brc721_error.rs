@@ -28,6 +28,8 @@ pub enum Brc721Error {
     InvalidSlotRange(u128, u128),
     #[error("Storage error: {0}")]
     StorageError(String),
+    #[error("RPC error: {0}")]
+    RpcError(String),
     #[error("Tx error: {0}")]
     TxError(String),
     #[error("Wallet error: {0}")]

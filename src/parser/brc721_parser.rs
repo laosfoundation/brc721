@@ -1,18 +1,21 @@
-use crate::storage::traits::StorageWrite;
-use crate::types::{parse_brc721_tx, Brc721Command, Brc721Error, Brc721Payload, Brc721Tx};
+use crate::scanner::BitcoinRpc;
+use crate::storage::traits::StorageTx;
+use crate::types::{parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx};
 use bitcoin::Block;
 use bitcoin::Transaction;
 
 use crate::parser::BlockParser;
 
-pub struct Brc721Parser;
+pub struct Brc721Parser<C> {
+    rpc: C,
+}
 
-impl Brc721Parser {
-    pub fn new() -> Self {
-        Self
+impl<C: BitcoinRpc> Brc721Parser<C> {
+    pub fn new(rpc: C) -> Self {
+        Self { rpc }
     }
 
-    fn parse_tx<T: StorageWrite>(
+    fn parse_tx<T: StorageTx>(
         &self,
         storage: &T,
         bitcoin_tx: &Transaction,
@@ -39,11 +42,22 @@ impl Brc721Parser {
             tx_index
         );
 
-        self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index)?;
+        match self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index) {
+            Ok(()) => {}
+            Err(Brc721Error::TxError(msg)) => {
+                log::warn!(
+                    "Discarding invalid BRC-721 tx at block {} tx {}: {}",
+                    block_height,
+                    tx_index,
+                    msg
+                );
+            }
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 
-    fn digest_brc721_tx<T: StorageWrite>(
+    fn digest_brc721_tx<T: StorageTx>(
         &self,
         storage: &T,
         brc721_tx: &Brc721Tx<'_>,
@@ -62,24 +76,19 @@ impl Brc721Parser {
                     tx_index,
                 )
             }
-            Brc721Payload::RegisterOwnership(payload) => {
-                log::error!(
-                    "register-ownership not supported yet (block {} tx {}, collection {}:{}, groups={})",
-                    block_height,
-                    tx_index,
-                    payload.collection_height,
-                    payload.collection_tx_index,
-                    payload.groups.len()
-                );
-                Err(Brc721Error::UnsupportedCommand {
-                    cmd: Brc721Command::RegisterOwnership,
-                })
-            }
+            Brc721Payload::RegisterOwnership(payload) => crate::parser::register_ownership::digest(
+                &self.rpc,
+                payload,
+                brc721_tx,
+                storage,
+                block_height,
+                tx_index,
+            ),
         }
     }
 }
 
-impl<T: StorageWrite> BlockParser<T> for Brc721Parser {
+impl<C: BitcoinRpc, T: StorageTx> BlockParser<T> for Brc721Parser<C> {
     fn parse_block(
         &self,
         storage: &T,
@@ -125,6 +134,40 @@ mod tests {
     use ethereum_types::H160;
     use hex::FromHex;
     use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct DummyRpc;
+
+    impl crate::scanner::BitcoinRpc for DummyRpc {
+        fn get_block_count(&self) -> Result<u64, bitcoincore_rpc::Error> {
+            unimplemented!()
+        }
+
+        fn get_block_hash(
+            &self,
+            _height: u64,
+        ) -> Result<bitcoin::BlockHash, bitcoincore_rpc::Error> {
+            unimplemented!()
+        }
+
+        fn get_block(
+            &self,
+            _hash: &bitcoin::BlockHash,
+        ) -> Result<bitcoin::Block, bitcoincore_rpc::Error> {
+            unimplemented!()
+        }
+
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, bitcoincore_rpc::Error> {
+            unimplemented!()
+        }
+
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), bitcoincore_rpc::Error> {
+            unimplemented!()
+        }
+    }
 
     fn build_payload(addr20: [u8; 20], rebase: u8) -> Vec<u8> {
         let mut v = Vec::with_capacity(1 + 20 + 1);
@@ -191,7 +234,7 @@ mod tests {
         let storage =
             crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_parser_test.db"));
         storage.init().expect("init the database");
-        let parser = Brc721Parser::new();
+        let parser = Brc721Parser::new(DummyRpc);
         let tx = storage.begin_tx().expect("init the tx");
         let r = parser.parse_block(&tx, &block, 0);
         assert!(r.is_ok());
@@ -277,9 +320,9 @@ mod tests {
         }
     }
 
-    fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser) {
+    fn make_parser_with_storage(fail_storage: bool) -> (DummyStorage, Brc721Parser<DummyRpc>) {
         let storage = DummyStorage::new(fail_storage);
-        let parser = Brc721Parser::new();
+        let parser = Brc721Parser::new(DummyRpc);
         (storage, parser)
     }
 

@@ -1,10 +1,11 @@
-use bitcoin::{Block, BlockHash};
+use bitcoin::{Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::{Client, Error as RpcError, RpcApi};
 
 pub trait BitcoinRpc {
     fn get_block_count(&self) -> Result<u64, RpcError>;
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError>;
     fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError>;
+    fn get_raw_transaction(&self, txid: &Txid) -> Result<Transaction, RpcError>;
     fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError>;
 }
 
@@ -18,8 +19,33 @@ impl BitcoinRpc for Client {
     fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
         RpcApi::get_block(self, hash)
     }
+    fn get_raw_transaction(&self, txid: &Txid) -> Result<Transaction, RpcError> {
+        RpcApi::get_raw_transaction(self, txid, None)
+    }
     fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError> {
         RpcApi::wait_for_new_block(self, timeout).map(|_| ())
+    }
+}
+
+impl<T: BitcoinRpc + ?Sized> BitcoinRpc for std::sync::Arc<T> {
+    fn get_block_count(&self) -> Result<u64, RpcError> {
+        (**self).get_block_count()
+    }
+
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
+        (**self).get_block_hash(height)
+    }
+
+    fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
+        (**self).get_block(hash)
+    }
+
+    fn get_raw_transaction(&self, txid: &Txid) -> Result<Transaction, RpcError> {
+        (**self).get_raw_transaction(txid)
+    }
+
+    fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError> {
+        (**self).wait_for_new_block(timeout)
     }
 }
 
@@ -143,6 +169,12 @@ mod tests {
         fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
             let (_h, b) = self.blocks.values().find(|(hh, _)| hh == hash).unwrap();
             Ok(b.clone())
+        }
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
+            unimplemented!()
         }
         fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
             Ok(())

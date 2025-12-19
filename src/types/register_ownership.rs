@@ -40,7 +40,46 @@ impl RegisterOwnershipData {
 
     pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
         let output_count = bitcoin_tx.output.len();
+        let group_count: u8 = self
+            .groups
+            .len()
+            .try_into()
+            .map_err(|_| Brc721Error::InvalidGroupCount(u8::MAX))?;
+
+        if output_count < (group_count as usize + 1) {
+            return Err(Brc721Error::TxError(format!(
+                "register-ownership requires at least {} outputs (got {})",
+                group_count as usize + 1,
+                output_count
+            )));
+        }
+
+        // Protocol rule: output 0 is the only OP_RETURN output.
+        for (vout, tx_out) in bitcoin_tx.output.iter().enumerate().skip(1) {
+            if matches!(tx_out.script_pubkey.as_bytes().first(), Some(0x6a)) {
+                return Err(Brc721Error::TxError(format!(
+                    "register-ownership forbids OP_RETURN at vout {}",
+                    vout
+                )));
+            }
+        }
+
+        let mut seen_outputs = std::collections::HashSet::new();
         for group in &self.groups {
+            if group.output_index > group_count {
+                return Err(Brc721Error::TxError(format!(
+                    "register-ownership output_index {} must be within 1..={}",
+                    group.output_index, group_count
+                )));
+            }
+
+            if !seen_outputs.insert(group.output_index) {
+                return Err(Brc721Error::TxError(format!(
+                    "register-ownership output_index {} is duplicated",
+                    group.output_index
+                )));
+            }
+
             if group.output_index as usize >= output_count {
                 return Err(Brc721Error::TxError(format!(
                     "register-ownership output_index {} out of bounds (tx outputs={})",

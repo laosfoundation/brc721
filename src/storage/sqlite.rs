@@ -4,11 +4,15 @@ use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::{path::Path, str::FromStr};
 
 use super::{
-    traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
+    traits::{
+        Collection, CollectionKey, OwnershipRange, Storage, StorageRead, StorageTx, StorageWrite,
+    },
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 1;
+const DB_SCHEMA_VERSION: i64 = 2;
+
+const SLOT_BYTES: usize = 12;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -79,6 +83,83 @@ fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<Collection>> {
     Ok(mapped)
 }
 
+fn slot_to_be_bytes(slot: u128) -> [u8; SLOT_BYTES] {
+    let bytes = slot.to_be_bytes();
+    let mut out = [0u8; SLOT_BYTES];
+    out.copy_from_slice(&bytes[bytes.len() - SLOT_BYTES..]);
+    out
+}
+
+fn db_has_ownership_overlap(
+    conn: &Connection,
+    collection: &CollectionKey,
+    initial_owner_h160: H160,
+    slot_start: u128,
+    slot_end: u128,
+) -> rusqlite::Result<bool> {
+    let start = slot_to_be_bytes(slot_start);
+    let end = slot_to_be_bytes(slot_end);
+    let exists: Option<i64> = conn
+        .query_row(
+            r#"
+            SELECT 1
+            FROM ownership_ranges
+            WHERE collection_id = ?1
+              AND initial_owner_h160 = ?2
+              AND slot_start <= ?3
+              AND slot_end >= ?4
+            LIMIT 1
+            "#,
+            params![
+                collection.to_string(),
+                initial_owner_h160.as_bytes(),
+                &end[..],
+                &start[..]
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(exists.is_some())
+}
+
+fn db_load_registered_owner_h160(
+    conn: &Connection,
+    collection: &CollectionKey,
+    token_id: &crate::types::Brc721Token,
+) -> rusqlite::Result<Option<H160>> {
+    let slot = slot_to_be_bytes(token_id.slot_number());
+    let initial_owner_h160 = token_id.h160_address();
+
+    conn.query_row(
+        r#"
+        SELECT owner_h160
+        FROM ownership_ranges
+        WHERE collection_id = ?1
+          AND initial_owner_h160 = ?2
+          AND slot_start <= ?3
+          AND slot_end >= ?3
+        LIMIT 1
+        "#,
+        params![
+            collection.to_string(),
+            initial_owner_h160.as_bytes(),
+            &slot[..]
+        ],
+        |row| {
+            let owner_h160_blob: Vec<u8> = row.get(0)?;
+            if owner_h160_blob.len() != 20 {
+                return Err(rusqlite::Error::InvalidColumnType(
+                    0,
+                    "owner_h160".to_string(),
+                    Type::Blob,
+                ));
+            }
+            Ok(H160::from_slice(&owner_h160_blob))
+        },
+    )
+    .optional()
+}
+
 fn db_save_last(conn: &Connection, height: u64, hash: &str) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
@@ -103,6 +184,41 @@ fn db_save_collection(
     Ok(())
 }
 
+fn db_save_ownership_ranges(conn: &Connection, ranges: &[OwnershipRange]) -> rusqlite::Result<()> {
+    if ranges.is_empty() {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare(
+        r#"
+        INSERT INTO ownership_ranges (
+            collection_id,
+            initial_owner_h160,
+            slot_start,
+            slot_end,
+            owner_h160,
+            out_txid,
+            out_vout
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+    )?;
+
+    for range in ranges {
+        let slot_start = slot_to_be_bytes(range.slot_start);
+        let slot_end = slot_to_be_bytes(range.slot_end);
+        stmt.execute(params![
+            range.collection.to_string(),
+            range.initial_owner_h160.as_bytes(),
+            &slot_start[..],
+            &slot_end[..],
+            range.owner_h160.as_bytes(),
+            range.outpoint.txid.to_string(),
+            range.outpoint.vout as i64,
+        ])?;
+    }
+    Ok(())
+}
+
 impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
         Ok(db_load_last(&self.conn)?)
@@ -114,6 +230,32 @@ impl StorageRead for SqliteTx {
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
         Ok(db_list_collections(&self.conn)?)
+    }
+
+    fn has_ownership_overlap(
+        &self,
+        collection: &CollectionKey,
+        initial_owner_h160: H160,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool> {
+        Ok(db_has_ownership_overlap(
+            &self.conn,
+            collection,
+            initial_owner_h160,
+            slot_start,
+            slot_end,
+        )?)
+    }
+
+    fn load_registered_owner_h160(
+        &self,
+        collection: &CollectionKey,
+        token_id: &crate::types::Brc721Token,
+    ) -> Result<Option<H160>> {
+        Ok(db_load_registered_owner_h160(
+            &self.conn, collection, token_id,
+        )?)
     }
 }
 
@@ -134,6 +276,10 @@ impl StorageWrite for SqliteTx {
             evm_collection_address,
             rebaseable,
         )?)
+    }
+
+    fn save_ownership_ranges(&self, ranges: &[OwnershipRange]) -> Result<()> {
+        Ok(db_save_ownership_ranges(&self.conn, ranges)?)
     }
 }
 
@@ -205,6 +351,39 @@ impl SqliteStorage {
                 evm_collection_address TEXT NOT NULL,
                 rebaseable INTEGER NOT NULL
             );
+            CREATE TABLE ownership_ranges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id TEXT NOT NULL,
+                initial_owner_h160 BLOB NOT NULL,
+                slot_start BLOB NOT NULL,
+                slot_end BLOB NOT NULL,
+                owner_h160 BLOB NOT NULL,
+                out_txid TEXT NOT NULL,
+                out_vout INTEGER NOT NULL
+            );
+            CREATE INDEX ownership_ranges_lookup
+                ON ownership_ranges (collection_id, initial_owner_h160, slot_start, slot_end);
+        "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            return Ok(());
+        }
+
+        if version == 1 {
+            conn.execute_batch(
+                r#"
+            CREATE TABLE ownership_ranges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id TEXT NOT NULL,
+                initial_owner_h160 BLOB NOT NULL,
+                slot_start BLOB NOT NULL,
+                slot_end BLOB NOT NULL,
+                owner_h160 BLOB NOT NULL,
+                out_txid TEXT NOT NULL,
+                out_vout INTEGER NOT NULL
+            );
+            CREATE INDEX ownership_ranges_lookup
+                ON ownership_ranges (collection_id, initial_owner_h160, slot_start, slot_end);
         "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
@@ -232,6 +411,29 @@ impl StorageRead for SqliteStorage {
     fn list_collections(&self) -> Result<Vec<Collection>> {
         let rows = self.with_conn(db_list_collections)?;
         Ok(rows)
+    }
+
+    fn has_ownership_overlap(
+        &self,
+        collection: &CollectionKey,
+        initial_owner_h160: H160,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool> {
+        let exists = self.with_conn(|conn| {
+            db_has_ownership_overlap(conn, collection, initial_owner_h160, slot_start, slot_end)
+        })?;
+        Ok(exists)
+    }
+
+    fn load_registered_owner_h160(
+        &self,
+        collection: &CollectionKey,
+        token_id: &crate::types::Brc721Token,
+    ) -> Result<Option<H160>> {
+        let owner =
+            self.with_conn(|conn| db_load_registered_owner_h160(conn, collection, token_id))?;
+        Ok(owner)
     }
 }
 

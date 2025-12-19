@@ -27,7 +27,7 @@ impl App {
     }
 
     /// Main entry point for the Daemon.
-    pub async fn run_daemon<C: BitcoinRpc + Send + Sync + 'static>(
+    pub async fn run_daemon<C: BitcoinRpc + Clone + Send + Sync + 'static>(
         &mut self,
         client: C,
     ) -> Result<()> {
@@ -52,18 +52,18 @@ impl App {
         })
     }
 
-    fn spawn_core_indexer<C: BitcoinRpc + Send + Sync + 'static>(
+    fn spawn_core_indexer<C: BitcoinRpc + Clone + Send + Sync + 'static>(
         &mut self,
         client: C,
     ) -> Result<JoinHandle<Result<()>>> {
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let start_block = determine_start_block(&storage, self.config.start)?;
 
+        let parser = parser::Brc721Parser::new(client.clone());
         let scanner = scanner::Scanner::new(client)
             .with_confirmations(self.config.confirmations)
             .with_capacity(self.config.batch_size)
             .with_start_from(start_block);
-        let parser = parser::Brc721Parser::new();
         let token = self.shutdown.clone();
 
         // Spawn blocking because Bitcoin RPC is synchronous
@@ -168,7 +168,7 @@ pub async fn run() -> Result<()> {
     let client = Client::new(ctx.rpc_url.as_ref(), ctx.auth.clone())
         .context("failed to connect to Bitcoin RPC")?;
 
-    App::new(ctx)?.run_daemon(client).await
+    App::new(ctx)?.run_daemon(std::sync::Arc::new(client)).await
 }
 
 #[cfg(test)]
@@ -262,6 +262,18 @@ mod tests {
             Ok(bitcoin::BlockHash::all_zeros())
         }
         fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
+            Err(RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
+                bitcoincore_rpc::jsonrpc::error::RpcError {
+                    code: -1,
+                    message: "not implemented".into(),
+                    data: None,
+                },
+            )))
+        }
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
             Err(RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
                 bitcoincore_rpc::jsonrpc::error::RpcError {
                     code: -1,
