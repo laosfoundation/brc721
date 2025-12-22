@@ -6,12 +6,12 @@ use bitcoin::script::{Builder, PushBytesBuf};
 use bitcoin::{Amount, ScriptBuf, TxOut};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Brc721Output {
+pub struct Brc721OpReturnOutput {
     value: Amount,
     payload: Brc721Payload,
 }
 
-impl Brc721Output {
+impl Brc721OpReturnOutput {
     pub fn new(payload: Brc721Payload) -> Self {
         Self {
             value: Amount::from_sat(0),
@@ -127,12 +127,12 @@ mod tests {
         let brc721_payload =
             Brc721Payload::try_from(payload.as_slice()).expect("valid brc721 payload");
 
-        // 2) Create a Brc721Output and convert it into a TxOut
-        let output = Brc721Output::new(brc721_payload.clone());
+        // 2) Create a Brc721OpReturnOutput and convert it into a TxOut
+        let output = Brc721OpReturnOutput::new(brc721_payload.clone());
         let txout = output.into_txout().expect("into_txout should succeed");
 
         // 3) Parse back from the TxOut
-        let parsed = Brc721Output::from_output(&txout).expect("from_output should succeed");
+        let parsed = Brc721OpReturnOutput::from_output(&txout).expect("from_output should succeed");
 
         // 4) Check that the message matches
         assert_eq!(parsed.payload(), &brc721_payload);
@@ -150,7 +150,7 @@ mod tests {
             script_pubkey: script,
         };
 
-        let res = Brc721Output::from_output(&txout);
+        let res = Brc721OpReturnOutput::from_output(&txout);
         match res {
             Err(Brc721Error::InvalidPayload) => {}
             other => panic!("expected InvalidPayload, got {:?}", other),
@@ -168,7 +168,7 @@ mod tests {
             script_pubkey: script,
         };
 
-        let res = Brc721Output::from_output(&txout);
+        let res = Brc721OpReturnOutput::from_output(&txout);
 
         // This depends on how Brc721Error is modeled,
         // but the idea is that it propagates the error from Brc721Payload::try_from
