@@ -34,9 +34,10 @@ impl Brc721Parser {
         };
 
         log::info!(
-            "📦 Found BRC-721 tx at block {}, tx {}",
+            "📦 Found BRC-721 tx at block {}, tx {} (cmd={:?})",
             block_height,
-            tx_index
+            tx_index,
+            brc721_tx.payload().command()
         );
 
         self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index)?;
