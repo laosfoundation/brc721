@@ -1,15 +1,15 @@
-use crate::types::{Brc721Error, Brc721Output, Brc721Payload};
+use crate::types::{Brc721Error, Brc721OpReturnOutput, Brc721Payload};
 use bitcoin::Transaction;
 
 /// A parsed BRC-721 transaction envelope.
 ///
 /// Protocol rule: the BRC-721 `OP_RETURN` output must be `vout=0`.
 ///
-/// Even though the message payload is carried by output 0, many commands are
+/// Even though the message payload is carried by the `OP_RETURN` output (`vout=0`), many commands are
 /// multi-output by nature (e.g. ownership references other outputs). This
 /// envelope keeps the full transaction available for validation/digestion.
 pub struct Brc721Tx<'a> {
-    op_return: Brc721Output,
+    op_return_output: Brc721OpReturnOutput,
     tx: &'a Transaction,
 }
 
@@ -19,21 +19,21 @@ impl<'a> Brc721Tx<'a> {
     }
 
     pub fn payload(&self) -> &Brc721Payload {
-        self.op_return.payload()
+        self.op_return_output.payload()
     }
 }
 
 /// Parse a BRC-721 transaction envelope from a Bitcoin transaction.
 ///
-/// Returns `Ok(None)` if `vout=0` is not a BRC-721 `OP_RETURN`.
+/// Returns `Ok(None)` if `vout=0` is not a BRC-721 `OP_RETURN` output.
 pub fn parse_brc721_tx(bitcoin_tx: &Transaction) -> Result<Option<Brc721Tx<'_>>, Brc721Error> {
-    let Some(first_tx_out) = bitcoin_tx.output.first() else {
+    let Some(op_return_output_txout) = bitcoin_tx.output.first() else {
         return Ok(None);
     };
 
-    match Brc721Output::from_output(first_tx_out) {
-        Ok(op_return) => Ok(Some(Brc721Tx {
-            op_return,
+    match Brc721OpReturnOutput::from_output(op_return_output_txout) {
+        Ok(op_return_output) => Ok(Some(Brc721Tx {
+            op_return_output,
             tx: bitcoin_tx,
         })),
         Err(Brc721Error::InvalidPayload) => Ok(None),
