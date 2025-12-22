@@ -3,13 +3,13 @@ use bitcoin::Transaction;
 
 /// A parsed BRC-721 transaction envelope.
 ///
-/// Protocol rule: the BRC-721 `OP_RETURN` output must be `vout=0`.
+/// Protocol rule: the BRC-721 command output (an `OP_RETURN`) must be `vout=0`.
 ///
-/// Even though the message payload is carried by output 0, many commands are
+/// Even though the message payload is carried by the command output (`vout=0`), many commands are
 /// multi-output by nature (e.g. ownership references other outputs). This
 /// envelope keeps the full transaction available for validation/digestion.
 pub struct Brc721Tx<'a> {
-    op_return: Brc721Output,
+    command_output: Brc721Output,
     tx: &'a Transaction,
 }
 
@@ -19,21 +19,21 @@ impl<'a> Brc721Tx<'a> {
     }
 
     pub fn payload(&self) -> &Brc721Payload {
-        self.op_return.payload()
+        self.command_output.payload()
     }
 }
 
 /// Parse a BRC-721 transaction envelope from a Bitcoin transaction.
 ///
-/// Returns `Ok(None)` if `vout=0` is not a BRC-721 `OP_RETURN`.
+/// Returns `Ok(None)` if the command output (`vout=0`) is not a BRC-721 `OP_RETURN`.
 pub fn parse_brc721_tx(bitcoin_tx: &Transaction) -> Result<Option<Brc721Tx<'_>>, Brc721Error> {
-    let Some(first_tx_out) = bitcoin_tx.output.first() else {
+    let Some(command_output_txout) = bitcoin_tx.output.first() else {
         return Ok(None);
     };
 
-    match Brc721Output::from_output(first_tx_out) {
-        Ok(op_return) => Ok(Some(Brc721Tx {
-            op_return,
+    match Brc721Output::from_output(command_output_txout) {
+        Ok(command_output) => Ok(Some(Brc721Tx {
+            command_output,
             tx: bitcoin_tx,
         })),
         Err(Brc721Error::InvalidPayload) => Ok(None),
@@ -82,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_brc721_tx_accepts_op_return_at_vout0() {
+    fn parse_brc721_tx_accepts_command_output_at_vout0() {
         let payload = Brc721Payload::RegisterCollection(RegisterCollectionData {
             evm_collection_address: H160::from_low_u64_be(1),
             rebaseable: false,
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_brc721_tx_rejects_op_return_not_at_vout0() {
+    fn parse_brc721_tx_rejects_command_output_not_at_vout0() {
         let payload = Brc721Payload::RegisterCollection(RegisterCollectionData {
             evm_collection_address: H160::from_low_u64_be(1),
             rebaseable: false,
