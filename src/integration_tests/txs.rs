@@ -37,12 +37,13 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         .address;
     let client = bitcoincore_rpc::Client::new(&node.rpc_url(), auth.clone()).unwrap();
     client.generate_to_address(101, &address).expect("mint");
-    let output = Brc721OpReturnOutput::new(Brc721Payload::RegisterCollection(RegisterCollectionData {
-        evm_collection_address: H160::default(),
-        rebaseable: false,
-    }))
-    .into_txout()
-    .unwrap();
+    let output =
+        Brc721OpReturnOutput::new(Brc721Payload::RegisterCollection(RegisterCollectionData {
+            evm_collection_address: H160::default(),
+            rebaseable: false,
+        }))
+        .into_txout()
+        .unwrap();
     assert_eq!(
         output.script_pubkey.to_string(),
         "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_22 00000000000000000000000000000000000000000000"
