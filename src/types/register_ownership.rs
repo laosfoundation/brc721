@@ -1,10 +1,107 @@
 use crate::types::{Brc721Error, Brc721Token};
 use bitcoin::Transaction;
+use std::{fmt, str::FromStr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotRange {
     pub start: u128,
     pub end: u128,
+}
+
+#[derive(Debug)]
+pub struct SlotRangesParseError {
+    message: String,
+}
+
+impl SlotRangesParseError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for SlotRangesParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for SlotRangesParseError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotRanges(Vec<SlotRange>);
+
+impl SlotRanges {
+    pub(crate) fn into_ranges(self) -> Vec<SlotRange> {
+        self.0
+    }
+}
+
+impl FromStr for SlotRanges {
+    type Err = SlotRangesParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let raw = s.trim();
+        if raw.is_empty() {
+            return Err(SlotRangesParseError::new(
+                "slots cannot be empty (expected e.g. '0..=9,10..=19')",
+            ));
+        }
+
+        let mut ranges = Vec::new();
+        for part in raw.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                return Err(SlotRangesParseError::new(
+                    "slots contains an empty range (expected e.g. '0..=9,10..=19')",
+                ));
+            }
+
+            let (start, end) = match part.split_once("..=") {
+                Some((start, end)) => (parse_slot_str(start)?, parse_slot_str(end)?),
+                None => {
+                    let single = parse_slot_str(part)?;
+                    (single, single)
+                }
+            };
+
+            if start > end {
+                return Err(SlotRangesParseError::new(format!(
+                    "invalid slot range '{part}': start {start} is greater than end {end}"
+                )));
+            }
+
+            ranges.push(SlotRange { start, end });
+        }
+
+        if ranges.len() > u8::MAX as usize {
+            return Err(SlotRangesParseError::new(format!(
+                "too many slot ranges (got {}, max {})",
+                ranges.len(),
+                u8::MAX
+            )));
+        }
+
+        Ok(Self(ranges))
+    }
+}
+
+fn parse_slot_str(s: &str) -> Result<u128, SlotRangesParseError> {
+    let raw = s.trim();
+    if raw.is_empty() {
+        return Err(SlotRangesParseError::new("slot number cannot be empty"));
+    }
+    let slot: u128 = raw
+        .parse()
+        .map_err(|_| SlotRangesParseError::new(format!("invalid slot number '{raw}'")))?;
+    if slot > Brc721Token::MAX_SLOT {
+        return Err(SlotRangesParseError::new(format!(
+            "slot number {slot} exceeds max {}",
+            Brc721Token::MAX_SLOT
+        )));
+    }
+    Ok(slot)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +135,22 @@ impl RegisterOwnershipData {
         Ok(data)
     }
 
+    pub fn for_single_output(
+        collection_height: u64,
+        collection_tx_index: u32,
+        output_index: u8,
+        slots: SlotRanges,
+    ) -> Result<Self, Brc721Error> {
+        Self::new(
+            collection_height,
+            collection_tx_index,
+            vec![OwnershipGroup {
+                output_index,
+                ranges: slots.into_ranges(),
+            }],
+        )
+    }
+
     pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
         let output_count = bitcoin_tx.output.len();
         for group in &self.groups {
@@ -51,6 +164,7 @@ impl RegisterOwnershipData {
         Ok(())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn dummy() -> Self {
         Self::new(
             0,
@@ -232,6 +346,25 @@ fn parse_slot(bytes: &[u8]) -> Result<u128, Brc721Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slot_ranges_parse_allows_single_and_multiple_ranges() {
+        let slots = SlotRanges::from_str("0..=9, 42,10..=19").expect("parse");
+        assert_eq!(
+            slots,
+            SlotRanges(vec![
+                SlotRange { start: 0, end: 9 },
+                SlotRange { start: 42, end: 42 },
+                SlotRange { start: 10, end: 19 },
+            ])
+        );
+    }
+
+    #[test]
+    fn slot_ranges_parse_rejects_start_greater_than_end() {
+        let err = SlotRanges::from_str("9..=0").unwrap_err();
+        assert!(err.to_string().contains("start 9 is greater than end 0"));
+    }
 
     fn sample_payload() -> RegisterOwnershipData {
         RegisterOwnershipData::new(

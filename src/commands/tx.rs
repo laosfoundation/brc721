@@ -3,7 +3,7 @@ use std::str::FromStr;
 use super::CommandRunner;
 use crate::storage::traits::CollectionKey;
 use crate::types::{
-    Brc721OpReturnOutput, Brc721Payload, RegisterCollectionData, RegisterOwnershipData,
+    Brc721OpReturnOutput, Brc721Payload, RegisterCollectionData, RegisterOwnershipData, SlotRanges,
 };
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
@@ -35,9 +35,16 @@ impl CommandRunner for cli::TxCmd {
             } => run_send_amount(ctx, to, *amount_sat, *fee_rate, passphrase.clone()),
             cli::TxCmd::RegisterOwnership {
                 collection_id,
+                slots,
                 fee_rate,
                 passphrase,
-            } => run_register_ownership(ctx, collection_id, *fee_rate, passphrase.clone()),
+            } => run_register_ownership(
+                ctx,
+                collection_id,
+                slots.clone(),
+                *fee_rate,
+                passphrase.clone(),
+            ),
         }
     }
 }
@@ -75,14 +82,18 @@ fn run_register_collection(
 fn run_register_ownership(
     ctx: &context::Context,
     collection_id: &CollectionKey,
+    slots: SlotRanges,
     fee_rate: Option<f64>,
     passphrase: Option<String>,
 ) -> Result<()> {
     let wallet = load_wallet(ctx)?;
 
-    let mut ownership = RegisterOwnershipData::dummy();
-    ownership.collection_height = collection_id.block_height;
-    ownership.collection_tx_index = collection_id.tx_index;
+    let ownership = RegisterOwnershipData::for_single_output(
+        collection_id.block_height,
+        collection_id.tx_index,
+        1,
+        slots,
+    )?;
     let payload = Brc721Payload::RegisterOwnership(ownership);
 
     let output = Brc721OpReturnOutput::new(payload).into_txout().unwrap();

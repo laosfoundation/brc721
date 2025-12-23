@@ -2,6 +2,7 @@ use clap::Subcommand;
 use ethereum_types::H160;
 
 use crate::storage::traits::CollectionKey;
+use crate::types::SlotRanges;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum TxCmd {
@@ -50,6 +51,13 @@ pub enum TxCmd {
             required = true
         )]
         collection_id: CollectionKey,
+        #[arg(
+            long = "slots",
+            value_name = "RANGES",
+            help = "Comma-separated slot ranges (inclusive), e.g. '0..=9,10..=19' or '42'",
+            required = true
+        )]
+        slots: SlotRanges,
         #[arg(
             long = "fee-rate",
             value_name = "SAT/VB",
