@@ -343,8 +343,8 @@ mod tests {
             RegisterOwnershipData::for_single_output(0, 0, 1, slots).expect("ownership payload");
 
         let op_return = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(ownership))
-        .into_txout()
-        .expect("opreturn txout");
+            .into_txout()
+            .expect("opreturn txout");
 
         let tx = Transaction {
             version: bitcoin::transaction::Version(2),
