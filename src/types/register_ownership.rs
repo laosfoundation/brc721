@@ -120,7 +120,6 @@ pub struct RegisterOwnershipData {
 impl RegisterOwnershipData {
     pub const HEADER_LEN: usize = 8 + 4 + 1; // height + tx_index + group_count
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(
         collection_height: u64,
         collection_tx_index: u32,
@@ -162,19 +161,6 @@ impl RegisterOwnershipData {
             }
         }
         Ok(())
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn dummy() -> Self {
-        Self::new(
-            0,
-            0,
-            vec![OwnershipGroup {
-                output_index: 1,
-                ranges: vec![SlotRange { start: 0, end: 0 }],
-            }],
-        )
-        .expect("dummy register ownership payload must be valid")
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -387,8 +373,10 @@ mod tests {
     }
 
     #[test]
-    fn dummy_payload_is_valid_and_roundtrips() {
-        let data = RegisterOwnershipData::dummy();
+    fn minimal_payload_is_valid_and_roundtrips() {
+        let slots = SlotRanges::from_str("0").expect("slots parse");
+        let data = RegisterOwnershipData::for_single_output(0, 0, 1, slots)
+            .expect("valid minimal register ownership payload");
         let bytes = data.to_bytes();
         let parsed = RegisterOwnershipData::try_from(bytes.as_slice()).expect("parse succeeds");
         assert_eq!(parsed, data);
@@ -398,7 +386,9 @@ mod tests {
     fn validate_in_tx_rejects_out_of_bounds_output_index() {
         use bitcoin::{absolute, transaction, Amount, ScriptBuf, TxOut};
 
-        let data = RegisterOwnershipData::dummy(); // output_index = 1
+        let slots = SlotRanges::from_str("0").expect("slots parse");
+        let data = RegisterOwnershipData::for_single_output(0, 0, 1, slots)
+            .expect("valid minimal register ownership payload");
         let tx = bitcoin::Transaction {
             version: transaction::Version(2),
             lock_time: absolute::LockTime::ZERO,

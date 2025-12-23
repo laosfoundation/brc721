@@ -333,13 +333,16 @@ mod tests {
 
     #[test]
     fn parse_block_ignores_register_ownership_for_unknown_collection() {
-        use crate::types::{Brc721OpReturnOutput, RegisterOwnershipData};
+        use crate::types::{Brc721OpReturnOutput, RegisterOwnershipData, SlotRanges};
+        use std::str::FromStr;
 
         let (storage, parser) = make_parser_with_storage(false);
 
-        let op_return = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(
-            RegisterOwnershipData::dummy(),
-        ))
+        let slots = SlotRanges::from_str("0").expect("slots parse");
+        let ownership =
+            RegisterOwnershipData::for_single_output(0, 0, 1, slots).expect("ownership payload");
+
+        let op_return = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(ownership))
         .into_txout()
         .expect("opreturn txout");
 
