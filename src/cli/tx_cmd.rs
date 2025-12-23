@@ -1,6 +1,8 @@
 use clap::Subcommand;
 use ethereum_types::H160;
 
+use crate::storage::traits::CollectionKey;
+
 #[derive(Subcommand, Debug, Clone)]
 pub enum TxCmd {
     #[command(
@@ -37,10 +39,17 @@ pub enum TxCmd {
         passphrase: Option<String>,
     },
     #[command(
-        about = "Register BRC-721 collection ownership (dummy payload)",
-        long_about = "Create and broadcast a transaction that registers BRC-721 collection ownership. This initial implementation sends a dummy payload using command code 0x01."
+        about = "Register BRC-721 collection ownership",
+        long_about = "Create and broadcast a transaction that registers BRC-721 collection ownership for a given collection id (HEIGHT:TX_INDEX)."
     )]
     RegisterOwnership {
+        #[arg(
+            long = "collection-id",
+            value_name = "HEIGHT:TX_INDEX",
+            help = "Collection id in the form <block_height>:<tx_index> (e.g. 850123:0)",
+            required = true
+        )]
+        collection_id: CollectionKey,
         #[arg(
             long = "fee-rate",
             value_name = "SAT/VB",
