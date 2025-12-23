@@ -46,6 +46,11 @@ impl RemoteWallet {
             return Ok(());
         }
 
+        log::info!(
+            "⏳ Loading watch-only wallet '{}' in Bitcoin Core (this may take a while)...",
+            self.watch_name
+        );
+
         let result: serde_json::Value = root
             .call::<serde_json::Value>("loadwallet", &[serde_json::json!(self.watch_name)])
             .with_context(|| format!("loadwallet '{}'", self.watch_name))?;
