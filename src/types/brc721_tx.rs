@@ -44,7 +44,9 @@ pub fn parse_brc721_tx(bitcoin_tx: &Transaction) -> Result<Option<Brc721Tx<'_>>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::register_ownership::{OwnershipGroup, SlotRange};
     use crate::types::{Brc721Command, RegisterCollectionData, BRC721_CODE};
+    use crate::types::{Brc721Payload, RegisterOwnershipData};
     use bitcoin::absolute;
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::script::{Builder, PushBytesBuf};
@@ -105,5 +107,31 @@ mod tests {
         let tx = dummy_tx(vec![empty_txout(), brc721_txout_for_payload(&payload)]);
         let parsed = parse_brc721_tx(&tx).expect("parse should succeed");
         assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn validate_register_ownership_allows_multiple_lots_single_owner_output() {
+        let ownership = RegisterOwnershipData::new(
+            840_000,
+            2,
+            vec![OwnershipGroup {
+                output_index: 1,
+                ranges: vec![
+                    SlotRange { start: 0, end: 9 },
+                    SlotRange { start: 10, end: 19 },
+                ],
+            }],
+        )
+        .expect("valid ownership data");
+
+        let payload = Brc721Payload::RegisterOwnership(ownership);
+        let tx = dummy_tx(vec![brc721_txout_for_payload(&payload), empty_txout()]);
+        let parsed = parse_brc721_tx(&tx)
+            .expect("parse should succeed")
+            .expect("expected Some(Brc721Tx)");
+
+        parsed
+            .validate()
+            .expect("ownership output references should be valid");
     }
 }
