@@ -63,15 +63,13 @@ impl Brc721Parser {
                     tx_index,
                 )
             }
-            Brc721Payload::RegisterOwnership(payload) => {
-                crate::parser::register_ownership::digest(
-                    payload,
-                    brc721_tx,
-                    storage,
-                    block_height,
-                    tx_index,
-                )
-            }
+            Brc721Payload::RegisterOwnership(payload) => crate::parser::register_ownership::digest(
+                payload,
+                brc721_tx,
+                storage,
+                block_height,
+                tx_index,
+            ),
         }
     }
 }

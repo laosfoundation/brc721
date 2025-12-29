@@ -37,4 +37,3 @@ pub fn digest<S: StorageRead>(
         }
     }
 }
-
