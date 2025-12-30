@@ -83,6 +83,23 @@ impl FromStr for SlotRanges {
             )));
         }
 
+        // Disallow overlapping slots across ranges.
+        if ranges.len() > 1 {
+            let mut sorted = ranges.clone();
+            sorted.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
+
+            let mut last = &sorted[0];
+            for current in sorted.iter().skip(1) {
+                if current.start <= last.end {
+                    return Err(SlotRangesParseError::new(format!(
+                        "overlapping slot ranges are not allowed: {}..={} overlaps {}..={}",
+                        last.start, last.end, current.start, current.end
+                    )));
+                }
+                last = current;
+            }
+        }
+
         Ok(Self(ranges))
     }
 }
@@ -350,6 +367,12 @@ mod tests {
     fn slot_ranges_parse_rejects_start_greater_than_end() {
         let err = SlotRanges::from_str("9..=0").unwrap_err();
         assert!(err.to_string().contains("start 9 is greater than end 0"));
+    }
+
+    #[test]
+    fn slot_ranges_parse_rejects_overlapping_ranges() {
+        let err = SlotRanges::from_str("0..=5,3..=7").unwrap_err();
+        assert!(err.to_string().contains("overlapping slot ranges"));
     }
 
     fn sample_payload() -> RegisterOwnershipData {
