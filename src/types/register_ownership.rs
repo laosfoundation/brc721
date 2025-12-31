@@ -204,8 +204,8 @@ impl RegisterOwnershipData {
 
         let height = VarInt96::new(self.collection_height as u128)
             .expect("u64 always fits in 96-bit varint");
-        let tx_index =
-            VarInt96::new(self.collection_tx_index as u128).expect("u32 always fits in 96-bit varint");
+        let tx_index = VarInt96::new(self.collection_tx_index as u128)
+            .expect("u32 always fits in 96-bit varint");
 
         let mut out = Vec::with_capacity(height.size() + tx_index.size() + 1);
         height.encode_into(&mut out);
