@@ -185,13 +185,13 @@ mod tests {
         use std::str::FromStr;
 
         let slots = SlotRanges::from_str("10,20..=30").expect("slots parse");
-        let ownership = RegisterOwnershipData::for_single_output(1, 2, 1, slots)
+        let ownership = RegisterOwnershipData::for_single_output(840_000, 2, 1, slots)
             .expect("valid register ownership payload");
         let txout = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(ownership))
             .into_txout()
             .expect("into_txout");
 
         let output0 = format!("0x{}", hex::encode(txout.script_pubkey.as_bytes()));
-        assert_eq!(output0, "0x6a5f0b010102010102000a01141e");
+        assert_eq!(output0, "0x6a5f0d01c0a23302010102000a01141e");
     }
 }

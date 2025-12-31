@@ -195,7 +195,6 @@ impl RegisterOwnershipData {
             .expect("register ownership payload must be valid before serialization");
 
         use crate::types::varint96::VarInt96;
-        use bitcoin::consensus::encode::{Encodable, VarInt};
 
         let group_count: u8 = self
             .groups
@@ -203,16 +202,14 @@ impl RegisterOwnershipData {
             .try_into()
             .expect("group count must fit in u8");
 
-        let height_vi = VarInt::from(self.collection_height);
-        let tx_index_vi = VarInt::from(self.collection_tx_index);
+        let height = VarInt96::new(self.collection_height as u128)
+            .expect("u64 always fits in 96-bit varint");
+        let tx_index =
+            VarInt96::new(self.collection_tx_index as u128).expect("u32 always fits in 96-bit varint");
 
-        let mut out = Vec::with_capacity(height_vi.size() + tx_index_vi.size() + 1);
-        height_vi
-            .consensus_encode(&mut out)
-            .expect("Vec<u8> writes are infallible");
-        tx_index_vi
-            .consensus_encode(&mut out)
-            .expect("Vec<u8> writes are infallible");
+        let mut out = Vec::with_capacity(height.size() + tx_index.size() + 1);
+        height.encode_into(&mut out);
+        tx_index.encode_into(&mut out);
         out.push(group_count);
 
         for group in &self.groups {
@@ -294,8 +291,16 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let mut cursor = 0usize;
 
-        let collection_height = take_varint(bytes, &mut cursor)?;
-        let collection_tx_index_raw = take_varint(bytes, &mut cursor)?;
+        let collection_height_raw = take_varint96(bytes, &mut cursor)?;
+        let collection_height: u64 = collection_height_raw.try_into().map_err(|_| {
+            Brc721Error::TxError(format!(
+                "collection height {} out of range (max {})",
+                collection_height_raw,
+                u64::MAX
+            ))
+        })?;
+
+        let collection_tx_index_raw = take_varint96(bytes, &mut cursor)?;
         let collection_tx_index: u32 = collection_tx_index_raw.try_into().map_err(|_| {
             Brc721Error::TxError(format!(
                 "collection tx_index {} out of range (max {})",
@@ -383,49 +388,6 @@ fn take_bytes<'a>(
     let slice = &bytes[*cursor..*cursor + len];
     *cursor += len;
     Ok(slice)
-}
-
-fn take_varint(bytes: &[u8], cursor: &mut usize) -> Result<u64, Brc721Error> {
-    let prefix = take_bytes(bytes, cursor, 1)?[0];
-    match prefix {
-        n @ 0x00..=0xFC => Ok(n as u64),
-        0xFD => {
-            let slice: [u8; 2] = take_bytes(bytes, cursor, 2)?
-                .try_into()
-                .expect("slice length checked");
-            let value = u16::from_le_bytes(slice) as u64;
-            if value < 0xFD {
-                return Err(Brc721Error::TxError(
-                    bitcoin::consensus::encode::Error::NonMinimalVarInt.to_string(),
-                ));
-            }
-            Ok(value)
-        }
-        0xFE => {
-            let slice: [u8; 4] = take_bytes(bytes, cursor, 4)?
-                .try_into()
-                .expect("slice length checked");
-            let value = u32::from_le_bytes(slice) as u64;
-            if value < 0x1_0000 {
-                return Err(Brc721Error::TxError(
-                    bitcoin::consensus::encode::Error::NonMinimalVarInt.to_string(),
-                ));
-            }
-            Ok(value)
-        }
-        0xFF => {
-            let slice: [u8; 8] = take_bytes(bytes, cursor, 8)?
-                .try_into()
-                .expect("slice length checked");
-            let value = u64::from_le_bytes(slice);
-            if value < 0x1_0000_0000 {
-                return Err(Brc721Error::TxError(
-                    bitcoin::consensus::encode::Error::NonMinimalVarInt.to_string(),
-                ));
-            }
-            Ok(value)
-        }
-    }
 }
 
 fn take_varint96(bytes: &[u8], cursor: &mut usize) -> Result<u128, Brc721Error> {
