@@ -58,21 +58,33 @@ impl FromStr for SlotRanges {
                 ));
             }
 
-            let (start, end) = match part.split_once("..=") {
-                Some((start, end)) => (parse_slot_str(start)?, parse_slot_str(end)?),
+            match part.split_once("..=") {
+                Some((start, end)) => {
+                    let start = parse_slot_str(start)?;
+                    let end = parse_slot_str(end)?;
+
+                    if start > end {
+                        return Err(SlotRangesParseError::new(format!(
+                            "invalid slot range '{part}': start {start} is greater than end {end}"
+                        )));
+                    }
+
+                    if start == end {
+                        return Err(SlotRangesParseError::new(format!(
+                            "invalid slot range '{part}': start {start} must be strictly less than end {end} (use '{start}' for a single slot)"
+                        )));
+                    }
+
+                    ranges.push(SlotRange { start, end });
+                }
                 None => {
                     let single = parse_slot_str(part)?;
-                    (single, single)
+                    ranges.push(SlotRange {
+                        start: single,
+                        end: single,
+                    });
                 }
             };
-
-            if start > end {
-                return Err(SlotRangesParseError::new(format!(
-                    "invalid slot range '{part}': start {start} is greater than end {end}"
-                )));
-            }
-
-            ranges.push(SlotRange { start, end });
         }
 
         if ranges.len() > u8::MAX as usize {
@@ -367,6 +379,13 @@ mod tests {
     fn slot_ranges_parse_rejects_start_greater_than_end() {
         let err = SlotRanges::from_str("9..=0").unwrap_err();
         assert!(err.to_string().contains("start 9 is greater than end 0"));
+    }
+
+    #[test]
+    fn slot_ranges_parse_rejects_equal_range_endpoints() {
+        let err = SlotRanges::from_str("42..=42").unwrap_err();
+        assert!(err.to_string().contains("must be strictly less than"));
+        assert!(err.to_string().contains("use '42'"));
     }
 
     #[test]

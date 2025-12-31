@@ -54,7 +54,7 @@ pub enum TxCmd {
         #[arg(
             long = "slots",
             value_name = "RANGES",
-            help = "Comma-separated slot ranges (inclusive), e.g. '0..=9,10..=19' or '42'",
+            help = "Comma-separated slot ranges (inclusive) and/or single slots, e.g. '0..=9,10..=19' or '42' (ranges require start < end)",
             required = true
         )]
         slots: SlotRanges,
