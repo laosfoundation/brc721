@@ -551,4 +551,35 @@ mod tests {
             other => panic!("expected InvalidSlotRange, got {:?}", other),
         }
     }
+
+    #[test]
+    fn rejects_equal_slot_range_endpoints_in_tagged_range_item() {
+        use crate::types::varint96::VarInt96;
+
+        let start = 42u128;
+        let end = 42u128;
+
+        let mut bytes = vec![
+            1, // height varint
+            2, // tx index varint
+            1, // group count
+            1, // output index
+            1, // range count
+        ];
+
+        bytes.push(0x01); // slot range tag
+        VarInt96::new(start)
+            .expect("start fits")
+            .encode_into(&mut bytes);
+        VarInt96::new(end).expect("end fits").encode_into(&mut bytes);
+
+        let res = RegisterOwnershipData::try_from(bytes.as_slice());
+        match res {
+            Err(Brc721Error::TxError(msg)) => {
+                assert!(msg.contains("strictly less"));
+                assert!(msg.contains("single slot"));
+            }
+            other => panic!("expected TxError, got {:?}", other),
+        }
+    }
 }

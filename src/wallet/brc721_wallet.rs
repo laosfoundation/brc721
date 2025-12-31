@@ -122,6 +122,21 @@ impl Brc721Wallet {
         self.sign(psbt, &passphrase)
     }
 
+    pub fn build_tx_with_op_return_and_payments(
+        &self,
+        op_return: bitcoin::TxOut,
+        payments: Vec<(Address, Amount)>,
+        fee_rate: Option<f64>,
+        passphrase: SecretString,
+    ) -> Result<bitcoin::Transaction> {
+        let psbt = self
+            .remote
+            .create_psbt_from_opreturn_and_payments(op_return, payments, fee_rate)
+            .context("create psbt from op_return + payments")?;
+
+        self.sign(psbt, &passphrase)
+    }
+
     pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
         self.remote.broadcast(tx)
     }
