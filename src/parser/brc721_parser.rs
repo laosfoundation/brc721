@@ -1,5 +1,5 @@
-use crate::storage::traits::{CollectionKey, StorageRead, StorageWrite};
-use crate::types::{parse_brc721_tx, Brc721Command, Brc721Error, Brc721Payload, Brc721Tx};
+use crate::storage::traits::{StorageRead, StorageWrite};
+use crate::types::{parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx};
 use bitcoin::Block;
 use bitcoin::Transaction;
 
@@ -63,37 +63,13 @@ impl Brc721Parser {
                     tx_index,
                 )
             }
-            Brc721Payload::RegisterOwnership(payload) => {
-                let collection_key =
-                    CollectionKey::new(payload.collection_height, payload.collection_tx_index);
-
-                match storage
-                    .load_collection(&collection_key)
-                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?
-                {
-                    Some(_) => {
-                        log::error!(
-                            "register-ownership not supported yet (block {} tx {}, collection {}, groups={})",
-                            block_height,
-                            tx_index,
-                            collection_key,
-                            payload.groups.len()
-                        );
-                        Err(Brc721Error::UnsupportedCommand {
-                            cmd: Brc721Command::RegisterOwnership,
-                        })
-                    }
-                    None => {
-                        log::warn!(
-                            "register-ownership references unknown collection {} (block {} tx {})",
-                            collection_key,
-                            block_height,
-                            tx_index
-                        );
-                        Ok(())
-                    }
-                }
-            }
+            Brc721Payload::RegisterOwnership(payload) => crate::parser::register_ownership::digest(
+                payload,
+                brc721_tx,
+                storage,
+                block_height,
+                tx_index,
+            ),
         }
     }
 }
@@ -333,15 +309,18 @@ mod tests {
 
     #[test]
     fn parse_block_ignores_register_ownership_for_unknown_collection() {
-        use crate::types::{Brc721OpReturnOutput, RegisterOwnershipData};
+        use crate::types::{Brc721OpReturnOutput, RegisterOwnershipData, SlotRanges};
+        use std::str::FromStr;
 
         let (storage, parser) = make_parser_with_storage(false);
 
-        let op_return = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(
-            RegisterOwnershipData::dummy(),
-        ))
-        .into_txout()
-        .expect("opreturn txout");
+        let slots = SlotRanges::from_str("0").expect("slots parse");
+        let ownership =
+            RegisterOwnershipData::for_single_output(0, 0, 1, slots).expect("ownership payload");
+
+        let op_return = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(ownership))
+            .into_txout()
+            .expect("opreturn txout");
 
         let tx = Transaction {
             version: bitcoin::transaction::Version(2),

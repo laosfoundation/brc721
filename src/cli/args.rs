@@ -111,3 +111,24 @@ pub fn parse() -> Cli {
     log::info!("Loaded env from {}", dotenv_path);
     Cli::parse()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_rejects_equal_range_endpoints_for_slots() {
+        let res = Cli::try_parse_from([
+            "brc721",
+            "tx",
+            "register-ownership",
+            "--collection-id",
+            "1:2",
+            "--slots",
+            "42..=42",
+        ]);
+
+        let err = res.expect_err("expected CLI parsing to fail");
+        assert!(err.to_string().contains("must be strictly less than"));
+    }
+}

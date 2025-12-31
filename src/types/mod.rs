@@ -6,6 +6,7 @@ mod brc721_token;
 mod brc721_tx;
 mod register_collection;
 mod register_ownership;
+pub(crate) mod varint96;
 
 pub use self::brc721_token::Brc721Token;
 use bitcoin::opcodes;
@@ -15,6 +16,6 @@ pub use brc721_op_return_output::Brc721OpReturnOutput;
 pub use brc721_payload::Brc721Payload;
 pub use brc721_tx::{parse_brc721_tx, Brc721Tx};
 pub use register_collection::RegisterCollectionData;
-pub use register_ownership::RegisterOwnershipData;
+pub use register_ownership::{RegisterOwnershipData, SlotRanges};
 
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
