@@ -192,9 +192,6 @@ mod tests {
             .expect("into_txout");
 
         let output0 = format!("0x{}", hex::encode(txout.script_pubkey.as_bytes()));
-        assert_eq!(
-            output0,
-            "0x6a5f3601010201010200000000000000000000000a00000000000000000000000a00000000000000000000001400000000000000000000001e"
-        );
+        assert_eq!(output0, "0x6a5f0b010102010102000a01141e");
     }
 }

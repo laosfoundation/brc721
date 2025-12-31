@@ -183,4 +183,3 @@ mod tests {
         assert!(matches!(err, VarInt96Error::Overflow(_)));
     }
 }
-

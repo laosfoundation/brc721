@@ -194,6 +194,7 @@ impl RegisterOwnershipData {
         self.validate()
             .expect("register ownership payload must be valid before serialization");
 
+        use crate::types::varint96::VarInt96;
         use bitcoin::consensus::encode::{Encodable, VarInt};
 
         let group_count: u8 = self
@@ -224,12 +225,20 @@ impl RegisterOwnershipData {
             out.push(range_count);
 
             for range in &group.ranges {
-                let start = range.start.to_be_bytes();
-                let end = range.end.to_be_bytes();
-                let start_bytes = &start[start.len() - Brc721Token::SLOT_BYTES..];
-                let end_bytes = &end[end.len() - Brc721Token::SLOT_BYTES..];
-                out.extend_from_slice(start_bytes);
-                out.extend_from_slice(end_bytes);
+                if range.start == range.end {
+                    out.push(0x00); // single slot
+                    VarInt96::new(range.start)
+                        .expect("validated slot must fit 96 bits")
+                        .encode_into(&mut out);
+                } else {
+                    out.push(0x01); // slot range
+                    VarInt96::new(range.start)
+                        .expect("validated slot must fit 96 bits")
+                        .encode_into(&mut out);
+                    VarInt96::new(range.end)
+                        .expect("validated slot must fit 96 bits")
+                        .encode_into(&mut out);
+                }
             }
         }
 
@@ -284,19 +293,9 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let mut cursor = 0usize;
-        let total_len = bytes.len();
 
-        let mut take = |len: usize| -> Result<&[u8], Brc721Error> {
-            if total_len < cursor + len {
-                return Err(Brc721Error::InvalidLength(cursor + len, total_len));
-            }
-            let slice = &bytes[cursor..cursor + len];
-            cursor += len;
-            Ok(slice)
-        };
-
-        let collection_height = take_varint(&mut take)?;
-        let collection_tx_index_raw = take_varint(&mut take)?;
+        let collection_height = take_varint(bytes, &mut cursor)?;
+        let collection_tx_index_raw = take_varint(bytes, &mut cursor)?;
         let collection_tx_index: u32 = collection_tx_index_raw.try_into().map_err(|_| {
             Brc721Error::TxError(format!(
                 "collection tx_index {} out of range (max {})",
@@ -305,8 +304,7 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
             ))
         })?;
 
-        let group_count_bytes = take(1)?;
-        let group_count = group_count_bytes[0];
+        let group_count = take_bytes(bytes, &mut cursor, 1)?[0];
         if group_count == 0 {
             return Err(Brc721Error::InvalidGroupCount(group_count));
         }
@@ -314,26 +312,46 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
         let mut groups = Vec::with_capacity(group_count as usize);
 
         for _ in 0..group_count {
-            let output_index = take(1)?[0];
+            let output_index = take_bytes(bytes, &mut cursor, 1)?[0];
             if output_index == 0 {
                 return Err(Brc721Error::InvalidOutputIndex(output_index));
             }
 
-            let range_count = take(1)?[0];
+            let range_count = take_bytes(bytes, &mut cursor, 1)?[0];
             if range_count == 0 {
                 return Err(Brc721Error::InvalidRangeCount(range_count));
             }
 
             let mut ranges = Vec::with_capacity(range_count as usize);
             for _ in 0..range_count {
-                let start_bytes = take(Brc721Token::SLOT_BYTES)?;
-                let end_bytes = take(Brc721Token::SLOT_BYTES)?;
-                let start = parse_slot(start_bytes)?;
-                let end = parse_slot(end_bytes)?;
-                if start > end {
-                    return Err(Brc721Error::InvalidSlotRange(start, end));
+                let tag = take_bytes(bytes, &mut cursor, 1)?[0];
+                match tag {
+                    0x00 => {
+                        let slot = take_varint96(bytes, &mut cursor)?;
+                        ranges.push(SlotRange {
+                            start: slot,
+                            end: slot,
+                        });
+                    }
+                    0x01 => {
+                        let start = take_varint96(bytes, &mut cursor)?;
+                        let end = take_varint96(bytes, &mut cursor)?;
+                        if start > end {
+                            return Err(Brc721Error::InvalidSlotRange(start, end));
+                        }
+                        if start == end {
+                            return Err(Brc721Error::TxError(format!(
+                                "invalid slot range: start {start} must be strictly less than end {end} (use a single slot item instead)"
+                            )));
+                        }
+                        ranges.push(SlotRange { start, end });
+                    }
+                    other => {
+                        return Err(Brc721Error::TxError(format!(
+                            "unknown slot item tag: {other}"
+                        )));
+                    }
                 }
-                ranges.push(SlotRange { start, end });
             }
 
             groups.push(OwnershipGroup {
@@ -342,8 +360,8 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
             });
         }
 
-        if cursor != total_len {
-            return Err(Brc721Error::InvalidLength(cursor, total_len));
+        if cursor != bytes.len() {
+            return Err(Brc721Error::InvalidLength(cursor, bytes.len()));
         }
 
         Ok(Self {
@@ -354,14 +372,27 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
     }
 }
 
-fn take_varint<'a>(
-    take: &mut impl FnMut(usize) -> Result<&'a [u8], Brc721Error>,
-) -> Result<u64, Brc721Error> {
-    let prefix = take(1)?[0];
+fn take_bytes<'a>(
+    bytes: &'a [u8],
+    cursor: &mut usize,
+    len: usize,
+) -> Result<&'a [u8], Brc721Error> {
+    if bytes.len() < *cursor + len {
+        return Err(Brc721Error::InvalidLength(*cursor + len, bytes.len()));
+    }
+    let slice = &bytes[*cursor..*cursor + len];
+    *cursor += len;
+    Ok(slice)
+}
+
+fn take_varint(bytes: &[u8], cursor: &mut usize) -> Result<u64, Brc721Error> {
+    let prefix = take_bytes(bytes, cursor, 1)?[0];
     match prefix {
         n @ 0x00..=0xFC => Ok(n as u64),
         0xFD => {
-            let slice: [u8; 2] = take(2)?.try_into().expect("slice length checked");
+            let slice: [u8; 2] = take_bytes(bytes, cursor, 2)?
+                .try_into()
+                .expect("slice length checked");
             let value = u16::from_le_bytes(slice) as u64;
             if value < 0xFD {
                 return Err(Brc721Error::TxError(
@@ -371,7 +402,9 @@ fn take_varint<'a>(
             Ok(value)
         }
         0xFE => {
-            let slice: [u8; 4] = take(4)?.try_into().expect("slice length checked");
+            let slice: [u8; 4] = take_bytes(bytes, cursor, 4)?
+                .try_into()
+                .expect("slice length checked");
             let value = u32::from_le_bytes(slice) as u64;
             if value < 0x1_0000 {
                 return Err(Brc721Error::TxError(
@@ -381,7 +414,9 @@ fn take_varint<'a>(
             Ok(value)
         }
         0xFF => {
-            let slice: [u8; 8] = take(8)?.try_into().expect("slice length checked");
+            let slice: [u8; 8] = take_bytes(bytes, cursor, 8)?
+                .try_into()
+                .expect("slice length checked");
             let value = u64::from_le_bytes(slice);
             if value < 0x1_0000_0000 {
                 return Err(Brc721Error::TxError(
@@ -393,19 +428,16 @@ fn take_varint<'a>(
     }
 }
 
-fn parse_slot(bytes: &[u8]) -> Result<u128, Brc721Error> {
-    debug_assert_eq!(bytes.len(), Brc721Token::SLOT_BYTES);
+fn take_varint96(bytes: &[u8], cursor: &mut usize) -> Result<u128, Brc721Error> {
+    use crate::types::varint96::VarInt96;
 
-    let mut padded = [0u8; 16];
-    let offset = padded.len() - Brc721Token::SLOT_BYTES;
-    padded[offset..].copy_from_slice(bytes);
-    let slot = u128::from_be_bytes(padded);
-
-    if slot > Brc721Token::MAX_SLOT {
-        return Err(Brc721Error::InvalidSlotNumber(slot));
-    }
-
-    Ok(slot)
+    let slice = bytes
+        .get(*cursor..)
+        .ok_or_else(|| Brc721Error::TxError("varint96: cursor out of bounds".to_string()))?;
+    let (value, consumed) =
+        VarInt96::decode(slice).map_err(|e| Brc721Error::TxError(e.to_string()))?;
+    *cursor += consumed;
+    Ok(value.value())
 }
 
 #[cfg(test)]
@@ -527,6 +559,8 @@ mod tests {
 
     #[test]
     fn rejects_inverted_slot_range() {
+        use crate::types::varint96::VarInt96;
+
         let start = 10u128;
         let end = 5u128;
 
@@ -538,10 +572,13 @@ mod tests {
             1, // range count
         ];
 
-        let start_bytes = start.to_be_bytes();
-        let end_bytes = end.to_be_bytes();
-        bytes.extend_from_slice(&start_bytes[start_bytes.len() - Brc721Token::SLOT_BYTES..]);
-        bytes.extend_from_slice(&end_bytes[end_bytes.len() - Brc721Token::SLOT_BYTES..]);
+        bytes.push(0x01); // slot range tag
+        VarInt96::new(start)
+            .expect("start fits")
+            .encode_into(&mut bytes);
+        VarInt96::new(end)
+            .expect("end fits")
+            .encode_into(&mut bytes);
 
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
         match res {
