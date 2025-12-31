@@ -147,8 +147,6 @@ pub struct RegisterOwnershipData {
 }
 
 impl RegisterOwnershipData {
-    pub const HEADER_LEN: usize = 8 + 4 + 1; // height + tx_index + group_count
-
     pub fn new(
         collection_height: u64,
         collection_tx_index: u32,
@@ -196,15 +194,24 @@ impl RegisterOwnershipData {
         self.validate()
             .expect("register ownership payload must be valid before serialization");
 
+        use bitcoin::consensus::encode::{Encodable, VarInt};
+
         let group_count: u8 = self
             .groups
             .len()
             .try_into()
             .expect("group count must fit in u8");
 
-        let mut out = Vec::with_capacity(Self::HEADER_LEN);
-        out.extend_from_slice(&self.collection_height.to_be_bytes());
-        out.extend_from_slice(&self.collection_tx_index.to_be_bytes());
+        let height_vi = VarInt::from(self.collection_height);
+        let tx_index_vi = VarInt::from(self.collection_tx_index);
+
+        let mut out = Vec::with_capacity(height_vi.size() + tx_index_vi.size() + 1);
+        height_vi
+            .consensus_encode(&mut out)
+            .expect("Vec<u8> writes are infallible");
+        tx_index_vi
+            .consensus_encode(&mut out)
+            .expect("Vec<u8> writes are infallible");
         out.push(group_count);
 
         for group in &self.groups {
@@ -288,11 +295,15 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
             Ok(slice)
         };
 
-        let height_bytes: [u8; 8] = take(8)?.try_into().expect("slice length checked");
-        let collection_height = u64::from_be_bytes(height_bytes);
-
-        let tx_bytes: [u8; 4] = take(4)?.try_into().expect("slice length checked");
-        let collection_tx_index = u32::from_be_bytes(tx_bytes);
+        let collection_height = take_varint(&mut take)?;
+        let collection_tx_index_raw = take_varint(&mut take)?;
+        let collection_tx_index: u32 = collection_tx_index_raw.try_into().map_err(|_| {
+            Brc721Error::TxError(format!(
+                "collection tx_index {} out of range (max {})",
+                collection_tx_index_raw,
+                u32::MAX
+            ))
+        })?;
 
         let group_count_bytes = take(1)?;
         let group_count = group_count_bytes[0];
@@ -340,6 +351,45 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
             collection_tx_index,
             groups,
         })
+    }
+}
+
+fn take_varint<'a>(
+    take: &mut impl FnMut(usize) -> Result<&'a [u8], Brc721Error>,
+) -> Result<u64, Brc721Error> {
+    let prefix = take(1)?[0];
+    match prefix {
+        n @ 0x00..=0xFC => Ok(n as u64),
+        0xFD => {
+            let slice: [u8; 2] = take(2)?.try_into().expect("slice length checked");
+            let value = u16::from_le_bytes(slice) as u64;
+            if value < 0xFD {
+                return Err(Brc721Error::TxError(
+                    bitcoin::consensus::encode::Error::NonMinimalVarInt.to_string(),
+                ));
+            }
+            Ok(value)
+        }
+        0xFE => {
+            let slice: [u8; 4] = take(4)?.try_into().expect("slice length checked");
+            let value = u32::from_le_bytes(slice) as u64;
+            if value < 0x1_0000 {
+                return Err(Brc721Error::TxError(
+                    bitcoin::consensus::encode::Error::NonMinimalVarInt.to_string(),
+                ));
+            }
+            Ok(value)
+        }
+        0xFF => {
+            let slice: [u8; 8] = take(8)?.try_into().expect("slice length checked");
+            let value = u64::from_le_bytes(slice);
+            if value < 0x1_0000_0000 {
+                return Err(Brc721Error::TxError(
+                    bitcoin::consensus::encode::Error::NonMinimalVarInt.to_string(),
+                ));
+            }
+            Ok(value)
+        }
     }
 }
 
@@ -449,7 +499,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_group_count() {
-        let bytes = vec![0u8; RegisterOwnershipData::HEADER_LEN]; // group_count = 0
+        let bytes = vec![0, 0, 0]; // height=0 (varint), tx_index=0 (varint), group_count=0
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
         match res {
             Err(Brc721Error::InvalidGroupCount(0)) => {}
@@ -460,12 +510,13 @@ mod tests {
     #[test]
     fn rejects_zero_range_count() {
         // Build bytes manually: header + one group with range_count = 0
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&1u64.to_be_bytes()); // height
-        bytes.extend_from_slice(&2u32.to_be_bytes()); // tx index
-        bytes.push(1); // group count
-        bytes.push(1); // output index
-        bytes.push(0); // range count (invalid)
+        let bytes = vec![
+            1, // height varint
+            2, // tx index varint
+            1, // group count
+            1, // output index
+            0, // range count (invalid)
+        ];
 
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
         match res {
@@ -479,12 +530,13 @@ mod tests {
         let start = 10u128;
         let end = 5u128;
 
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&1u64.to_be_bytes());
-        bytes.extend_from_slice(&2u32.to_be_bytes());
-        bytes.push(1); // group count
-        bytes.push(1); // output index
-        bytes.push(1); // range count
+        let mut bytes = vec![
+            1, // height varint
+            2, // tx index varint
+            1, // group count
+            1, // output index
+            1, // range count
+        ];
 
         let start_bytes = start.to_be_bytes();
         let end_bytes = end.to_be_bytes();

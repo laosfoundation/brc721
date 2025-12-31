@@ -194,19 +194,9 @@ mod tests {
     fn from_bytes_rejects_register_ownership_with_zero_groups() {
         let bytes = vec![
             Brc721Command::RegisterOwnership.into(),
-            // collection height (8 bytes)
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
+            // collection height (varint)
             1,
-            // collection tx index (4 bytes)
-            0,
-            0,
-            0,
+            // collection tx index (varint)
             2,
             // group count
             0,
