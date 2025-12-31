@@ -6,6 +6,7 @@ mod brc721_token;
 mod brc721_tx;
 mod register_collection;
 mod register_ownership;
+pub(crate) mod varint96;
 
 pub use self::brc721_token::Brc721Token;
 use bitcoin::opcodes;
