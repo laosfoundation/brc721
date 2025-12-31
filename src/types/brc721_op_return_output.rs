@@ -178,4 +178,23 @@ mod tests {
             Ok(_) => panic!("expected error, got Ok"),
         }
     }
+
+    #[test]
+    fn output0_script_hex_matches_expected_for_register_ownership_two_ranges() {
+        use crate::types::{Brc721Payload, RegisterOwnershipData, SlotRanges};
+        use std::str::FromStr;
+
+        let slots = SlotRanges::from_str("10,20..=30").expect("slots parse");
+        let ownership = RegisterOwnershipData::for_single_output(1, 2, 1, slots)
+            .expect("valid register ownership payload");
+        let txout = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(ownership))
+            .into_txout()
+            .expect("into_txout");
+
+        let output0 = format!("0x{}", hex::encode(txout.script_pubkey.as_bytes()));
+        assert_eq!(
+            output0,
+            "0x6a5f400100000000000000010000000201010200000000000000000000000a00000000000000000000000a00000000000000000000001400000000000000000000001e"
+        );
+    }
 }
