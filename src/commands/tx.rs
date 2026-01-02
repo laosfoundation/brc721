@@ -86,7 +86,15 @@ fn run_register_ownership(
     fee_rate: Option<f64>,
     passphrase: Option<String>,
 ) -> Result<()> {
-    let wallet = load_wallet(ctx)?;
+    let mut wallet = load_wallet(ctx)?;
+
+    // Output 1 is the ownership UTXO tracked by the indexer for this registration.
+    // Use a new wallet-derived address so the NFTs are spendable by this wallet.
+    let ownership_address = wallet
+        .reveal_next_payment_address()
+        .context("derive ownership address")?
+        .address;
+    let ownership_amount = Amount::from_sat(546);
 
     let ownership = RegisterOwnershipData::for_single_output(
         collection_id.block_height,
@@ -100,13 +108,19 @@ fn run_register_ownership(
 
     let passphrase = resolve_passphrase(passphrase);
     let tx = wallet
-        .build_tx(output, fee_rate, passphrase)
+        .build_tx_with_op_return_and_payments(
+            output,
+            vec![(ownership_address.clone(), ownership_amount)],
+            fee_rate,
+            passphrase,
+        )
         .context("build tx")?;
     let txid = wallet.broadcast(&tx)?;
 
     log::info!(
-        "✅ Registered ownership for collection {} (cmd=0x01), txid: {}",
+        "✅ Registered ownership for collection {} (cmd=0x01), owner_output={}, txid: {}",
         collection_id,
+        ownership_address,
         txid
     );
     Ok(())

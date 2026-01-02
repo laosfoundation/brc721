@@ -194,7 +194,7 @@ impl RemoteWallet {
         let client = self.watch_client()?;
 
         let script = output.script_pubkey;
-        let dummy = bitcoin::script::ScriptBuf::from(vec![0u8; script.len() - 2]);
+        let dummy = dummy_op_return_data_for_target_script_len(script.len())?;
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);
@@ -211,6 +211,53 @@ impl RemoteWallet {
                 ],
             )
             .context("walletcreatefundedpsbt from raw tx data")?;
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
+
+        psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
+        psbt = move_opreturn_first(psbt);
+        Ok(psbt)
+    }
+
+    pub fn create_psbt_from_opreturn_and_payments(
+        &self,
+        op_return: TxOut,
+        payments: Vec<(Address, Amount)>,
+        fee_rate: Option<f64>,
+    ) -> Result<Psbt> {
+        let client = self.watch_client()?;
+
+        let script = op_return.script_pubkey;
+        let dummy = dummy_op_return_data_for_target_script_len(script.len())?;
+
+        let mut outputs_vec = Vec::with_capacity(1 + payments.len());
+        outputs_vec.push(serde_json::json!({ "data": dummy }));
+        for (address, amount) in payments {
+            outputs_vec.push(serde_json::json!({ address.to_string(): amount.to_btc() }));
+        }
+        let change_position = outputs_vec.len();
+        let outputs = serde_json::Value::Array(outputs_vec);
+
+        let mut options = serde_json::json!({});
+        if let Some(fr) = fee_rate {
+            options["fee_rate"] = serde_json::json!(fr);
+        }
+        // Keep all user-specified outputs at the front, so indices in the OP_RETURN mapping remain stable.
+        options["changePosition"] = serde_json::json!(change_position);
+
+        let funded: serde_json::Value = client
+            .call(
+                "walletcreatefundedpsbt",
+                &[
+                    serde_json::json!([]),
+                    outputs,
+                    serde_json::json!(0),
+                    options,
+                    serde_json::json!(true),
+                ],
+            )
+            .context("walletcreatefundedpsbt (op_return + payments)")?;
+
         let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
         let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
 
@@ -317,6 +364,42 @@ fn substitute_first_opreturn_script(mut psbt: Psbt, new_script: ScriptBuf) -> Re
     psbt.unsigned_tx.output[idx].value = original_amount;
 
     Ok(psbt)
+}
+
+fn dummy_op_return_data_for_target_script_len(target_len: usize) -> Result<ScriptBuf> {
+    // Standard relay policy defaults: OP_RETURN outputs are limited by `-datacarriersize` (83 bytes).
+    // We build a dummy `{"data": ...}` output whose script size is >= the final script size so that
+    // fee estimation is conservative, while keeping it within standard limits.
+    const MAX_NULL_DATA_SCRIPT_LEN: usize = 83;
+    const MAX_NULL_DATA_LEN: usize = 80; // 1 (OP_RETURN) + 2 (PUSHDATA1) + 80 = 83
+
+    if target_len > MAX_NULL_DATA_SCRIPT_LEN {
+        return Err(anyhow::anyhow!(
+            "op_return script too large: {} bytes (max standard {})",
+            target_len,
+            MAX_NULL_DATA_SCRIPT_LEN
+        ));
+    }
+
+    for data_len in 0..=MAX_NULL_DATA_LEN {
+        let script_len = 1 + pushdata_prefix_len(data_len) + data_len;
+        if script_len >= target_len && script_len <= MAX_NULL_DATA_SCRIPT_LEN {
+            return Ok(ScriptBuf::from(vec![0u8; data_len]));
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "unable to construct dummy op_return data for target script length {target_len}"
+    ))
+}
+
+fn pushdata_prefix_len(data_len: usize) -> usize {
+    match data_len {
+        0..=75 => 1,      // OP_PUSHBYTES_N
+        76..=255 => 2,    // OP_PUSHDATA1 + len (u8)
+        256..=65535 => 3, // OP_PUSHDATA2 + len (u16)
+        _ => 5,           // OP_PUSHDATA4 + len (u32)
+    }
 }
 
 #[cfg(test)]
