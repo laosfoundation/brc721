@@ -87,14 +87,6 @@ impl FromStr for SlotRanges {
             };
         }
 
-        if ranges.len() > u8::MAX as usize {
-            return Err(SlotRangesParseError::new(format!(
-                "too many slot ranges (got {}, max {})",
-                ranges.len(),
-                u8::MAX
-            )));
-        }
-
         // Disallow overlapping slots across ranges.
         if ranges.len() > 1 {
             let mut sorted = ranges.clone();
@@ -135,7 +127,6 @@ fn parse_slot_str(s: &str) -> Result<u128, SlotRangesParseError> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnershipGroup {
-    pub output_index: u8,
     pub ranges: Vec<SlotRange>,
 }
 
@@ -164,14 +155,12 @@ impl RegisterOwnershipData {
     pub fn for_single_output(
         collection_height: u64,
         collection_tx_index: u32,
-        output_index: u8,
         slots: SlotRanges,
     ) -> Result<Self, Brc721Error> {
         Self::new(
             collection_height,
             collection_tx_index,
             vec![OwnershipGroup {
-                output_index,
                 ranges: slots.into_ranges(),
             }],
         )
@@ -179,11 +168,12 @@ impl RegisterOwnershipData {
 
     pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
         let output_count = bitcoin_tx.output.len();
-        for group in &self.groups {
-            if group.output_index as usize >= output_count {
+        for (group_index, _group) in self.groups.iter().enumerate() {
+            let output_index = group_index + 1;
+            if output_index >= output_count {
                 return Err(Brc721Error::TxError(format!(
                     "register-ownership output_index {} out of bounds (tx outputs={})",
-                    group.output_index, output_count
+                    output_index, output_count
                 )));
             }
         }
@@ -196,30 +186,26 @@ impl RegisterOwnershipData {
 
         use crate::types::varint96::VarInt96;
 
-        let group_count: u8 = self
-            .groups
-            .len()
-            .try_into()
-            .expect("group count must fit in u8");
+        let group_count = self.groups.len() as u128;
+        let group_count_varint =
+            VarInt96::new(group_count).expect("validated group count must fit 96-bit varint");
 
         let height = VarInt96::new(self.collection_height as u128)
             .expect("u64 always fits in 96-bit varint");
         let tx_index = VarInt96::new(self.collection_tx_index as u128)
             .expect("u32 always fits in 96-bit varint");
 
-        let mut out = Vec::with_capacity(height.size() + tx_index.size() + 1);
+        let mut out =
+            Vec::with_capacity(height.size() + tx_index.size() + group_count_varint.size());
         height.encode_into(&mut out);
         tx_index.encode_into(&mut out);
-        out.push(group_count);
+        group_count_varint.encode_into(&mut out);
 
         for group in &self.groups {
-            let range_count: u8 = group
-                .ranges
-                .len()
-                .try_into()
-                .expect("range count must fit in u8");
-            out.push(group.output_index);
-            out.push(range_count);
+            let item_count = group.ranges.len() as u128;
+            let item_count_varint =
+                VarInt96::new(item_count).expect("validated item count must fit 96-bit varint");
+            item_count_varint.encode_into(&mut out);
 
             for range in &group.ranges {
                 if range.start == range.end {
@@ -243,29 +229,13 @@ impl RegisterOwnershipData {
     }
 
     fn validate(&self) -> Result<(), Brc721Error> {
-        let group_count = self
-            .groups
-            .len()
-            .try_into()
-            .map_err(|_| Brc721Error::InvalidGroupCount(u8::MAX))?;
-
-        if group_count == 0 {
-            return Err(Brc721Error::InvalidGroupCount(group_count));
+        if self.groups.is_empty() {
+            return Err(Brc721Error::InvalidGroupCount(0));
         }
 
         for group in &self.groups {
-            if group.output_index == 0 {
-                return Err(Brc721Error::InvalidOutputIndex(group.output_index));
-            }
-
-            let range_count = group
-                .ranges
-                .len()
-                .try_into()
-                .map_err(|_| Brc721Error::InvalidRangeCount(u8::MAX))?;
-
-            if range_count == 0 {
-                return Err(Brc721Error::InvalidRangeCount(range_count));
+            if group.ranges.is_empty() {
+                return Err(Brc721Error::InvalidRangeCount(0));
             }
 
             for range in &group.ranges {
@@ -309,26 +279,35 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
             ))
         })?;
 
-        let group_count = take_bytes(bytes, &mut cursor, 1)?[0];
+        let group_count_raw = take_varint96(bytes, &mut cursor)?;
+        let group_count: usize = group_count_raw.try_into().map_err(|_| {
+            Brc721Error::TxError(format!(
+                "group_count {} out of range (max {})",
+                group_count_raw,
+                usize::MAX
+            ))
+        })?;
         if group_count == 0 {
-            return Err(Brc721Error::InvalidGroupCount(group_count));
+            return Err(Brc721Error::InvalidGroupCount(0));
         }
 
-        let mut groups = Vec::with_capacity(group_count as usize);
+        let mut groups = Vec::new();
 
         for _ in 0..group_count {
-            let output_index = take_bytes(bytes, &mut cursor, 1)?[0];
-            if output_index == 0 {
-                return Err(Brc721Error::InvalidOutputIndex(output_index));
+            let item_count_raw = take_varint96(bytes, &mut cursor)?;
+            let item_count: usize = item_count_raw.try_into().map_err(|_| {
+                Brc721Error::TxError(format!(
+                    "item_count {} out of range (max {})",
+                    item_count_raw,
+                    usize::MAX
+                ))
+            })?;
+            if item_count == 0 {
+                return Err(Brc721Error::InvalidRangeCount(0));
             }
 
-            let range_count = take_bytes(bytes, &mut cursor, 1)?[0];
-            if range_count == 0 {
-                return Err(Brc721Error::InvalidRangeCount(range_count));
-            }
-
-            let mut ranges = Vec::with_capacity(range_count as usize);
-            for _ in 0..range_count {
+            let mut ranges = Vec::new();
+            for _ in 0..item_count {
                 let tag = take_bytes(bytes, &mut cursor, 1)?[0];
                 match tag {
                     0x00 => {
@@ -359,10 +338,7 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
                 }
             }
 
-            groups.push(OwnershipGroup {
-                output_index,
-                ranges,
-            });
+            groups.push(OwnershipGroup { ranges });
         }
 
         if cursor != bytes.len() {
@@ -443,7 +419,6 @@ mod tests {
             840_000,
             2,
             vec![OwnershipGroup {
-                output_index: 1,
                 ranges: vec![SlotRange { start: 0, end: 9 }],
             }],
         )
@@ -461,7 +436,7 @@ mod tests {
     #[test]
     fn minimal_payload_is_valid_and_roundtrips() {
         let slots = SlotRanges::from_str("0").expect("slots parse");
-        let data = RegisterOwnershipData::for_single_output(0, 0, 1, slots)
+        let data = RegisterOwnershipData::for_single_output(0, 0, slots)
             .expect("valid minimal register ownership payload");
         let bytes = data.to_bytes();
         let parsed = RegisterOwnershipData::try_from(bytes.as_slice()).expect("parse succeeds");
@@ -473,7 +448,7 @@ mod tests {
         use bitcoin::{absolute, transaction, Amount, ScriptBuf, TxOut};
 
         let slots = SlotRanges::from_str("0").expect("slots parse");
-        let data = RegisterOwnershipData::for_single_output(0, 0, 1, slots)
+        let data = RegisterOwnershipData::for_single_output(0, 0, slots)
             .expect("valid minimal register ownership payload");
         let tx = bitcoin::Transaction {
             version: transaction::Version(2),
@@ -493,7 +468,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_group_count() {
-        let bytes = vec![0, 0, 0]; // height=0 (varint), tx_index=0 (varint), group_count=0
+        let bytes = vec![0, 0, 0]; // height=0 (varint), tx_index=0 (varint), group_count=0 (varint)
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
         match res {
             Err(Brc721Error::InvalidGroupCount(0)) => {}
@@ -503,13 +478,12 @@ mod tests {
 
     #[test]
     fn rejects_zero_range_count() {
-        // Build bytes manually: header + one group with range_count = 0
+        // Build bytes manually: header + one group with item_count = 0
         let bytes = vec![
             1, // height varint
             2, // tx index varint
-            1, // group count
-            1, // output index
-            0, // range count (invalid)
+            1, // group count (varint)
+            0, // item_count (varint, invalid)
         ];
 
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
@@ -529,9 +503,8 @@ mod tests {
         let mut bytes = vec![
             1, // height varint
             2, // tx index varint
-            1, // group count
-            1, // output index
-            1, // range count
+            1, // group count (varint)
+            1, // item_count (varint)
         ];
 
         bytes.push(0x01); // slot range tag
@@ -562,9 +535,8 @@ mod tests {
         let mut bytes = vec![
             1, // height varint
             2, // tx index varint
-            1, // group count
-            1, // output index
-            1, // range count
+            1, // group count (varint)
+            1, // item_count (varint)
         ];
 
         bytes.push(0x01); // slot range tag

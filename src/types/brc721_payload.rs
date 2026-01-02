@@ -83,7 +83,6 @@ mod tests {
             840_000,
             2,
             vec![OwnershipGroup {
-                output_index: 1,
                 ranges: vec![SlotRange { start: 0, end: 10 }],
             }],
         )
@@ -166,14 +165,12 @@ mod tests {
             1,
             vec![
                 OwnershipGroup {
-                    output_index: 1,
                     ranges: vec![
                         SlotRange { start: 0, end: 5 },
                         SlotRange { start: 10, end: 20 },
                     ],
                 },
                 OwnershipGroup {
-                    output_index: 2,
                     ranges: vec![SlotRange {
                         start: 100,
                         end: 105,
@@ -198,7 +195,7 @@ mod tests {
             1,
             // collection tx index (varint)
             2,
-            // group count
+            // group count (varint)
             0,
         ];
 

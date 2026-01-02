@@ -115,7 +115,6 @@ mod tests {
             840_000,
             2,
             vec![OwnershipGroup {
-                output_index: 1,
                 ranges: vec![
                     SlotRange { start: 0, end: 9 },
                     SlotRange { start: 10, end: 19 },
