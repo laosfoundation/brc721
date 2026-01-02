@@ -1,8 +1,8 @@
-use bitcoincore_rpc::{Auth, Client, RpcApi};
 use bitcoin::blockdata::script::Instruction;
 use bitcoin::consensus::encode::deserialize;
 use bitcoin::opcodes;
 use bitcoin::{Address, Transaction, Txid};
+use bitcoincore_rpc::{Auth, Client, RpcApi};
 use serde_json::json;
 use std::process::Output;
 use std::str::FromStr;
@@ -220,4 +220,3 @@ fn e2e_register_ownership_broadcasts_and_has_expected_outputs() {
         .unwrap_or(0);
     assert!(confirmations >= 1, "expected confirmations >= 1");
 }
-

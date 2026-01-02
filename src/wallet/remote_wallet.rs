@@ -395,10 +395,10 @@ fn dummy_op_return_data_for_target_script_len(target_len: usize) -> Result<Scrip
 
 fn pushdata_prefix_len(data_len: usize) -> usize {
     match data_len {
-        0..=75 => 1,        // OP_PUSHBYTES_N
-        76..=255 => 2,      // OP_PUSHDATA1 + len (u8)
-        256..=65535 => 3,   // OP_PUSHDATA2 + len (u16)
-        _ => 5,             // OP_PUSHDATA4 + len (u32)
+        0..=75 => 1,      // OP_PUSHBYTES_N
+        76..=255 => 2,    // OP_PUSHDATA1 + len (u8)
+        256..=65535 => 3, // OP_PUSHDATA2 + len (u16)
+        _ => 5,           // OP_PUSHDATA4 + len (u32)
     }
 }
 

@@ -571,7 +571,9 @@ mod tests {
         VarInt96::new(start)
             .expect("start fits")
             .encode_into(&mut bytes);
-        VarInt96::new(end).expect("end fits").encode_into(&mut bytes);
+        VarInt96::new(end)
+            .expect("end fits")
+            .encode_into(&mut bytes);
 
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
         match res {
