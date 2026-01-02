@@ -196,21 +196,20 @@ impl RegisterOwnershipData {
 
         use crate::types::varint96::VarInt96;
 
-        let group_count: u8 = self
-            .groups
-            .len()
-            .try_into()
-            .expect("group count must fit in u8");
+        let group_count = self.groups.len() as u128;
+        let group_count_varint = VarInt96::new(group_count)
+            .expect("validated group count must fit 96-bit varint");
 
         let height = VarInt96::new(self.collection_height as u128)
             .expect("u64 always fits in 96-bit varint");
         let tx_index = VarInt96::new(self.collection_tx_index as u128)
             .expect("u32 always fits in 96-bit varint");
 
-        let mut out = Vec::with_capacity(height.size() + tx_index.size() + 1);
+        let mut out =
+            Vec::with_capacity(height.size() + tx_index.size() + group_count_varint.size());
         height.encode_into(&mut out);
         tx_index.encode_into(&mut out);
-        out.push(group_count);
+        group_count_varint.encode_into(&mut out);
 
         for group in &self.groups {
             let range_count: u8 = group
@@ -243,14 +242,8 @@ impl RegisterOwnershipData {
     }
 
     fn validate(&self) -> Result<(), Brc721Error> {
-        let group_count = self
-            .groups
-            .len()
-            .try_into()
-            .map_err(|_| Brc721Error::InvalidGroupCount(u8::MAX))?;
-
-        if group_count == 0 {
-            return Err(Brc721Error::InvalidGroupCount(group_count));
+        if self.groups.is_empty() {
+            return Err(Brc721Error::InvalidGroupCount(0));
         }
 
         for group in &self.groups {
@@ -309,12 +302,19 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
             ))
         })?;
 
-        let group_count = take_bytes(bytes, &mut cursor, 1)?[0];
+        let group_count_raw = take_varint96(bytes, &mut cursor)?;
+        let group_count: usize = group_count_raw.try_into().map_err(|_| {
+            Brc721Error::TxError(format!(
+                "group_count {} out of range (max {})",
+                group_count_raw,
+                usize::MAX
+            ))
+        })?;
         if group_count == 0 {
-            return Err(Brc721Error::InvalidGroupCount(group_count));
+            return Err(Brc721Error::InvalidGroupCount(0));
         }
 
-        let mut groups = Vec::with_capacity(group_count as usize);
+        let mut groups = Vec::new();
 
         for _ in 0..group_count {
             let output_index = take_bytes(bytes, &mut cursor, 1)?[0];
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_group_count() {
-        let bytes = vec![0, 0, 0]; // height=0 (varint), tx_index=0 (varint), group_count=0
+        let bytes = vec![0, 0, 0]; // height=0 (varint), tx_index=0 (varint), group_count=0 (varint)
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
         match res {
             Err(Brc721Error::InvalidGroupCount(0)) => {}
@@ -507,7 +507,7 @@ mod tests {
         let bytes = vec![
             1, // height varint
             2, // tx index varint
-            1, // group count
+            1, // group count (varint)
             1, // output index
             0, // range count (invalid)
         ];
@@ -529,7 +529,7 @@ mod tests {
         let mut bytes = vec![
             1, // height varint
             2, // tx index varint
-            1, // group count
+            1, // group count (varint)
             1, // output index
             1, // range count
         ];
@@ -562,7 +562,7 @@ mod tests {
         let mut bytes = vec![
             1, // height varint
             2, // tx index varint
-            1, // group count
+            1, // group count (varint)
             1, // output index
             1, // range count
         ];

@@ -198,7 +198,7 @@ mod tests {
             1,
             // collection tx index (varint)
             2,
-            // group count
+            // group count (varint)
             0,
         ];
 
