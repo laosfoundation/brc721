@@ -316,7 +316,7 @@ mod tests {
 
         let slots = SlotRanges::from_str("0").expect("slots parse");
         let ownership =
-            RegisterOwnershipData::for_single_output(0, 0, 1, slots).expect("ownership payload");
+            RegisterOwnershipData::for_single_output(0, 0, slots).expect("ownership payload");
 
         let op_return = Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(ownership))
             .into_txout()

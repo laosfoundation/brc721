@@ -99,7 +99,6 @@ fn run_register_ownership(
     let ownership = RegisterOwnershipData::for_single_output(
         collection_id.block_height,
         collection_id.tx_index,
-        1,
         slots,
     )?;
     let payload = Brc721Payload::RegisterOwnership(ownership);

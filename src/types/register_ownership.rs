@@ -135,7 +135,6 @@ fn parse_slot_str(s: &str) -> Result<u128, SlotRangesParseError> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnershipGroup {
-    pub output_index: u8,
     pub ranges: Vec<SlotRange>,
 }
 
@@ -164,14 +163,12 @@ impl RegisterOwnershipData {
     pub fn for_single_output(
         collection_height: u64,
         collection_tx_index: u32,
-        output_index: u8,
         slots: SlotRanges,
     ) -> Result<Self, Brc721Error> {
         Self::new(
             collection_height,
             collection_tx_index,
             vec![OwnershipGroup {
-                output_index,
                 ranges: slots.into_ranges(),
             }],
         )
@@ -179,11 +176,12 @@ impl RegisterOwnershipData {
 
     pub fn validate_in_tx(&self, bitcoin_tx: &Transaction) -> Result<(), Brc721Error> {
         let output_count = bitcoin_tx.output.len();
-        for group in &self.groups {
-            if group.output_index as usize >= output_count {
+        for (group_index, _group) in self.groups.iter().enumerate() {
+            let output_index = group_index + 1;
+            if output_index >= output_count {
                 return Err(Brc721Error::TxError(format!(
                     "register-ownership output_index {} out of bounds (tx outputs={})",
-                    group.output_index, output_count
+                    output_index, output_count
                 )));
             }
         }
@@ -197,8 +195,8 @@ impl RegisterOwnershipData {
         use crate::types::varint96::VarInt96;
 
         let group_count = self.groups.len() as u128;
-        let group_count_varint = VarInt96::new(group_count)
-            .expect("validated group count must fit 96-bit varint");
+        let group_count_varint =
+            VarInt96::new(group_count).expect("validated group count must fit 96-bit varint");
 
         let height = VarInt96::new(self.collection_height as u128)
             .expect("u64 always fits in 96-bit varint");
@@ -217,7 +215,6 @@ impl RegisterOwnershipData {
                 .len()
                 .try_into()
                 .expect("range count must fit in u8");
-            out.push(group.output_index);
             out.push(range_count);
 
             for range in &group.ranges {
@@ -247,10 +244,6 @@ impl RegisterOwnershipData {
         }
 
         for group in &self.groups {
-            if group.output_index == 0 {
-                return Err(Brc721Error::InvalidOutputIndex(group.output_index));
-            }
-
             let range_count = group
                 .ranges
                 .len()
@@ -317,11 +310,6 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
         let mut groups = Vec::new();
 
         for _ in 0..group_count {
-            let output_index = take_bytes(bytes, &mut cursor, 1)?[0];
-            if output_index == 0 {
-                return Err(Brc721Error::InvalidOutputIndex(output_index));
-            }
-
             let range_count = take_bytes(bytes, &mut cursor, 1)?[0];
             if range_count == 0 {
                 return Err(Brc721Error::InvalidRangeCount(range_count));
@@ -359,10 +347,7 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
                 }
             }
 
-            groups.push(OwnershipGroup {
-                output_index,
-                ranges,
-            });
+            groups.push(OwnershipGroup { ranges });
         }
 
         if cursor != bytes.len() {
@@ -443,7 +428,6 @@ mod tests {
             840_000,
             2,
             vec![OwnershipGroup {
-                output_index: 1,
                 ranges: vec![SlotRange { start: 0, end: 9 }],
             }],
         )
@@ -461,7 +445,7 @@ mod tests {
     #[test]
     fn minimal_payload_is_valid_and_roundtrips() {
         let slots = SlotRanges::from_str("0").expect("slots parse");
-        let data = RegisterOwnershipData::for_single_output(0, 0, 1, slots)
+        let data = RegisterOwnershipData::for_single_output(0, 0, slots)
             .expect("valid minimal register ownership payload");
         let bytes = data.to_bytes();
         let parsed = RegisterOwnershipData::try_from(bytes.as_slice()).expect("parse succeeds");
@@ -473,7 +457,7 @@ mod tests {
         use bitcoin::{absolute, transaction, Amount, ScriptBuf, TxOut};
 
         let slots = SlotRanges::from_str("0").expect("slots parse");
-        let data = RegisterOwnershipData::for_single_output(0, 0, 1, slots)
+        let data = RegisterOwnershipData::for_single_output(0, 0, slots)
             .expect("valid minimal register ownership payload");
         let tx = bitcoin::Transaction {
             version: transaction::Version(2),
@@ -508,7 +492,6 @@ mod tests {
             1, // height varint
             2, // tx index varint
             1, // group count (varint)
-            1, // output index
             0, // range count (invalid)
         ];
 
@@ -530,7 +513,6 @@ mod tests {
             1, // height varint
             2, // tx index varint
             1, // group count (varint)
-            1, // output index
             1, // range count
         ];
 
@@ -563,7 +545,6 @@ mod tests {
             1, // height varint
             2, // tx index varint
             1, // group count (varint)
-            1, // output index
             1, // range count
         ];
 
