@@ -23,7 +23,7 @@ pub enum Brc721Error {
     #[error("output index must be at least 1, got {0}")]
     InvalidOutputIndex(u8),
     #[error("range count must be at least 1, got {0}")]
-    InvalidRangeCount(u8),
+    InvalidRangeCount(u128),
     #[error("slot range start {0} is greater than end {1}")]
     InvalidSlotRange(u128, u128),
     #[error("Storage error: {0}")]

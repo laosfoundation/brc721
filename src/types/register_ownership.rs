@@ -87,14 +87,6 @@ impl FromStr for SlotRanges {
             };
         }
 
-        if ranges.len() > u8::MAX as usize {
-            return Err(SlotRangesParseError::new(format!(
-                "too many slot ranges (got {}, max {})",
-                ranges.len(),
-                u8::MAX
-            )));
-        }
-
         // Disallow overlapping slots across ranges.
         if ranges.len() > 1 {
             let mut sorted = ranges.clone();
@@ -210,12 +202,10 @@ impl RegisterOwnershipData {
         group_count_varint.encode_into(&mut out);
 
         for group in &self.groups {
-            let range_count: u8 = group
-                .ranges
-                .len()
-                .try_into()
-                .expect("range count must fit in u8");
-            out.push(range_count);
+            let item_count = group.ranges.len() as u128;
+            let item_count_varint =
+                VarInt96::new(item_count).expect("validated item count must fit 96-bit varint");
+            item_count_varint.encode_into(&mut out);
 
             for range in &group.ranges {
                 if range.start == range.end {
@@ -244,14 +234,8 @@ impl RegisterOwnershipData {
         }
 
         for group in &self.groups {
-            let range_count = group
-                .ranges
-                .len()
-                .try_into()
-                .map_err(|_| Brc721Error::InvalidRangeCount(u8::MAX))?;
-
-            if range_count == 0 {
-                return Err(Brc721Error::InvalidRangeCount(range_count));
+            if group.ranges.is_empty() {
+                return Err(Brc721Error::InvalidRangeCount(0));
             }
 
             for range in &group.ranges {
@@ -310,13 +294,20 @@ impl TryFrom<&[u8]> for RegisterOwnershipData {
         let mut groups = Vec::new();
 
         for _ in 0..group_count {
-            let range_count = take_bytes(bytes, &mut cursor, 1)?[0];
-            if range_count == 0 {
-                return Err(Brc721Error::InvalidRangeCount(range_count));
+            let item_count_raw = take_varint96(bytes, &mut cursor)?;
+            let item_count: usize = item_count_raw.try_into().map_err(|_| {
+                Brc721Error::TxError(format!(
+                    "item_count {} out of range (max {})",
+                    item_count_raw,
+                    usize::MAX
+                ))
+            })?;
+            if item_count == 0 {
+                return Err(Brc721Error::InvalidRangeCount(0));
             }
 
-            let mut ranges = Vec::with_capacity(range_count as usize);
-            for _ in 0..range_count {
+            let mut ranges = Vec::new();
+            for _ in 0..item_count {
                 let tag = take_bytes(bytes, &mut cursor, 1)?[0];
                 match tag {
                     0x00 => {
@@ -487,12 +478,12 @@ mod tests {
 
     #[test]
     fn rejects_zero_range_count() {
-        // Build bytes manually: header + one group with range_count = 0
+        // Build bytes manually: header + one group with item_count = 0
         let bytes = vec![
             1, // height varint
             2, // tx index varint
             1, // group count (varint)
-            0, // range count (invalid)
+            0, // item_count (varint, invalid)
         ];
 
         let res = RegisterOwnershipData::try_from(bytes.as_slice());
@@ -513,7 +504,7 @@ mod tests {
             1, // height varint
             2, // tx index varint
             1, // group count (varint)
-            1, // range count
+            1, // item_count (varint)
         ];
 
         bytes.push(0x01); // slot range tag
@@ -545,7 +536,7 @@ mod tests {
             1, // height varint
             2, // tx index varint
             1, // group count (varint)
-            1, // range count
+            1, // item_count (varint)
         ];
 
         bytes.push(0x01); // slot range tag
