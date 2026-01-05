@@ -39,6 +39,44 @@ pub struct LastBlock {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AddressAssetsResponse {
+    pub address: String,
+    pub owner_h160: String,
+    pub utxos: Vec<OwnershipUtxoResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnershipUtxoResponse {
+    pub collection_id: String,
+    pub txid: String,
+    pub vout: u32,
+    pub created_height: u64,
+    pub created_tx_index: u32,
+    pub slot_ranges: Vec<SlotRangeResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotRangeResponse {
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressesAssetsRequest {
+    pub addresses: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressesAssetsResponse {
+    pub results: Vec<AddressAssetsResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TokenOwnerResponse {
     pub collection_id: String,
     pub token_id: String,

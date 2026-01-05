@@ -43,10 +43,11 @@ impl App {
     fn spawn_rest_server(&self) -> JoinHandle<()> {
         let addr = self.config.api_listen;
         let storage = storage::SqliteStorage::new(self.db_path.clone());
+        let network = self.config.network;
         let token = self.shutdown.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = rest::serve(addr, storage, token).await {
+            if let Err(e) = rest::serve(addr, storage, network, token).await {
                 log::error!("REST server failed: {:#}", e);
             }
         })
@@ -175,7 +176,7 @@ pub async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        Block, Collection, CollectionKey, OwnershipRange, StorageRead, StorageTx, StorageWrite,
     };
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
@@ -216,6 +217,26 @@ mod tests {
         fn list_collections(&self) -> Result<Vec<Collection>> {
             Ok(Vec::new())
         }
+
+        fn has_unspent_slot_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn list_unspent_ownership_by_owner(&self, _owner_h160: H160) -> Result<Vec<OwnershipRange>> {
+            Ok(Vec::new())
+        }
+
+        fn list_unspent_ownership_by_owners(
+            &self,
+            _owner_h160s: &[H160],
+        ) -> Result<Vec<OwnershipRange>> {
+            Ok(Vec::new())
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -234,6 +255,28 @@ mod tests {
             _rebaseable: bool,
         ) -> Result<()> {
             Ok(())
+        }
+
+        fn insert_ownership_range(
+            &self,
+            _collection_id: CollectionKey,
+            _owner_h160: H160,
+            _outpoint: bitcoin::OutPoint,
+            _slot_start: u128,
+            _slot_end: u128,
+            _created_height: u64,
+            _created_tx_index: u32,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn mark_ownership_outpoint_spent(
+            &self,
+            _outpoint: bitcoin::OutPoint,
+            _spent_height: u64,
+            _spent_txid: bitcoin::Txid,
+        ) -> Result<usize> {
+            Ok(0)
         }
     }
 

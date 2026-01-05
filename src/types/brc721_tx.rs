@@ -18,6 +18,10 @@ impl<'a> Brc721Tx<'a> {
         self.payload().validate_in_tx(self.tx)
     }
 
+    pub fn bitcoin_tx(&self) -> &Transaction {
+        self.tx
+    }
+
     pub fn payload(&self) -> &Brc721Payload {
         self.op_return_output.payload()
     }

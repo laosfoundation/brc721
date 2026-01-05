@@ -1,4 +1,4 @@
-use std::{fmt, str::FromStr};
+use std::{collections::HashMap, fmt, str::FromStr};
 
 use axum::{
     extract::{Path, State},
@@ -6,11 +6,15 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use ethereum_types::U256;
+use bitcoin::{
+    hashes::{hash160, Hash as _},
+    Address,
+};
+use ethereum_types::{H160, U256};
 
 use crate::{
     storage::{
-        traits::{Collection, CollectionKey},
+        traits::{Collection, CollectionKey, OwnershipRange},
         Storage,
     },
     types::{Brc721Error, Brc721Token},
@@ -18,8 +22,9 @@ use crate::{
 
 use super::{
     models::{
-        ChainStateResponse, CollectionResponse, CollectionsResponse, ErrorResponse, HealthResponse,
-        LastBlock, OwnershipStatus, TokenOwnerResponse,
+        AddressAssetsResponse, AddressesAssetsRequest, AddressesAssetsResponse, ChainStateResponse,
+        CollectionResponse, CollectionsResponse, ErrorResponse, HealthResponse, LastBlock,
+        OwnershipStatus, OwnershipUtxoResponse, SlotRangeResponse, TokenOwnerResponse,
     },
     AppState,
 };
@@ -45,6 +50,110 @@ pub async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
         hash: b.hash,
     });
     Json(ChainStateResponse { last })
+}
+
+pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    let checked =
+        match Address::from_str(&address).and_then(|addr| addr.require_network(state.network)) {
+            Ok(addr) => addr,
+            Err(err) => {
+                log::warn!("Invalid address {}: {}", address, err);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        message: "invalid address".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+    let owner_h160 = owner_h160_for_script(&checked.script_pubkey());
+    let ranges = match state.storage.list_unspent_ownership_by_owner(owner_h160) {
+        Ok(ranges) => ranges,
+        Err(err) => {
+            log::error!("Failed to load assets for address {}: {:?}", address, err);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    Json(AddressAssetsResponse {
+        address,
+        owner_h160: format!("{:#x}", owner_h160),
+        utxos: group_ownership_ranges(ranges),
+    })
+    .into_response()
+}
+
+pub async fn post_addresses_assets<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+    Json(req): Json<AddressesAssetsRequest>,
+) -> impl IntoResponse {
+    const MAX_ADDRESSES: usize = 5_000;
+    if req.addresses.len() > MAX_ADDRESSES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                message: format!("too many addresses (max {MAX_ADDRESSES})"),
+            }),
+        )
+            .into_response();
+    }
+
+    let mut requested = Vec::with_capacity(req.addresses.len());
+    for address in req.addresses {
+        let checked = match Address::from_str(&address)
+            .and_then(|addr| addr.require_network(state.network))
+        {
+            Ok(addr) => addr,
+            Err(err) => {
+                log::warn!("Invalid address {}: {}", address, err);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        message: "invalid address".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+        let owner_h160 = owner_h160_for_script(&checked.script_pubkey());
+        requested.push((address, owner_h160));
+    }
+
+    let owners = requested
+        .iter()
+        .map(|(_, owner_h160)| *owner_h160)
+        .collect::<Vec<_>>();
+
+    let all_ranges = match state.storage.list_unspent_ownership_by_owners(&owners) {
+        Ok(ranges) => ranges,
+        Err(err) => {
+            log::error!("Failed to load assets for bulk request: {:?}", err);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut by_owner: HashMap<H160, Vec<OwnershipRange>> = HashMap::new();
+    for range in all_ranges {
+        by_owner.entry(range.owner_h160).or_default().push(range);
+    }
+
+    let mut results = Vec::with_capacity(requested.len());
+    for (address, owner_h160) in requested {
+        let ranges = by_owner.remove(&owner_h160).unwrap_or_default();
+        results.push(AddressAssetsResponse {
+            address,
+            owner_h160: format!("{:#x}", owner_h160),
+            utxos: group_ownership_ranges(ranges),
+        });
+    }
+
+    Json(AddressesAssetsResponse { results }).into_response()
 }
 
 pub async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
@@ -163,6 +272,53 @@ fn format_owner_h160(token: &Brc721Token) -> String {
     format!("{:#x}", token.h160_address())
 }
 
+fn owner_h160_for_script(script: &bitcoin::ScriptBuf) -> H160 {
+    let script_hash = hash160::Hash::hash(script.as_bytes());
+    H160::from_slice(script_hash.as_byte_array())
+}
+
+fn group_ownership_ranges(ranges: Vec<OwnershipRange>) -> Vec<OwnershipUtxoResponse> {
+    let mut out = Vec::new();
+    let mut current_key: Option<(String, bitcoin::Txid, u32)> = None;
+    let mut current: Option<OwnershipUtxoResponse> = None;
+
+    for range in ranges {
+        let key = (
+            range.collection_id.to_string(),
+            range.outpoint.txid,
+            range.outpoint.vout,
+        );
+        if current_key.as_ref() != Some(&key) {
+            if let Some(previous) = current.take() {
+                out.push(previous);
+            }
+
+            current_key = Some(key.clone());
+            current = Some(OwnershipUtxoResponse {
+                collection_id: key.0.clone(),
+                txid: key.1.to_string(),
+                vout: key.2,
+                created_height: range.created_height,
+                created_tx_index: range.created_tx_index,
+                slot_ranges: Vec::new(),
+            });
+        }
+
+        if let Some(current) = current.as_mut() {
+            current.slot_ranges.push(SlotRangeResponse {
+                start: range.slot_start.to_string(),
+                end: range.slot_end.to_string(),
+            });
+        }
+    }
+
+    if let Some(last) = current {
+        out.push(last);
+    }
+
+    out
+}
+
 #[derive(Debug)]
 enum TokenIdParseError {
     Empty,
@@ -204,7 +360,9 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::storage::{
-        traits::{Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite},
+        traits::{
+            Block, Collection, CollectionKey, OwnershipRange, StorageRead, StorageTx, StorageWrite,
+        },
         Storage,
     };
     use anyhow::anyhow;
@@ -273,6 +431,90 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[tokio::test]
+    async fn get_address_assets_returns_grouped_utxos() {
+        use bitcoin::hashes::Hash as _;
+        use bitcoin::hashes::hash160;
+        use bitcoin::{Address, Network, OutPoint};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage = crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_rest.db"));
+        storage.init().expect("init storage");
+
+        let address = Address::from_str(
+            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg",
+        )
+        .unwrap()
+        .require_network(Network::Regtest)
+        .unwrap();
+        let script = address.script_pubkey();
+        let script_hash = hash160::Hash::hash(script.as_bytes());
+        let owner_h160 = H160::from_slice(script_hash.as_byte_array());
+
+        let outpoint = OutPoint {
+            txid: bitcoin::Txid::all_zeros(),
+            vout: 1,
+        };
+
+        let tx = storage.begin_tx().unwrap();
+        tx.insert_ownership_range(
+            CollectionKey::new(1, 0),
+            owner_h160,
+            outpoint,
+            0,
+            9,
+            100,
+            2,
+        )
+        .unwrap();
+        tx.insert_ownership_range(
+            CollectionKey::new(1, 0),
+            owner_h160,
+            outpoint,
+            42,
+            42,
+            100,
+            2,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let router = Router::new()
+            .route("/addresses/:address/assets", get(get_address_assets::<crate::storage::SqliteStorage>))
+            .with_state(AppState {
+                storage: storage.clone(),
+                network: bitcoin::Network::Regtest,
+                started_at: SystemTime::now(),
+            });
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/addresses/{}/assets", address))
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: AddressAssetsResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(payload.address, address.to_string());
+        assert_eq!(payload.owner_h160, format!("{:#x}", owner_h160));
+        assert_eq!(payload.utxos.len(), 1);
+        assert_eq!(payload.utxos[0].collection_id, "1:0");
+        assert_eq!(payload.utxos[0].txid, bitcoin::Txid::all_zeros().to_string());
+        assert_eq!(payload.utxos[0].vout, 1);
+        assert_eq!(payload.utxos[0].slot_ranges.len(), 2);
+        assert_eq!(payload.utxos[0].slot_ranges[0].start, "0");
+        assert_eq!(payload.utxos[0].slot_ranges[0].end, "9");
+        assert_eq!(payload.utxos[0].slot_ranges[1].start, "42");
+        assert_eq!(payload.utxos[0].slot_ranges[1].end, "42");
+    }
+
     fn sample_token() -> Brc721Token {
         Brc721Token::new(42, sample_address()).expect("valid token")
     }
@@ -297,6 +539,7 @@ mod tests {
             )
             .with_state(AppState {
                 storage,
+                network: bitcoin::Network::Regtest,
                 started_at: SystemTime::now(),
             });
 
@@ -344,6 +587,29 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(self.collections.read().unwrap().clone())
         }
+
+        fn has_unspent_slot_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+
+        fn list_unspent_ownership_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Ok(Vec::new())
+        }
+
+        fn list_unspent_ownership_by_owners(
+            &self,
+            _owner_h160s: &[H160],
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Ok(Vec::new())
+        }
     }
 
     impl Storage for TestStorage {
@@ -368,6 +634,29 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Err(anyhow!("not implemented"))
         }
+
+        fn has_unspent_slot_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<bool> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn list_unspent_ownership_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn list_unspent_ownership_by_owners(
+            &self,
+            _owner_h160s: &[H160],
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Err(anyhow!("not implemented"))
+        }
     }
 
     impl StorageWrite for NoopTx {
@@ -381,6 +670,28 @@ mod tests {
             _evm_collection_address: H160,
             _rebaseable: bool,
         ) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn insert_ownership_range(
+            &self,
+            _collection_id: CollectionKey,
+            _owner_h160: H160,
+            _outpoint: bitcoin::OutPoint,
+            _slot_start: u128,
+            _slot_end: u128,
+            _created_height: u64,
+            _created_tx_index: u32,
+        ) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn mark_ownership_outpoint_spent(
+            &self,
+            _outpoint: bitcoin::OutPoint,
+            _spent_height: u64,
+            _spent_txid: bitcoin::Txid,
+        ) -> anyhow::Result<usize> {
             Err(anyhow!("not implemented"))
         }
     }

@@ -1,14 +1,20 @@
 use anyhow::Result;
+use bitcoin::{hashes::Hash as _, OutPoint};
 use ethereum_types::H160;
 use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::{path::Path, str::FromStr};
 
 use super::{
-    traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
+    traits::{
+        Collection, CollectionKey, OwnershipRange, Storage, StorageRead, StorageTx, StorageWrite,
+    },
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 1;
+const DB_SCHEMA_VERSION: i64 = 2;
+
+const U96_BLOB_LEN: usize = 12;
+const U96_MAX: u128 = (1u128 << 96) - 1;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -79,6 +85,200 @@ fn db_list_collections(conn: &Connection) -> rusqlite::Result<Vec<Collection>> {
     Ok(mapped)
 }
 
+fn encode_u96_be(value: u128) -> Result<[u8; U96_BLOB_LEN]> {
+    if value > U96_MAX {
+        anyhow::bail!("value {value} exceeds u96 max {U96_MAX}");
+    }
+    let bytes = value.to_be_bytes();
+    let mut out = [0u8; U96_BLOB_LEN];
+    out.copy_from_slice(&bytes[bytes.len() - U96_BLOB_LEN..]);
+    Ok(out)
+}
+
+fn decode_u96_be(blob: &[u8]) -> Result<u128> {
+    if blob.len() != U96_BLOB_LEN {
+        anyhow::bail!("expected u96 blob of len {U96_BLOB_LEN}, got {}", blob.len());
+    }
+    let mut bytes = [0u8; 16];
+    let start = bytes.len() - U96_BLOB_LEN;
+    bytes[start..].copy_from_slice(blob);
+    Ok(u128::from_be_bytes(bytes))
+}
+
+fn db_has_unspent_slot_overlap(
+    conn: &Connection,
+    collection_id: &CollectionKey,
+    slot_start: u128,
+    slot_end: u128,
+) -> rusqlite::Result<bool> {
+    let start_blob = encode_u96_be(slot_start).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+        )
+    })?;
+    let end_blob = encode_u96_be(slot_end).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+        )
+    })?;
+
+    let existing: Option<i64> = conn
+        .query_row(
+            r#"
+            SELECT 1
+            FROM ownership_ranges
+            WHERE collection_id = ?1
+              AND spent_height IS NULL
+              AND slot_start <= ?2
+              AND slot_end >= ?3
+            LIMIT 1
+            "#,
+            params![
+                collection_id.to_string(),
+                end_blob.as_slice(),
+                start_blob.as_slice()
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    Ok(existing.is_some())
+}
+
+fn map_ownership_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OwnershipRange> {
+    let collection_id_str: String = row.get(0)?;
+    let collection_id = CollectionKey::from_str(&collection_id_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
+
+    let owner_bytes: Vec<u8> = row.get(1)?;
+    if owner_bytes.len() != 20 {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            1,
+            Type::Blob,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "invalid owner_h160 length: expected 20 got {}",
+                    owner_bytes.len()
+                ),
+            )),
+        ));
+    }
+    let owner_h160 = H160::from_slice(&owner_bytes);
+
+    let slot_start_blob: Vec<u8> = row.get(2)?;
+    let slot_end_blob: Vec<u8> = row.get(3)?;
+    let slot_start = decode_u96_be(&slot_start_blob).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            2,
+            Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+        )
+    })?;
+    let slot_end = decode_u96_be(&slot_end_blob).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            3,
+            Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+        )
+    })?;
+
+    let out_txid_blob: Vec<u8> = row.get(4)?;
+    let out_txid = bitcoin::Txid::from_slice(&out_txid_blob).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(4, Type::Blob, Box::new(err))
+    })?;
+
+    let out_vout_int: i64 = row.get(5)?;
+    let out_vout: u32 = out_vout_int.try_into().map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(5, Type::Integer, Box::new(err))
+    })?;
+
+    let created_height_int: i64 = row.get(6)?;
+    let created_height: u64 = created_height_int.try_into().map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(6, Type::Integer, Box::new(err))
+    })?;
+
+    let created_tx_index_int: i64 = row.get(7)?;
+    let created_tx_index: u32 = created_tx_index_int.try_into().map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(7, Type::Integer, Box::new(err))
+    })?;
+
+    Ok(OwnershipRange {
+        owner_h160,
+        collection_id,
+        outpoint: OutPoint {
+            txid: out_txid,
+            vout: out_vout,
+        },
+        slot_start,
+        slot_end,
+        created_height,
+        created_tx_index,
+    })
+}
+
+fn db_list_unspent_ownership_by_owner(
+    conn: &Connection,
+    owner_h160: H160,
+) -> rusqlite::Result<Vec<OwnershipRange>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT collection_id, owner_h160, slot_start, slot_end, out_txid, out_vout, created_height, created_tx_index
+        FROM ownership_ranges
+        WHERE owner_h160 = ?1
+          AND spent_height IS NULL
+        ORDER BY created_height, created_tx_index, out_txid, out_vout, slot_start
+        "#,
+    )?;
+    let rows = stmt
+        .query_map(params![owner_h160.as_bytes()], map_ownership_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn db_list_unspent_ownership_by_owners(
+    conn: &Connection,
+    owners: &[H160],
+) -> rusqlite::Result<Vec<OwnershipRange>> {
+    if owners.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    for chunk in owners.chunks(900) {
+        let placeholders = std::iter::repeat("?")
+            .take(chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            r#"
+            SELECT collection_id, owner_h160, slot_start, slot_end, out_txid, out_vout, created_height, created_tx_index
+            FROM ownership_ranges
+            WHERE spent_height IS NULL
+              AND owner_h160 IN ({placeholders})
+            ORDER BY owner_h160, created_height, created_tx_index, out_txid, out_vout, slot_start
+            "#
+        );
+
+        let params_vec = chunk
+            .iter()
+            .map(|h| h.as_bytes().to_vec())
+            .collect::<Vec<_>>();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mapped = stmt
+            .query_map(rusqlite::params_from_iter(params_vec.iter()), map_ownership_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        out.extend(mapped);
+    }
+
+    Ok(out)
+}
+
 fn db_save_last(conn: &Connection, height: u64, hash: &str) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO chain_state (id, height, hash) VALUES (1, ?, ?)
@@ -103,6 +303,80 @@ fn db_save_collection(
     Ok(())
 }
 
+fn db_insert_ownership_range(
+    conn: &Connection,
+    collection_id: CollectionKey,
+    owner_h160: H160,
+    outpoint: OutPoint,
+    slot_start: u128,
+    slot_end: u128,
+    created_height: u64,
+    created_tx_index: u32,
+) -> rusqlite::Result<()> {
+    let start_blob = encode_u96_be(slot_start).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+        )
+    })?;
+    let end_blob = encode_u96_be(slot_end).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+        )
+    })?;
+    let out_txid_bytes = outpoint.txid.to_byte_array();
+
+    conn.execute(
+        r#"
+        INSERT INTO ownership_ranges (
+            collection_id, owner_h160, slot_start, slot_end, out_txid, out_vout,
+            created_height, created_tx_index, spent_height, spent_txid
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)
+        "#,
+        params![
+            collection_id.to_string(),
+            owner_h160.as_bytes(),
+            start_blob.as_slice(),
+            end_blob.as_slice(),
+            &out_txid_bytes[..],
+            outpoint.vout as i64,
+            created_height as i64,
+            created_tx_index as i64
+        ],
+    )?;
+    Ok(())
+}
+
+fn db_mark_ownership_outpoint_spent(
+    conn: &Connection,
+    outpoint: OutPoint,
+    spent_height: u64,
+    spent_txid: bitcoin::Txid,
+) -> rusqlite::Result<usize> {
+    let spent_txid_bytes = spent_txid.to_byte_array();
+    let out_txid_bytes = outpoint.txid.to_byte_array();
+    let rows = conn.execute(
+        r#"
+        UPDATE ownership_ranges
+        SET spent_height = ?1,
+            spent_txid = ?2
+        WHERE out_txid = ?3
+          AND out_vout = ?4
+          AND spent_height IS NULL
+        "#,
+        params![
+            spent_height as i64,
+            &spent_txid_bytes[..],
+            &out_txid_bytes[..],
+            outpoint.vout as i64
+        ],
+    )?;
+    Ok(rows)
+}
+
 impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
         Ok(db_load_last(&self.conn)?)
@@ -114,6 +388,31 @@ impl StorageRead for SqliteTx {
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
         Ok(db_list_collections(&self.conn)?)
+    }
+
+    fn has_unspent_slot_overlap(
+        &self,
+        collection_id: &CollectionKey,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool> {
+        Ok(db_has_unspent_slot_overlap(
+            &self.conn,
+            collection_id,
+            slot_start,
+            slot_end,
+        )?)
+    }
+
+    fn list_unspent_ownership_by_owner(&self, owner_h160: H160) -> Result<Vec<OwnershipRange>> {
+        Ok(db_list_unspent_ownership_by_owner(&self.conn, owner_h160)?)
+    }
+
+    fn list_unspent_ownership_by_owners(
+        &self,
+        owner_h160s: &[H160],
+    ) -> Result<Vec<OwnershipRange>> {
+        Ok(db_list_unspent_ownership_by_owners(&self.conn, owner_h160s)?)
     }
 }
 
@@ -133,6 +432,42 @@ impl StorageWrite for SqliteTx {
             key,
             evm_collection_address,
             rebaseable,
+        )?)
+    }
+
+    fn insert_ownership_range(
+        &self,
+        collection_id: CollectionKey,
+        owner_h160: H160,
+        outpoint: OutPoint,
+        slot_start: u128,
+        slot_end: u128,
+        created_height: u64,
+        created_tx_index: u32,
+    ) -> Result<()> {
+        Ok(db_insert_ownership_range(
+            &self.conn,
+            collection_id,
+            owner_h160,
+            outpoint,
+            slot_start,
+            slot_end,
+            created_height,
+            created_tx_index,
+        )?)
+    }
+
+    fn mark_ownership_outpoint_spent(
+        &self,
+        outpoint: OutPoint,
+        spent_height: u64,
+        spent_txid: bitcoin::Txid,
+    ) -> Result<usize> {
+        Ok(db_mark_ownership_outpoint_spent(
+            &self.conn,
+            outpoint,
+            spent_height,
+            spent_txid,
         )?)
     }
 }
@@ -192,6 +527,12 @@ impl SqliteStorage {
             return Ok(());
         }
 
+        log::info!(
+            "SQLite schema migration: {} -> {}",
+            version,
+            DB_SCHEMA_VERSION
+        );
+
         if version == 0 {
             conn.execute_batch(
                 r#"
@@ -205,7 +546,60 @@ impl SqliteStorage {
                 evm_collection_address TEXT NOT NULL,
                 rebaseable INTEGER NOT NULL
             );
+            CREATE TABLE ownership_ranges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id TEXT NOT NULL,
+                owner_h160 BLOB NOT NULL CHECK (length(owner_h160) = 20),
+                slot_start BLOB NOT NULL CHECK (length(slot_start) = 12),
+                slot_end BLOB NOT NULL CHECK (length(slot_end) = 12),
+                out_txid BLOB NOT NULL CHECK (length(out_txid) = 32),
+                out_vout INTEGER NOT NULL,
+                created_height INTEGER NOT NULL,
+                created_tx_index INTEGER NOT NULL,
+                spent_height INTEGER,
+                spent_txid BLOB CHECK (spent_txid IS NULL OR length(spent_txid) = 32)
+            );
+            CREATE INDEX ownership_ranges_owner_unspent_idx
+                ON ownership_ranges(owner_h160)
+                WHERE spent_height IS NULL;
+            CREATE INDEX ownership_ranges_outpoint_unspent_idx
+                ON ownership_ranges(out_txid, out_vout)
+                WHERE spent_height IS NULL;
+            CREATE INDEX ownership_ranges_collection_unspent_idx
+                ON ownership_ranges(collection_id, slot_start, slot_end)
+                WHERE spent_height IS NULL;
         "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            return Ok(());
+        }
+
+        if version == 1 {
+            conn.execute_batch(
+                r#"
+            CREATE TABLE ownership_ranges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id TEXT NOT NULL,
+                owner_h160 BLOB NOT NULL CHECK (length(owner_h160) = 20),
+                slot_start BLOB NOT NULL CHECK (length(slot_start) = 12),
+                slot_end BLOB NOT NULL CHECK (length(slot_end) = 12),
+                out_txid BLOB NOT NULL CHECK (length(out_txid) = 32),
+                out_vout INTEGER NOT NULL,
+                created_height INTEGER NOT NULL,
+                created_tx_index INTEGER NOT NULL,
+                spent_height INTEGER,
+                spent_txid BLOB CHECK (spent_txid IS NULL OR length(spent_txid) = 32)
+            );
+            CREATE INDEX ownership_ranges_owner_unspent_idx
+                ON ownership_ranges(owner_h160)
+                WHERE spent_height IS NULL;
+            CREATE INDEX ownership_ranges_outpoint_unspent_idx
+                ON ownership_ranges(out_txid, out_vout)
+                WHERE spent_height IS NULL;
+            CREATE INDEX ownership_ranges_collection_unspent_idx
+                ON ownership_ranges(collection_id, slot_start, slot_end)
+                WHERE spent_height IS NULL;
+            "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
             return Ok(());
@@ -231,6 +625,31 @@ impl StorageRead for SqliteStorage {
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
         let rows = self.with_conn(db_list_collections)?;
+        Ok(rows)
+    }
+
+    fn has_unspent_slot_overlap(
+        &self,
+        collection_id: &CollectionKey,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool> {
+        let overlap =
+            self.with_conn(|conn| db_has_unspent_slot_overlap(conn, collection_id, slot_start, slot_end))?;
+        Ok(overlap)
+    }
+
+    fn list_unspent_ownership_by_owner(&self, owner_h160: H160) -> Result<Vec<OwnershipRange>> {
+        let rows = self.with_conn(|conn| db_list_unspent_ownership_by_owner(conn, owner_h160))?;
+        Ok(rows)
+    }
+
+    fn list_unspent_ownership_by_owners(
+        &self,
+        owner_h160s: &[H160],
+    ) -> Result<Vec<OwnershipRange>> {
+        let rows =
+            self.with_conn(|conn| db_list_unspent_ownership_by_owners(conn, owner_h160s))?;
         Ok(rows)
     }
 }

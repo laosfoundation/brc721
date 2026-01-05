@@ -12,6 +12,25 @@ impl Brc721Parser {
         Self
     }
 
+    fn digest_spends<T: StorageWrite>(
+        &self,
+        storage: &T,
+        bitcoin_tx: &Transaction,
+        block_height: u64,
+        spent_txid: bitcoin::Txid,
+    ) -> Result<(), Brc721Error> {
+        for txin in &bitcoin_tx.input {
+            let prevout = txin.previous_output;
+            if prevout.is_null() {
+                continue;
+            }
+            storage
+                .mark_ownership_outpoint_spent(prevout, block_height, spent_txid)
+                .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     fn parse_tx<T: StorageRead + StorageWrite>(
         &self,
         storage: &T,
@@ -19,6 +38,8 @@ impl Brc721Parser {
         block_height: u64,
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
+        let txid = bitcoin_tx.compute_txid();
+        self.digest_spends(storage, bitcoin_tx, block_height, txid)?;
         let brc721_tx: Brc721Tx<'_> = match parse_brc721_tx(bitcoin_tx) {
             Ok(Some(tx)) => tx,
             Ok(None) => return Ok(()),
@@ -34,9 +55,10 @@ impl Brc721Parser {
         };
 
         log::info!(
-            "📦 Found BRC-721 tx at block {}, tx {} (cmd={:?})",
+            "📦 Found BRC-721 tx at block {}, tx {} (txid={}, cmd={:?})",
             block_height,
             tx_index,
+            txid,
             brc721_tx.payload().command()
         );
 
@@ -106,7 +128,8 @@ impl<T: StorageRead + StorageWrite> BlockParser<T> for Brc721Parser {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block as StorageBlock, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        Block as StorageBlock, Collection, CollectionKey, OwnershipRange, StorageRead, StorageTx,
+        StorageWrite,
     };
     use crate::storage::Storage;
     use crate::types::Brc721Command;
@@ -193,6 +216,110 @@ mod tests {
         tx.commit().unwrap();
     }
 
+    #[test]
+    fn parse_block_register_ownership_persists_and_spend_removes_it() {
+        use crate::types::RegisterCollectionData;
+        use crate::types::{Brc721OpReturnOutput, Brc721Payload, RegisterOwnershipData, SlotRanges};
+        use bitcoin::hashes::hash160;
+        use bitcoin::{
+            absolute, transaction, Address, Network, OutPoint, ScriptBuf, Sequence, TxIn, TxOut,
+        };
+        use ethereum_types::H160 as EthH160;
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("create temp dir for db");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_ownership_test.db"));
+        storage.init().expect("init the database");
+        let parser = Brc721Parser::new();
+
+        let owner_address = Address::from_str(
+            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg",
+        )
+        .unwrap()
+        .require_network(Network::Regtest)
+        .unwrap();
+        let owner_script = owner_address.script_pubkey();
+        let owner_hash = hash160::Hash::hash(owner_script.as_bytes());
+        let owner_h160 = EthH160::from_slice(owner_hash.as_byte_array());
+
+        let collection_payload = Brc721Payload::RegisterCollection(RegisterCollectionData {
+            evm_collection_address: EthH160::from_low_u64_be(1),
+            rebaseable: false,
+        });
+        let collection_op_return =
+            Brc721OpReturnOutput::new(collection_payload).into_txout().unwrap();
+        let collection_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![],
+            output: vec![collection_op_return],
+        };
+
+        let slots = SlotRanges::from_str("0..=9,42").expect("slots parse");
+        let ownership = RegisterOwnershipData::for_single_output(1, 0, slots).unwrap();
+        let ownership_payload = Brc721Payload::RegisterOwnership(ownership);
+        let ownership_op_return =
+            Brc721OpReturnOutput::new(ownership_payload).into_txout().unwrap();
+
+        let ownership_output = TxOut {
+            value: Amount::from_sat(546),
+            script_pubkey: owner_script.clone(),
+        };
+
+        let ownership_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![],
+            output: vec![ownership_op_return, ownership_output],
+        };
+        let ownership_txid = ownership_tx.compute_txid();
+
+        let mut block1 = genesis_block(Network::Regtest);
+        block1.txdata = vec![collection_tx, ownership_tx];
+
+        let tx = storage.begin_tx().unwrap();
+        parser.parse_block(&tx, &block1, 1).unwrap();
+
+        let owned = tx.list_unspent_ownership_by_owner(owner_h160).unwrap();
+        assert_eq!(owned.len(), 2);
+
+        assert!(tx
+            .has_unspent_slot_overlap(&CollectionKey::new(1, 0), 0, 9)
+            .unwrap());
+
+        let spend_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: ownership_txid,
+                    vout: 1,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: bitcoin::Witness::default(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(0),
+                script_pubkey: ScriptBuf::new(),
+            }],
+        };
+
+        let mut block2 = genesis_block(Network::Regtest);
+        block2.txdata = vec![spend_tx];
+        parser.parse_block(&tx, &block2, 2).unwrap();
+
+        let owned_after = tx.list_unspent_ownership_by_owner(owner_h160).unwrap();
+        assert_eq!(owned_after.len(), 0);
+
+        assert!(!tx
+            .has_unspent_slot_overlap(&CollectionKey::new(1, 0), 0, 9)
+            .unwrap());
+
+        tx.commit().unwrap();
+    }
+
     struct DummyStorageInner {
         last_height: Mutex<Option<u64>>,
         last_hash: Mutex<Option<String>>,
@@ -250,6 +377,29 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(Vec::new())
         }
+
+        fn has_unspent_slot_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+
+        fn list_unspent_ownership_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Ok(Vec::new())
+        }
+
+        fn list_unspent_ownership_by_owners(
+            &self,
+            _owner_h160s: &[H160],
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Ok(Vec::new())
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -269,6 +419,28 @@ mod tests {
             _rebaseable: bool,
         ) -> anyhow::Result<()> {
             Ok(())
+        }
+
+        fn insert_ownership_range(
+            &self,
+            _collection_id: CollectionKey,
+            _owner_h160: H160,
+            _outpoint: OutPoint,
+            _slot_start: u128,
+            _slot_end: u128,
+            _created_height: u64,
+            _created_tx_index: u32,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn mark_ownership_outpoint_spent(
+            &self,
+            _outpoint: OutPoint,
+            _spent_height: u64,
+            _spent_txid: bitcoin::Txid,
+        ) -> anyhow::Result<usize> {
+            Ok(0)
         }
     }
 
