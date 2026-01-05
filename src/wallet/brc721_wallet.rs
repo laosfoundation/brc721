@@ -88,6 +88,13 @@ impl Brc721Wallet {
         self.remote.loaded_wallets()
     }
 
+    pub fn list_unspent(
+        &self,
+        min_conf: usize,
+    ) -> Result<Vec<bitcoincore_rpc::json::ListUnspentResultEntry>> {
+        self.remote.list_unspent(min_conf)
+    }
+
     pub fn setup_watch_only(&self) -> Result<()> {
         let external = self.local.public_descriptor(KeychainKind::External);
         let internal = self.local.public_descriptor(KeychainKind::Internal);

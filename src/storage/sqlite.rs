@@ -319,10 +319,7 @@ fn db_save_collection(
     Ok(())
 }
 
-fn db_insert_ownership_range(
-    conn: &Connection,
-    range: OwnershipRange,
-) -> rusqlite::Result<()> {
+fn db_insert_ownership_range(conn: &Connection, range: OwnershipRange) -> rusqlite::Result<()> {
     let start_blob = encode_u96_be(range.slot_start).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             0,

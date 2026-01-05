@@ -65,4 +65,23 @@ pub enum WalletCmd {
         long_about = "Detach the watch-only wallet from Bitcoin Core without deleting its data."
     )]
     Unload,
+    #[command(
+        about = "List indexed BRC-721 assets owned by this wallet",
+        long_about = "Lists indexed (unspent) BRC-721 ownership ranges for the wallet by querying the local brc721 index DB and matching it against the wallet's currently unspent UTXO scripts from Bitcoin Core."
+    )]
+    Assets {
+        #[arg(
+            long = "min-conf",
+            value_name = "N",
+            default_value_t = 0usize,
+            help = "Minimum confirmations for wallet UTXOs considered (passed to Bitcoin Core listunspent)"
+        )]
+        min_conf: usize,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Print JSON to stdout instead of human-readable logs"
+        )]
+        json: bool,
+    },
 }

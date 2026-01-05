@@ -101,6 +101,13 @@ impl RemoteWallet {
         root.list_wallets().context("list wallets")
     }
 
+    pub fn list_unspent(&self, min_conf: usize) -> Result<Vec<json::ListUnspentResultEntry>> {
+        let client = self.watch_client()?;
+        client
+            .list_unspent(Some(min_conf), None, None, None, None)
+            .context("listunspent")
+    }
+
     pub fn setup(&self, external_desc: String, internal_desc: String) -> Result<()> {
         let root = self.root_client()?;
         let existing_wallets: Vec<String> = root.list_wallets().context("list wallets")?;
