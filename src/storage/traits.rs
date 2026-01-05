@@ -46,16 +46,7 @@ pub trait StorageWrite {
         rebaseable: bool,
     ) -> Result<()>;
 
-    fn insert_ownership_range(
-        &self,
-        collection_id: CollectionKey,
-        owner_h160: H160,
-        outpoint: OutPoint,
-        slot_start: u128,
-        slot_end: u128,
-        created_height: u64,
-        created_tx_index: u32,
-    ) -> Result<()>;
+    fn insert_ownership_range(&self, range: OwnershipRange) -> Result<()>;
 
     /// Marks all ownership ranges associated with the given output as spent.
     ///

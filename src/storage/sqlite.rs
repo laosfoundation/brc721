@@ -264,8 +264,7 @@ fn db_list_unspent_ownership_by_owners(
 
     let mut out = Vec::new();
     for chunk in owners.chunks(900) {
-        let placeholders = std::iter::repeat("?")
-            .take(chunk.len())
+        let placeholders = std::iter::repeat_n("?", chunk.len())
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
@@ -322,15 +321,9 @@ fn db_save_collection(
 
 fn db_insert_ownership_range(
     conn: &Connection,
-    collection_id: CollectionKey,
-    owner_h160: H160,
-    outpoint: OutPoint,
-    slot_start: u128,
-    slot_end: u128,
-    created_height: u64,
-    created_tx_index: u32,
+    range: OwnershipRange,
 ) -> rusqlite::Result<()> {
-    let start_blob = encode_u96_be(slot_start).map_err(|err| {
+    let start_blob = encode_u96_be(range.slot_start).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             Type::Blob,
@@ -340,7 +333,7 @@ fn db_insert_ownership_range(
             )),
         )
     })?;
-    let end_blob = encode_u96_be(slot_end).map_err(|err| {
+    let end_blob = encode_u96_be(range.slot_end).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             Type::Blob,
@@ -350,7 +343,7 @@ fn db_insert_ownership_range(
             )),
         )
     })?;
-    let out_txid_bytes = outpoint.txid.to_byte_array();
+    let out_txid_bytes = range.outpoint.txid.to_byte_array();
 
     conn.execute(
         r#"
@@ -360,14 +353,14 @@ fn db_insert_ownership_range(
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)
         "#,
         params![
-            collection_id.to_string(),
-            owner_h160.as_bytes(),
+            range.collection_id.to_string(),
+            range.owner_h160.as_bytes(),
             start_blob.as_slice(),
             end_blob.as_slice(),
             &out_txid_bytes[..],
-            outpoint.vout as i64,
-            created_height as i64,
-            created_tx_index as i64
+            range.outpoint.vout as i64,
+            range.created_height as i64,
+            range.created_tx_index as i64
         ],
     )?;
     Ok(())
@@ -461,26 +454,8 @@ impl StorageWrite for SqliteTx {
         )?)
     }
 
-    fn insert_ownership_range(
-        &self,
-        collection_id: CollectionKey,
-        owner_h160: H160,
-        outpoint: OutPoint,
-        slot_start: u128,
-        slot_end: u128,
-        created_height: u64,
-        created_tx_index: u32,
-    ) -> Result<()> {
-        Ok(db_insert_ownership_range(
-            &self.conn,
-            collection_id,
-            owner_h160,
-            outpoint,
-            slot_start,
-            slot_end,
-            created_height,
-            created_tx_index,
-        )?)
+    fn insert_ownership_range(&self, range: OwnershipRange) -> Result<()> {
+        Ok(db_insert_ownership_range(&self.conn, range)?)
     }
 
     fn mark_ownership_outpoint_spent(

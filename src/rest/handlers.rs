@@ -457,17 +457,25 @@ mod tests {
         };
 
         let tx = storage.begin_tx().unwrap();
-        tx.insert_ownership_range(CollectionKey::new(1, 0), owner_h160, outpoint, 0, 9, 100, 2)
-            .unwrap();
-        tx.insert_ownership_range(
-            CollectionKey::new(1, 0),
+        tx.insert_ownership_range(OwnershipRange {
             owner_h160,
+            collection_id: CollectionKey::new(1, 0),
             outpoint,
-            42,
-            42,
-            100,
-            2,
-        )
+            slot_start: 0,
+            slot_end: 9,
+            created_height: 100,
+            created_tx_index: 2,
+        })
+        .unwrap();
+        tx.insert_ownership_range(OwnershipRange {
+            owner_h160,
+            collection_id: CollectionKey::new(1, 0),
+            outpoint,
+            slot_start: 42,
+            slot_end: 42,
+            created_height: 100,
+            created_tx_index: 2,
+        })
         .unwrap();
         tx.commit().unwrap();
 
@@ -670,16 +678,7 @@ mod tests {
             Err(anyhow!("not implemented"))
         }
 
-        fn insert_ownership_range(
-            &self,
-            _collection_id: CollectionKey,
-            _owner_h160: H160,
-            _outpoint: bitcoin::OutPoint,
-            _slot_start: u128,
-            _slot_end: u128,
-            _created_height: u64,
-            _created_tx_index: u32,
-        ) -> anyhow::Result<()> {
+        fn insert_ownership_range(&self, _range: OwnershipRange) -> anyhow::Result<()> {
             Err(anyhow!("not implemented"))
         }
 

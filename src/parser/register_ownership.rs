@@ -1,4 +1,4 @@
-use crate::storage::traits::{CollectionKey, StorageRead, StorageWrite};
+use crate::storage::traits::{CollectionKey, OwnershipRange, StorageRead, StorageWrite};
 use crate::types::{Brc721Error, Brc721Tx, RegisterOwnershipData};
 use bitcoin::hashes::{hash160, Hash as _};
 use ethereum_types::H160;
@@ -80,15 +80,15 @@ pub fn digest<S: StorageRead + StorageWrite>(
 
         for range in &group.ranges {
             storage
-                .insert_ownership_range(
-                    collection_key.clone(),
+                .insert_ownership_range(OwnershipRange {
                     owner_h160,
+                    collection_id: collection_key.clone(),
                     outpoint,
-                    range.start,
-                    range.end,
-                    block_height,
-                    tx_index,
-                )
+                    slot_start: range.start,
+                    slot_end: range.end,
+                    created_height: block_height,
+                    created_tx_index: tx_index,
+                })
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         }
     }

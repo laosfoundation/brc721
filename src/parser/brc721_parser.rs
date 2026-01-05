@@ -447,16 +447,7 @@ mod tests {
             Ok(())
         }
 
-        fn insert_ownership_range(
-            &self,
-            _collection_id: CollectionKey,
-            _owner_h160: H160,
-            _outpoint: OutPoint,
-            _slot_start: u128,
-            _slot_end: u128,
-            _created_height: u64,
-            _created_tx_index: u32,
-        ) -> anyhow::Result<()> {
+        fn insert_ownership_range(&self, _range: OwnershipRange) -> anyhow::Result<()> {
             Ok(())
         }
 
