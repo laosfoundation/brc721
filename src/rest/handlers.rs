@@ -433,8 +433,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_address_assets_returns_grouped_utxos() {
-        use bitcoin::hashes::Hash as _;
         use bitcoin::hashes::hash160;
+        use bitcoin::hashes::Hash as _;
         use bitcoin::{Address, Network, OutPoint};
         use std::str::FromStr;
 
@@ -442,12 +442,11 @@ mod tests {
         let storage = crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_rest.db"));
         storage.init().expect("init storage");
 
-        let address = Address::from_str(
-            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg",
-        )
-        .unwrap()
-        .require_network(Network::Regtest)
-        .unwrap();
+        let address =
+            Address::from_str("bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg")
+                .unwrap()
+                .require_network(Network::Regtest)
+                .unwrap();
         let script = address.script_pubkey();
         let script_hash = hash160::Hash::hash(script.as_bytes());
         let owner_h160 = H160::from_slice(script_hash.as_byte_array());
@@ -458,16 +457,8 @@ mod tests {
         };
 
         let tx = storage.begin_tx().unwrap();
-        tx.insert_ownership_range(
-            CollectionKey::new(1, 0),
-            owner_h160,
-            outpoint,
-            0,
-            9,
-            100,
-            2,
-        )
-        .unwrap();
+        tx.insert_ownership_range(CollectionKey::new(1, 0), owner_h160, outpoint, 0, 9, 100, 2)
+            .unwrap();
         tx.insert_ownership_range(
             CollectionKey::new(1, 0),
             owner_h160,
@@ -481,7 +472,10 @@ mod tests {
         tx.commit().unwrap();
 
         let router = Router::new()
-            .route("/addresses/:address/assets", get(get_address_assets::<crate::storage::SqliteStorage>))
+            .route(
+                "/addresses/:address/assets",
+                get(get_address_assets::<crate::storage::SqliteStorage>),
+            )
             .with_state(AppState {
                 storage: storage.clone(),
                 network: bitcoin::Network::Regtest,
@@ -506,7 +500,10 @@ mod tests {
         assert_eq!(payload.owner_h160, format!("{:#x}", owner_h160));
         assert_eq!(payload.utxos.len(), 1);
         assert_eq!(payload.utxos[0].collection_id, "1:0");
-        assert_eq!(payload.utxos[0].txid, bitcoin::Txid::all_zeros().to_string());
+        assert_eq!(
+            payload.utxos[0].txid,
+            bitcoin::Txid::all_zeros().to_string()
+        );
         assert_eq!(payload.utxos[0].vout, 1);
         assert_eq!(payload.utxos[0].slot_ranges.len(), 2);
         assert_eq!(payload.utxos[0].slot_ranges[0].start, "0");

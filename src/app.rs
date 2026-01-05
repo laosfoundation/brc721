@@ -227,7 +227,10 @@ mod tests {
             Ok(false)
         }
 
-        fn list_unspent_ownership_by_owner(&self, _owner_h160: H160) -> Result<Vec<OwnershipRange>> {
+        fn list_unspent_ownership_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> Result<Vec<OwnershipRange>> {
             Ok(Vec::new())
         }
 

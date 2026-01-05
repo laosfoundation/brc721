@@ -24,9 +24,24 @@ impl Brc721Parser {
             if prevout.is_null() {
                 continue;
             }
-            storage
+            let range_count = storage
                 .mark_ownership_outpoint_spent(prevout, block_height, spent_txid)
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+            if range_count > 0 {
+                log::error!(
+                    "🚨 Ownership UTXO spent at height {} by tx {}: {} (ranges={}); exiting",
+                    block_height,
+                    spent_txid,
+                    prevout,
+                    range_count
+                );
+                return Err(Brc721Error::OwnershipUtxoSpent {
+                    outpoint: prevout,
+                    spending_txid: spent_txid,
+                    height: block_height,
+                    range_count,
+                });
+            }
         }
         Ok(())
     }
@@ -219,7 +234,9 @@ mod tests {
     #[test]
     fn parse_block_register_ownership_persists_and_spend_removes_it() {
         use crate::types::RegisterCollectionData;
-        use crate::types::{Brc721OpReturnOutput, Brc721Payload, RegisterOwnershipData, SlotRanges};
+        use crate::types::{
+            Brc721OpReturnOutput, Brc721Payload, RegisterOwnershipData, SlotRanges,
+        };
         use bitcoin::hashes::hash160;
         use bitcoin::{
             absolute, transaction, Address, Network, OutPoint, ScriptBuf, Sequence, TxIn, TxOut,
@@ -233,12 +250,11 @@ mod tests {
         storage.init().expect("init the database");
         let parser = Brc721Parser::new();
 
-        let owner_address = Address::from_str(
-            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg",
-        )
-        .unwrap()
-        .require_network(Network::Regtest)
-        .unwrap();
+        let owner_address =
+            Address::from_str("bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg")
+                .unwrap()
+                .require_network(Network::Regtest)
+                .unwrap();
         let owner_script = owner_address.script_pubkey();
         let owner_hash = hash160::Hash::hash(owner_script.as_bytes());
         let owner_h160 = EthH160::from_slice(owner_hash.as_byte_array());
@@ -247,8 +263,9 @@ mod tests {
             evm_collection_address: EthH160::from_low_u64_be(1),
             rebaseable: false,
         });
-        let collection_op_return =
-            Brc721OpReturnOutput::new(collection_payload).into_txout().unwrap();
+        let collection_op_return = Brc721OpReturnOutput::new(collection_payload)
+            .into_txout()
+            .unwrap();
         let collection_tx = Transaction {
             version: transaction::Version(2),
             lock_time: absolute::LockTime::ZERO,
@@ -259,8 +276,9 @@ mod tests {
         let slots = SlotRanges::from_str("0..=9,42").expect("slots parse");
         let ownership = RegisterOwnershipData::for_single_output(1, 0, slots).unwrap();
         let ownership_payload = Brc721Payload::RegisterOwnership(ownership);
-        let ownership_op_return =
-            Brc721OpReturnOutput::new(ownership_payload).into_txout().unwrap();
+        let ownership_op_return = Brc721OpReturnOutput::new(ownership_payload)
+            .into_txout()
+            .unwrap();
 
         let ownership_output = TxOut {
             value: Amount::from_sat(546),
@@ -306,18 +324,26 @@ mod tests {
             }],
         };
 
+        let spend_txid = spend_tx.compute_txid();
+
         let mut block2 = genesis_block(Network::Regtest);
         block2.txdata = vec![spend_tx];
-        parser.parse_block(&tx, &block2, 2).unwrap();
-
-        let owned_after = tx.list_unspent_ownership_by_owner(owner_h160).unwrap();
-        assert_eq!(owned_after.len(), 0);
-
-        assert!(!tx
-            .has_unspent_slot_overlap(&CollectionKey::new(1, 0), 0, 9)
-            .unwrap());
-
-        tx.commit().unwrap();
+        let err = parser.parse_block(&tx, &block2, 2).unwrap_err();
+        match err {
+            Brc721Error::OwnershipUtxoSpent {
+                outpoint,
+                spending_txid,
+                height,
+                range_count,
+            } => {
+                assert_eq!(outpoint.txid, ownership_txid);
+                assert_eq!(outpoint.vout, 1);
+                assert_eq!(spending_txid, spend_txid);
+                assert_eq!(height, 2);
+                assert_eq!(range_count, 2);
+            }
+            other => panic!("expected OwnershipUtxoSpent, got {:?}", other),
+        }
     }
 
     struct DummyStorageInner {

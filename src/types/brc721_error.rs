@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use super::Brc721Command;
+use bitcoin::{OutPoint, Txid};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum Brc721Error {
@@ -30,6 +31,15 @@ pub enum Brc721Error {
     StorageError(String),
     #[error("Tx error: {0}")]
     TxError(String),
+    #[error(
+        "ownership UTXO spent at height {height} by tx {spending_txid}: {outpoint} (ranges={range_count}); transfer handling not implemented"
+    )]
+    OwnershipUtxoSpent {
+        outpoint: OutPoint,
+        spending_txid: Txid,
+        height: u64,
+        range_count: usize,
+    },
     #[error("Wallet error: {0}")]
     WalletError(String),
 }

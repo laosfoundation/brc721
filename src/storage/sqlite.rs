@@ -97,7 +97,10 @@ fn encode_u96_be(value: u128) -> Result<[u8; U96_BLOB_LEN]> {
 
 fn decode_u96_be(blob: &[u8]) -> Result<u128> {
     if blob.len() != U96_BLOB_LEN {
-        anyhow::bail!("expected u96 blob of len {U96_BLOB_LEN}, got {}", blob.len());
+        anyhow::bail!(
+            "expected u96 blob of len {U96_BLOB_LEN}, got {}",
+            blob.len()
+        );
     }
     let mut bytes = [0u8; 16];
     let start = bytes.len() - U96_BLOB_LEN;
@@ -115,14 +118,20 @@ fn db_has_unspent_slot_overlap(
         rusqlite::Error::FromSqlConversionFailure(
             0,
             Type::Blob,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
         )
     })?;
     let end_blob = encode_u96_be(slot_end).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             Type::Blob,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
         )
     })?;
 
@@ -176,21 +185,26 @@ fn map_ownership_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OwnershipRange
         rusqlite::Error::FromSqlConversionFailure(
             2,
             Type::Blob,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
         )
     })?;
     let slot_end = decode_u96_be(&slot_end_blob).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             3,
             Type::Blob,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
         )
     })?;
 
     let out_txid_blob: Vec<u8> = row.get(4)?;
-    let out_txid = bitcoin::Txid::from_slice(&out_txid_blob).map_err(|err| {
-        rusqlite::Error::FromSqlConversionFailure(4, Type::Blob, Box::new(err))
-    })?;
+    let out_txid = bitcoin::Txid::from_slice(&out_txid_blob)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(4, Type::Blob, Box::new(err)))?;
 
     let out_vout_int: i64 = row.get(5)?;
     let out_vout: u32 = out_vout_int.try_into().map_err(|err| {
@@ -271,7 +285,10 @@ fn db_list_unspent_ownership_by_owners(
 
         let mut stmt = conn.prepare(&sql)?;
         let mapped = stmt
-            .query_map(rusqlite::params_from_iter(params_vec.iter()), map_ownership_row)?
+            .query_map(
+                rusqlite::params_from_iter(params_vec.iter()),
+                map_ownership_row,
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         out.extend(mapped);
     }
@@ -317,14 +334,20 @@ fn db_insert_ownership_range(
         rusqlite::Error::FromSqlConversionFailure(
             0,
             Type::Blob,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
         )
     })?;
     let end_blob = encode_u96_be(slot_end).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             Type::Blob,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
         )
     })?;
     let out_txid_bytes = outpoint.txid.to_byte_array();
@@ -412,7 +435,10 @@ impl StorageRead for SqliteTx {
         &self,
         owner_h160s: &[H160],
     ) -> Result<Vec<OwnershipRange>> {
-        Ok(db_list_unspent_ownership_by_owners(&self.conn, owner_h160s)?)
+        Ok(db_list_unspent_ownership_by_owners(
+            &self.conn,
+            owner_h160s,
+        )?)
     }
 }
 
@@ -634,8 +660,9 @@ impl StorageRead for SqliteStorage {
         slot_start: u128,
         slot_end: u128,
     ) -> Result<bool> {
-        let overlap =
-            self.with_conn(|conn| db_has_unspent_slot_overlap(conn, collection_id, slot_start, slot_end))?;
+        let overlap = self.with_conn(|conn| {
+            db_has_unspent_slot_overlap(conn, collection_id, slot_start, slot_end)
+        })?;
         Ok(overlap)
     }
 
@@ -648,8 +675,7 @@ impl StorageRead for SqliteStorage {
         &self,
         owner_h160s: &[H160],
     ) -> Result<Vec<OwnershipRange>> {
-        let rows =
-            self.with_conn(|conn| db_list_unspent_ownership_by_owners(conn, owner_h160s))?;
+        let rows = self.with_conn(|conn| db_list_unspent_ownership_by_owners(conn, owner_h160s))?;
         Ok(rows)
     }
 }

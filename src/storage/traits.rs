@@ -34,8 +34,7 @@ pub trait StorageRead {
     ) -> Result<bool>;
 
     fn list_unspent_ownership_by_owner(&self, owner_h160: H160) -> Result<Vec<OwnershipRange>>;
-    fn list_unspent_ownership_by_owners(&self, owner_h160: &[H160])
-        -> Result<Vec<OwnershipRange>>;
+    fn list_unspent_ownership_by_owners(&self, owner_h160: &[H160]) -> Result<Vec<OwnershipRange>>;
 }
 
 pub trait StorageWrite {

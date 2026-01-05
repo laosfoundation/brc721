@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
 
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use bitcoin::Network;
 
 use crate::storage::Storage;
