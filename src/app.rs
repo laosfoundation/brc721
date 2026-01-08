@@ -1,6 +1,7 @@
 use crate::{
+    bitcoin_rpc::BitcoinRpc,
     context, core, parser, rest,
-    scanner::{self, BitcoinRpc},
+    scanner::{self},
     storage::{self, Storage},
 };
 use anyhow::{anyhow, Context as AnyhowContext, Result};
@@ -254,7 +255,7 @@ mod tests {
     #[derive(Clone)]
     struct DummyRpc;
 
-    impl scanner::BitcoinRpc for DummyRpc {
+    impl crate::bitcoin_rpc::BitcoinRpc for DummyRpc {
         fn get_block_count(&self) -> Result<u64, RpcError> {
             Ok(100)
         }
@@ -269,6 +270,12 @@ mod tests {
                     data: None,
                 },
             )))
+        }
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
+            unimplemented!()
         }
         fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
             Ok(())

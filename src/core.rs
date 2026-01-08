@@ -1,5 +1,6 @@
+use crate::bitcoin_rpc::BitcoinRpc;
 use crate::parser::BlockParser;
-use crate::scanner::{BitcoinRpc, Scanner};
+use crate::scanner::Scanner;
 use crate::storage::traits::{Storage, StorageTx};
 use anyhow::Result;
 use bitcoin::Block;
@@ -53,7 +54,10 @@ impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
         let hash = block.block_hash();
         log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
-        if let Err(e) = self.parser.parse_block(tx, block, height) {
+        if let Err(e) = self
+            .parser
+            .parse_block(tx, block, height, self.scanner.rpc())
+        {
             log::error!(
                 "parsing error of block {} at height {}: {}",
                 hash,
@@ -80,7 +84,7 @@ mod tests {
     #[derive(Clone)]
     struct DummyRpc;
 
-    impl crate::scanner::BitcoinRpc for DummyRpc {
+    impl crate::bitcoin_rpc::BitcoinRpc for DummyRpc {
         fn get_block_count(&self) -> Result<u64, RpcError> {
             unimplemented!()
         }
@@ -90,6 +94,13 @@ mod tests {
         }
 
         fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
+            unimplemented!()
+        }
+
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
             unimplemented!()
         }
 
@@ -156,11 +167,12 @@ mod tests {
     struct FailingParser;
 
     impl BlockParser<DummyStorage> for FailingParser {
-        fn parse_block(
+        fn parse_block<R: crate::bitcoin_rpc::BitcoinRpc>(
             &self,
             _tx: &DummyStorage,
             _block: &Block,
             _height: u64,
+            _rpc: &R,
         ) -> Result<(), Brc721Error> {
             Err(Brc721Error::InvalidPayload)
         }
