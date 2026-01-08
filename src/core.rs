@@ -1,5 +1,5 @@
-use crate::parser::BlockParser;
 use crate::bitcoin_rpc::BitcoinRpc;
+use crate::parser::BlockParser;
 use crate::scanner::Scanner;
 use crate::storage::traits::{Storage, StorageTx};
 use anyhow::Result;
@@ -54,7 +54,10 @@ impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
         let hash = block.block_hash();
         log::info!("🧱 block={} 🧾 hash={}", height, hash);
 
-        if let Err(e) = self.parser.parse_block(tx, block, height, self.scanner.rpc()) {
+        if let Err(e) = self
+            .parser
+            .parse_block(tx, block, height, self.scanner.rpc())
+        {
             log::error!(
                 "parsing error of block {} at height {}: {}",
                 hash,

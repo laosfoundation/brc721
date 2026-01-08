@@ -1,6 +1,6 @@
+use crate::bitcoin_rpc::BitcoinRpc;
 use crate::storage::traits::{StorageRead, StorageWrite};
 use crate::types::{parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx};
-use crate::bitcoin_rpc::BitcoinRpc;
 use bitcoin::Block;
 use bitcoin::Transaction;
 

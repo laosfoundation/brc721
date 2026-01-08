@@ -26,4 +26,3 @@ impl<T: RpcApi> BitcoinRpc for T {
         RpcApi::wait_for_new_block(self, timeout).map(|_| ())
     }
 }
-

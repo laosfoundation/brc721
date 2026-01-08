@@ -17,7 +17,9 @@ fn try_base_address_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R
     }
     let prev_tx = rpc.get_raw_transaction(&prevout.txid).ok()?;
     let prev_txout = prev_tx.output.get(prevout.vout as usize)?;
-    Some(base_address_from_spent_script_pubkey(&prev_txout.script_pubkey))
+    Some(base_address_from_spent_script_pubkey(
+        &prev_txout.script_pubkey,
+    ))
 }
 
 pub fn digest<S: StorageRead, R: BitcoinRpc>(
