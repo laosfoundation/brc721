@@ -1,4 +1,5 @@
 mod app;
+mod bitcoin_rpc;
 mod cli;
 mod commands;
 mod context;

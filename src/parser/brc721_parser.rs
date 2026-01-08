@@ -1,5 +1,6 @@
 use crate::storage::traits::{StorageRead, StorageWrite};
 use crate::types::{parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx};
+use crate::bitcoin_rpc::BitcoinRpc;
 use bitcoin::Block;
 use bitcoin::Transaction;
 
@@ -12,9 +13,10 @@ impl Brc721Parser {
         Self
     }
 
-    fn parse_tx<T: StorageRead + StorageWrite>(
+    fn parse_tx<T: StorageRead + StorageWrite, R: BitcoinRpc>(
         &self,
         storage: &T,
+        rpc: &R,
         bitcoin_tx: &Transaction,
         block_height: u64,
         tx_index: u32,
@@ -40,16 +42,17 @@ impl Brc721Parser {
             brc721_tx.payload().command()
         );
 
-        self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index)?;
+        self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index, rpc)?;
         Ok(())
     }
 
-    fn digest_brc721_tx<T: StorageRead + StorageWrite>(
+    fn digest_brc721_tx<T: StorageRead + StorageWrite, R: BitcoinRpc>(
         &self,
         storage: &T,
         brc721_tx: &Brc721Tx<'_>,
         block_height: u64,
         tx_index: u32,
+        rpc: &R,
     ) -> Result<(), Brc721Error> {
         brc721_tx.validate()?;
 
@@ -66,6 +69,7 @@ impl Brc721Parser {
             Brc721Payload::RegisterOwnership(payload) => crate::parser::register_ownership::digest(
                 payload,
                 brc721_tx,
+                rpc,
                 storage,
                 block_height,
                 tx_index,
@@ -75,17 +79,18 @@ impl Brc721Parser {
 }
 
 impl<T: StorageRead + StorageWrite> BlockParser<T> for Brc721Parser {
-    fn parse_block(
+    fn parse_block<R: BitcoinRpc>(
         &self,
         storage: &T,
         block: &Block,
         block_height: u64,
+        rpc: &R,
     ) -> Result<(), Brc721Error> {
         let hash = block.block_hash();
         let hash_str = hash.to_string();
 
         for (tx_index, bitcoin_tx) in block.txdata.iter().enumerate() {
-            self.parse_tx(storage, bitcoin_tx, block_height, tx_index as u32)?;
+            self.parse_tx(storage, rpc, bitcoin_tx, block_height, tx_index as u32)?;
         }
         // Persist last processed block once per block
         if let Err(e) = storage.save_last(block_height, &hash_str) {
@@ -117,9 +122,37 @@ mod tests {
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::Network;
     use bitcoin::{Amount, Block, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+    use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
     use hex::FromHex;
     use std::sync::{Arc, Mutex};
+
+    struct DummyRpc;
+
+    impl crate::bitcoin_rpc::BitcoinRpc for DummyRpc {
+        fn get_block_count(&self) -> Result<u64, RpcError> {
+            unimplemented!()
+        }
+
+        fn get_block_hash(&self, _height: u64) -> Result<bitcoin::BlockHash, RpcError> {
+            unimplemented!()
+        }
+
+        fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
+            unimplemented!()
+        }
+
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
+            unimplemented!()
+        }
+
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            unimplemented!()
+        }
+    }
 
     fn build_payload(addr20: [u8; 20], rebase: u8) -> Vec<u8> {
         let mut v = Vec::with_capacity(1 + 20 + 1);
@@ -187,8 +220,9 @@ mod tests {
             crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_parser_test.db"));
         storage.init().expect("init the database");
         let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
         let tx = storage.begin_tx().expect("init the tx");
-        let r = parser.parse_block(&tx, &block, 0);
+        let r = parser.parse_block(&tx, &block, 0, &rpc);
         assert!(r.is_ok());
         tx.commit().unwrap();
     }
@@ -284,8 +318,9 @@ mod tests {
 
         let block = genesis_block(Network::Regtest);
         let height = 42;
+        let rpc = DummyRpc;
         let tx = storage.clone();
-        parser.parse_block(&tx, &block, height).unwrap();
+        parser.parse_block(&tx, &block, height, &rpc).unwrap();
 
         assert_eq!(*storage.inner.last_height.lock().unwrap(), Some(height));
         assert_eq!(
@@ -300,8 +335,9 @@ mod tests {
 
         let block = genesis_block(Network::Regtest);
         let height = 1;
+        let rpc = DummyRpc;
         let tx = storage.clone();
-        assert!(parser.parse_block(&tx, &block, height).is_err());
+        assert!(parser.parse_block(&tx, &block, height, &rpc).is_err());
 
         assert_eq!(*storage.inner.last_height.lock().unwrap(), None);
         assert_eq!(*storage.inner.last_hash.lock().unwrap(), None);
@@ -344,7 +380,8 @@ mod tests {
         block.txdata = vec![tx];
 
         let height = 7;
+        let rpc = DummyRpc;
         let tx = storage.clone();
-        assert!(parser.parse_block(&tx, &block, height).is_ok());
+        assert!(parser.parse_block(&tx, &block, height, &rpc).is_ok());
     }
 }

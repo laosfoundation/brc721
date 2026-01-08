@@ -1,27 +1,6 @@
-use bitcoin::{Block, BlockHash};
-use bitcoincore_rpc::{Client, Error as RpcError, RpcApi};
-
-pub trait BitcoinRpc {
-    fn get_block_count(&self) -> Result<u64, RpcError>;
-    fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError>;
-    fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError>;
-    fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError>;
-}
-
-impl BitcoinRpc for Client {
-    fn get_block_count(&self) -> Result<u64, RpcError> {
-        RpcApi::get_block_count(self)
-    }
-    fn get_block_hash(&self, height: u64) -> Result<BlockHash, RpcError> {
-        RpcApi::get_block_hash(self, height)
-    }
-    fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
-        RpcApi::get_block(self, hash)
-    }
-    fn wait_for_new_block(&self, timeout: u64) -> Result<(), RpcError> {
-        RpcApi::wait_for_new_block(self, timeout).map(|_| ())
-    }
-}
+use crate::bitcoin_rpc::BitcoinRpc;
+use bitcoin::Block;
+use bitcoincore_rpc::Error as RpcError;
 
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 1_000;
 
@@ -40,6 +19,10 @@ impl<C: BitcoinRpc> Scanner<C> {
             current_height: 0,
             batch_size: 1,
         }
+    }
+
+    pub fn rpc(&self) -> &C {
+        &self.client
     }
 
     pub fn with_confirmations(mut self, confirmations: u64) -> Self {
@@ -110,8 +93,8 @@ mod tests {
     use bitcoin::hashes::Hash;
     use bitcoin::{
         absolute::LockTime, block::Header, block::Version, transaction::Version as TxVersion,
-        Amount, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxMerkleNode,
-        TxOut,
+        Amount, BlockHash, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
+        TxMerkleNode, TxOut,
     };
     use bitcoincore_rpc::Error as RpcError;
 
@@ -143,6 +126,9 @@ mod tests {
         fn get_block(&self, hash: &BlockHash) -> Result<Block, RpcError> {
             let (_h, b) = self.blocks.values().find(|(hh, _)| hh == hash).unwrap();
             Ok(b.clone())
+        }
+        fn get_raw_transaction(&self, _txid: &bitcoin::Txid) -> Result<Transaction, RpcError> {
+            unimplemented!()
         }
         fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
             Ok(())
