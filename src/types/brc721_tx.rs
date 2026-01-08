@@ -1,5 +1,5 @@
 use crate::types::{Brc721Error, Brc721OpReturnOutput, Brc721Payload};
-use bitcoin::Transaction;
+use bitcoin::{Transaction, TxIn};
 
 /// A parsed BRC-721 transaction envelope.
 ///
@@ -15,7 +15,14 @@ pub struct Brc721Tx<'a> {
 
 impl<'a> Brc721Tx<'a> {
     pub fn validate(&self) -> Result<(), Brc721Error> {
+        if self.input0().is_none() {
+            return Err(Brc721Error::TxError("tx has no inputs".to_string()));
+        }
         self.payload().validate_in_tx(self.tx)
+    }
+
+    pub fn input0(&self) -> Option<&TxIn> {
+        self.tx.input.first()
     }
 
     pub fn payload(&self) -> &Brc721Payload {
@@ -50,7 +57,8 @@ mod tests {
     use bitcoin::absolute;
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::script::{Builder, PushBytesBuf};
-    use bitcoin::{transaction, Amount, ScriptBuf, Transaction, TxOut};
+    use bitcoin::Witness;
+    use bitcoin::{transaction, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
     use ethereum_types::H160;
 
     fn brc721_txout_for_payload(payload: &Brc721Payload) -> TxOut {
@@ -75,10 +83,16 @@ mod tests {
     }
 
     fn dummy_tx(outputs: Vec<TxOut>) -> Transaction {
+        let txin = TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: Witness::default(),
+        };
         Transaction {
             version: transaction::Version(2),
             lock_time: absolute::LockTime::ZERO,
-            input: vec![],
+            input: vec![txin],
             output: outputs,
         }
     }
@@ -132,5 +146,34 @@ mod tests {
         parsed
             .validate()
             .expect("ownership output references should be valid");
+    }
+
+    #[test]
+    fn brc721_tx_exposes_input0() {
+        let payload = Brc721Payload::RegisterCollection(RegisterCollectionData {
+            evm_collection_address: H160::from_low_u64_be(1),
+            rebaseable: false,
+        });
+
+        let txin = TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: Witness::default(),
+        };
+
+        let tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![txin],
+            output: vec![brc721_txout_for_payload(&payload), empty_txout()],
+        };
+
+        let parsed = parse_brc721_tx(&tx)
+            .expect("parse should succeed")
+            .expect("expected Some(Brc721Tx)");
+
+        let input0 = parsed.input0().expect("input0 must exist");
+        assert_eq!(input0.previous_output, OutPoint::null());
     }
 }

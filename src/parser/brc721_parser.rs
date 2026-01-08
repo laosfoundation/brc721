@@ -325,7 +325,12 @@ mod tests {
         let tx = Transaction {
             version: bitcoin::transaction::Version(2),
             lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![],
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: bitcoin::Sequence(0xffffffff),
+                witness: bitcoin::Witness::default(),
+            }],
             output: vec![
                 op_return,
                 TxOut {
