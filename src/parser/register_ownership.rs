@@ -1,6 +1,6 @@
 use crate::bitcoin_rpc::BitcoinRpc;
-use crate::storage::traits::{CollectionKey, StorageRead};
-use crate::types::{Brc721Command, Brc721Error, Brc721Token, Brc721Tx, RegisterOwnershipData};
+use crate::storage::traits::{CollectionKey, RegisteredTokenSave, StorageRead, StorageWrite};
+use crate::types::{Brc721Error, Brc721Token, Brc721Tx, RegisterOwnershipData};
 use bitcoin::hashes::{hash160, Hash};
 use ethereum_types::H160;
 
@@ -77,7 +77,17 @@ fn asset_ids_for_payload(payload: &RegisterOwnershipData, base_address: H160) ->
         .join("; ")
 }
 
-pub fn digest<S: StorageRead, R: BitcoinRpc>(
+fn total_slots_in_payload(payload: &RegisterOwnershipData) -> u128 {
+    payload
+        .groups
+        .iter()
+        .flat_map(|group| group.ranges.iter())
+        .fold(0u128, |acc, range| {
+            acc.saturating_add(range.end.saturating_sub(range.start).saturating_add(1))
+        })
+}
+
+pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
     payload: &RegisterOwnershipData,
     brc721_tx: &Brc721Tx<'_>,
     rpc: &R,
@@ -85,6 +95,8 @@ pub fn digest<S: StorageRead, R: BitcoinRpc>(
     block_height: u64,
     tx_index: u32,
 ) -> Result<(), Brc721Error> {
+    const MAX_REGISTERED_TOKENS_PER_TX: u128 = 1_000_000;
+
     let collection_key = CollectionKey::new(payload.collection_height, payload.collection_tx_index);
 
     let input0_prevout = brc721_tx.input0().map(|input0| input0.previous_output);
@@ -97,36 +109,105 @@ pub fn digest<S: StorageRead, R: BitcoinRpc>(
         None => ("<unknown>".to_string(), "<unknown>".to_string()),
     };
 
-    match storage
+    let collection = storage
         .load_collection(&collection_key)
-        .map_err(|e| Brc721Error::StorageError(e.to_string()))?
-    {
-        Some(_) => {
-            log::error!(
-                "register-ownership not supported yet (block {} tx {}, collection {}, groups={}, asset_ids={}, input0_prevout={:?}, base_address={})",
-                block_height,
-                tx_index,
-                collection_key,
-                payload.groups.len(),
-                asset_ids,
-                input0_prevout,
-                base_address_log
-            );
-            Err(Brc721Error::UnsupportedCommand {
-                cmd: Brc721Command::RegisterOwnership,
-            })
-        }
-        None => {
-            log::warn!(
-                "register-ownership references unknown collection {} (block {} tx {}, asset_ids={}, input0_prevout={:?}, base_address={})",
-                collection_key,
-                block_height,
-                tx_index,
-                asset_ids,
-                input0_prevout,
-                base_address_log
-            );
-            Ok(())
+        .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+
+    if collection.is_none() {
+        log::warn!(
+            "register-ownership references unknown collection {} (block {} tx {}, asset_ids={}, input0_prevout={:?}, base_address={})",
+            collection_key,
+            block_height,
+            tx_index,
+            asset_ids,
+            input0_prevout,
+            base_address_log
+        );
+        return Ok(());
+    }
+
+    let Some(base_address) = base_address else {
+        log::error!(
+            "register-ownership missing base address (block {} tx {}, collection {}, groups={}, input0_prevout={:?})",
+            block_height,
+            tx_index,
+            collection_key,
+            payload.groups.len(),
+            input0_prevout
+        );
+        return Ok(());
+    };
+
+    let total_slots = total_slots_in_payload(payload);
+    if total_slots > MAX_REGISTERED_TOKENS_PER_TX {
+        log::error!(
+            "register-ownership too many tokens (block {} tx {}, collection {}, token_count={}, max={}, input0_prevout={:?}, base_address={})",
+            block_height,
+            tx_index,
+            collection_key,
+            total_slots,
+            MAX_REGISTERED_TOKENS_PER_TX,
+            input0_prevout,
+            base_address_log
+        );
+        return Ok(());
+    }
+
+    let txid = brc721_tx.txid().to_string();
+
+    for (group_index, group) in payload.groups.iter().enumerate() {
+        let reg_vout: u32 = (group_index + 1).try_into().map_err(|_| {
+            Brc721Error::TxError("register-ownership vout out of range".to_string())
+        })?;
+
+        for range in &group.ranges {
+            let mut slot = range.start;
+            loop {
+                let token_id = match Brc721Token::new(slot, base_address) {
+                    Ok(token) => token.to_u256().to_string(),
+                    Err(err) => {
+                        log::error!(
+                            "register-ownership invalid slot {} at block {} tx {}: {}",
+                            slot,
+                            block_height,
+                            tx_index,
+                            err
+                        );
+                        return Ok(());
+                    }
+                };
+
+                storage
+                    .save_registered_token(RegisteredTokenSave {
+                        collection_id: &collection_key,
+                        token_id: &token_id,
+                        owner_h160: base_address,
+                        reg_txid: &txid,
+                        reg_vout,
+                        created_height: block_height,
+                        created_tx_index: tx_index,
+                    })
+                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+
+                if slot == range.end {
+                    break;
+                }
+                slot += 1;
+            }
         }
     }
+
+    log::info!(
+        "register-ownership indexed (block {} tx {}, collection {}, token_count={}, groups={}, asset_ids={}, input0_prevout={:?}, base_address={})",
+        block_height,
+        tx_index,
+        collection_key,
+        total_slots,
+        payload.groups.len(),
+        asset_ids,
+        input0_prevout,
+        base_address_log
+    );
+
+    Ok(())
 }

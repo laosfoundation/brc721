@@ -112,7 +112,8 @@ impl<T: StorageRead + StorageWrite> BlockParser<T> for Brc721Parser {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block as StorageBlock, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        Block as StorageBlock, Collection, CollectionKey, RegisteredToken, RegisteredTokenSave,
+        StorageRead, StorageTx, StorageWrite,
     };
     use crate::storage::Storage;
     use crate::types::Brc721Command;
@@ -285,6 +286,14 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(Vec::new())
         }
+
+        fn load_registered_token(
+            &self,
+            _collection_id: &CollectionKey,
+            _token_id: &str,
+        ) -> anyhow::Result<Option<RegisteredToken>> {
+            Ok(None)
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -303,6 +312,10 @@ mod tests {
             _evm_collection_address: H160,
             _rebaseable: bool,
         ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn save_registered_token(&self, _token: RegisteredTokenSave<'_>) -> anyhow::Result<()> {
             Ok(())
         }
     }

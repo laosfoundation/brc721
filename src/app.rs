@@ -176,7 +176,8 @@ pub async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        Block, Collection, CollectionKey, RegisteredToken, RegisteredTokenSave, StorageRead,
+        StorageTx, StorageWrite,
     };
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
@@ -217,6 +218,14 @@ mod tests {
         fn list_collections(&self) -> Result<Vec<Collection>> {
             Ok(Vec::new())
         }
+
+        fn load_registered_token(
+            &self,
+            _collection_id: &CollectionKey,
+            _token_id: &str,
+        ) -> Result<Option<RegisteredToken>> {
+            Ok(None)
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -234,6 +243,10 @@ mod tests {
             _evm_collection_address: H160,
             _rebaseable: bool,
         ) -> Result<()> {
+            Ok(())
+        }
+
+        fn save_registered_token(&self, _token: RegisteredTokenSave<'_>) -> Result<()> {
             Ok(())
         }
     }

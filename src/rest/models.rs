@@ -50,6 +50,5 @@ pub struct TokenOwnerResponse {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OwnershipStatus {
     InitialOwner,
-    #[allow(dead_code)]
     RegisteredOwner,
 }

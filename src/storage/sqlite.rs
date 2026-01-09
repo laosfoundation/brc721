@@ -4,11 +4,14 @@ use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::{path::Path, str::FromStr};
 
 use super::{
-    traits::{Collection, CollectionKey, Storage, StorageRead, StorageTx, StorageWrite},
+    traits::{
+        Collection, CollectionKey, RegisteredToken, RegisteredTokenSave, Storage, StorageRead,
+        StorageTx, StorageWrite,
+    },
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 1;
+const DB_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -103,6 +106,86 @@ fn db_save_collection(
     Ok(())
 }
 
+fn map_registered_token_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RegisteredToken> {
+    let collection_id_str: String = row.get(0)?;
+    let collection_id = CollectionKey::from_str(&collection_id_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
+
+    let token_id: String = row.get(1)?;
+
+    let owner_h160_str: String = row.get(2)?;
+    let owner_h160 = H160::from_str(&owner_h160_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(err)))?;
+
+    let reg_txid: String = row.get(3)?;
+
+    let reg_vout_raw: i64 = row.get(4)?;
+    let reg_vout: u32 = reg_vout_raw
+        .try_into()
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(4, reg_vout_raw))?;
+
+    let created_height_raw: i64 = row.get(5)?;
+    let created_height: u64 = created_height_raw
+        .try_into()
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, created_height_raw))?;
+
+    let created_tx_index_raw: i64 = row.get(6)?;
+    let created_tx_index: u32 = created_tx_index_raw
+        .try_into()
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, created_tx_index_raw))?;
+
+    Ok(RegisteredToken {
+        collection_id,
+        token_id,
+        owner_h160,
+        reg_txid,
+        reg_vout,
+        created_height,
+        created_tx_index,
+    })
+}
+
+fn db_load_registered_token(
+    conn: &Connection,
+    collection_id: &CollectionKey,
+    token_id: &str,
+) -> rusqlite::Result<Option<RegisteredToken>> {
+    conn.query_row(
+        r#"
+        SELECT collection_id, token_id, owner_h160, reg_txid, reg_vout, created_height, created_tx_index
+        FROM registered_tokens
+        WHERE collection_id = ?1 AND token_id = ?2
+        "#,
+        params![collection_id.to_string(), token_id],
+        map_registered_token_row,
+    )
+    .optional()
+}
+
+fn db_save_registered_token(
+    conn: &Connection,
+    token: RegisteredTokenSave<'_>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO registered_tokens (
+            collection_id, token_id, owner_h160, reg_txid, reg_vout, created_height, created_tx_index
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(collection_id, token_id) DO NOTHING
+        "#,
+        params![
+            token.collection_id.to_string(),
+            token.token_id,
+            format!("0x{:x}", token.owner_h160),
+            token.reg_txid,
+            token.reg_vout as i64,
+            token.created_height as i64,
+            token.created_tx_index as i64,
+        ],
+    )?;
+    Ok(())
+}
+
 impl StorageRead for SqliteTx {
     fn load_last(&self) -> Result<Option<Block>> {
         Ok(db_load_last(&self.conn)?)
@@ -114,6 +197,18 @@ impl StorageRead for SqliteTx {
 
     fn list_collections(&self) -> Result<Vec<Collection>> {
         Ok(db_list_collections(&self.conn)?)
+    }
+
+    fn load_registered_token(
+        &self,
+        collection_id: &CollectionKey,
+        token_id: &str,
+    ) -> Result<Option<RegisteredToken>> {
+        Ok(db_load_registered_token(
+            &self.conn,
+            collection_id,
+            token_id,
+        )?)
     }
 }
 
@@ -134,6 +229,10 @@ impl StorageWrite for SqliteTx {
             evm_collection_address,
             rebaseable,
         )?)
+    }
+
+    fn save_registered_token(&self, token: RegisteredTokenSave<'_>) -> Result<()> {
+        Ok(db_save_registered_token(&self.conn, token)?)
     }
 }
 
@@ -205,7 +304,38 @@ impl SqliteStorage {
                 evm_collection_address TEXT NOT NULL,
                 rebaseable INTEGER NOT NULL
             );
+            CREATE TABLE registered_tokens (
+                collection_id TEXT NOT NULL,
+                token_id TEXT NOT NULL,
+                owner_h160 TEXT NOT NULL,
+                reg_txid TEXT NOT NULL,
+                reg_vout INTEGER NOT NULL,
+                created_height INTEGER NOT NULL,
+                created_tx_index INTEGER NOT NULL,
+                PRIMARY KEY (collection_id, token_id)
+            );
+            CREATE INDEX registered_tokens_owner_idx ON registered_tokens(owner_h160);
         "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            return Ok(());
+        }
+
+        if version == 1 {
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS registered_tokens (
+                    collection_id TEXT NOT NULL,
+                    token_id TEXT NOT NULL,
+                    owner_h160 TEXT NOT NULL,
+                    reg_txid TEXT NOT NULL,
+                    reg_vout INTEGER NOT NULL,
+                    created_height INTEGER NOT NULL,
+                    created_tx_index INTEGER NOT NULL,
+                    PRIMARY KEY (collection_id, token_id)
+                );
+                CREATE INDEX IF NOT EXISTS registered_tokens_owner_idx ON registered_tokens(owner_h160);
+                "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
             return Ok(());
@@ -232,6 +362,15 @@ impl StorageRead for SqliteStorage {
     fn list_collections(&self) -> Result<Vec<Collection>> {
         let rows = self.with_conn(db_list_collections)?;
         Ok(rows)
+    }
+
+    fn load_registered_token(
+        &self,
+        collection_id: &CollectionKey,
+        token_id: &str,
+    ) -> Result<Option<RegisteredToken>> {
+        let row = self.with_conn(|conn| db_load_registered_token(conn, collection_id, token_id))?;
+        Ok(row)
     }
 }
 

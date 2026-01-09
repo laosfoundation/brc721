@@ -116,15 +116,46 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         }
     };
 
-    let owner_h160 = format_owner_h160(&token);
+    let token_id = format_token_id(&token);
+    let initial_owner_h160 = format_owner_h160(&token);
 
-    Json(TokenOwnerResponse {
-        collection_id: key.to_string(),
-        token_id: format_token_id(&token),
-        ownership_status: OwnershipStatus::InitialOwner,
-        owner_h160,
-    })
-    .into_response()
+    match state.storage.load_registered_token(&key, &token_id) {
+        Ok(Some(registered)) => {
+            if registered.owner_h160 != token.h160_address() {
+                log::warn!(
+                    "Registered token owner mismatch: collection={} token_id={} token_owner={:#x} stored_owner={:#x}",
+                    key,
+                    token_id,
+                    token.h160_address(),
+                    registered.owner_h160,
+                );
+            }
+
+            Json(TokenOwnerResponse {
+                collection_id: key.to_string(),
+                token_id,
+                ownership_status: OwnershipStatus::RegisteredOwner,
+                owner_h160: format!("{:#x}", registered.owner_h160),
+            })
+            .into_response()
+        }
+        Ok(None) => Json(TokenOwnerResponse {
+            collection_id: key.to_string(),
+            token_id,
+            ownership_status: OwnershipStatus::InitialOwner,
+            owner_h160: initial_owner_h160,
+        })
+        .into_response(),
+        Err(err) => {
+            log::error!(
+                "Failed to load registered token for collection {} token {}: {:?}",
+                key,
+                token_id,
+                err
+            );
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn not_found() -> impl IntoResponse {
@@ -204,7 +235,10 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::storage::{
-        traits::{Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite},
+        traits::{
+            Block, Collection, CollectionKey, RegisteredToken, RegisteredTokenSave, StorageRead,
+            StorageTx, StorageWrite,
+        },
         Storage,
     };
     use anyhow::anyhow;
@@ -249,7 +283,44 @@ mod tests {
 
         assert_eq!(payload.collection_id, collection_id);
         assert_eq!(payload.token_id, token_decimal);
+        assert!(matches!(
+            payload.ownership_status,
+            OwnershipStatus::InitialOwner
+        ));
         assert_eq!(payload.owner_h160, expected_owner_h160);
+    }
+
+    #[tokio::test]
+    async fn get_token_owner_returns_registered_owner_payload_when_registered() {
+        let collection = sample_collection();
+        let token = sample_token();
+        let token_decimal = format_token_id(&token);
+        let collection_id = collection.key.to_string();
+
+        let registered = RegisteredToken {
+            collection_id: collection.key.clone(),
+            token_id: token_decimal.clone(),
+            owner_h160: sample_address(),
+            reg_txid: "txid".to_string(),
+            reg_vout: 1,
+            created_height: 840_001,
+            created_tx_index: 2,
+        };
+
+        let storage = TestStorage::with_collection(collection).with_registered_token(registered);
+
+        let response = issue_owner_request(storage, &collection_id, &token_decimal).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.token_id, token_decimal);
+        assert!(matches!(
+            payload.ownership_status,
+            OwnershipStatus::RegisteredOwner
+        ));
+        assert_eq!(payload.owner_h160, format!("{:#x}", sample_address()));
     }
 
     #[tokio::test]
@@ -318,6 +389,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestStorage {
         collections: Arc<RwLock<Vec<Collection>>>,
+        registered_tokens: Arc<RwLock<Vec<RegisteredToken>>>,
     }
 
     impl TestStorage {
@@ -328,6 +400,14 @@ mod tests {
                 guard.push(collection);
             }
             storage
+        }
+
+        fn with_registered_token(self, token: RegisteredToken) -> Self {
+            {
+                let mut guard = self.registered_tokens.write().unwrap();
+                guard.push(token);
+            }
+            self
         }
     }
 
@@ -343,6 +423,18 @@ mod tests {
 
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(self.collections.read().unwrap().clone())
+        }
+
+        fn load_registered_token(
+            &self,
+            collection_id: &CollectionKey,
+            token_id: &str,
+        ) -> anyhow::Result<Option<RegisteredToken>> {
+            let registered = self.registered_tokens.read().unwrap();
+            Ok(registered
+                .iter()
+                .find(|entry| &entry.collection_id == collection_id && entry.token_id == token_id)
+                .cloned())
         }
     }
 
@@ -368,6 +460,14 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Err(anyhow!("not implemented"))
         }
+
+        fn load_registered_token(
+            &self,
+            _collection_id: &CollectionKey,
+            _token_id: &str,
+        ) -> anyhow::Result<Option<RegisteredToken>> {
+            Err(anyhow!("not implemented"))
+        }
     }
 
     impl StorageWrite for NoopTx {
@@ -381,6 +481,10 @@ mod tests {
             _evm_collection_address: H160,
             _rebaseable: bool,
         ) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn save_registered_token(&self, _token: RegisteredTokenSave<'_>) -> anyhow::Result<()> {
             Err(anyhow!("not implemented"))
         }
     }
