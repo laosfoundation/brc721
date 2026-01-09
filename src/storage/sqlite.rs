@@ -11,7 +11,7 @@ use super::{
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 2;
+const DB_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -162,6 +162,27 @@ fn db_load_registered_token(
     .optional()
 }
 
+fn db_list_registered_tokens_by_outpoint(
+    conn: &Connection,
+    reg_txid: &str,
+    reg_vout: u32,
+) -> rusqlite::Result<Vec<RegisteredToken>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT collection_id, token_id, owner_h160, reg_txid, reg_vout, created_height, created_tx_index
+        FROM registered_tokens
+        WHERE reg_txid = ?1 AND reg_vout = ?2
+        ORDER BY collection_id, token_id
+        "#,
+    )?;
+
+    let mapped = stmt
+        .query_map(params![reg_txid, reg_vout as i64], map_registered_token_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(mapped)
+}
+
 fn db_save_registered_token(
     conn: &Connection,
     token: RegisteredTokenSave<'_>,
@@ -258,6 +279,16 @@ impl SqliteStorage {
         }
     }
 
+    pub fn list_registered_tokens_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<RegisteredToken>> {
+        Ok(self.with_conn(|conn| {
+            db_list_registered_tokens_by_outpoint(conn, reg_txid, reg_vout)
+        })?)
+    }
+
     pub fn reset_all(&self) -> Result<()> {
         if !std::path::Path::new(&self.path).exists() {
             return Ok(());
@@ -315,6 +346,7 @@ impl SqliteStorage {
                 PRIMARY KEY (collection_id, token_id)
             );
             CREATE INDEX registered_tokens_owner_idx ON registered_tokens(owner_h160);
+            CREATE INDEX registered_tokens_reg_outpoint_idx ON registered_tokens(reg_txid, reg_vout);
         "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
@@ -336,6 +368,22 @@ impl SqliteStorage {
                     PRIMARY KEY (collection_id, token_id)
                 );
                 CREATE INDEX IF NOT EXISTS registered_tokens_owner_idx ON registered_tokens(owner_h160);
+                CREATE INDEX IF NOT EXISTS registered_tokens_reg_outpoint_idx ON registered_tokens(reg_txid, reg_vout);
+                "#,
+            )?;
+            conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            log::info!(
+                "🗄️ Migrated SQLite schema from v{} to v{}",
+                version,
+                DB_SCHEMA_VERSION
+            );
+            return Ok(());
+        }
+
+        if version == 2 {
+            conn.execute_batch(
+                r#"
+                CREATE INDEX IF NOT EXISTS registered_tokens_reg_outpoint_idx ON registered_tokens(reg_txid, reg_vout);
                 "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
@@ -593,5 +641,57 @@ mod tests {
         let last = repo.load_last().unwrap().unwrap();
         assert_eq!(last.height, 200);
         assert_eq!(last.hash, "hash200");
+    }
+
+    #[test]
+    fn sqlite_lists_registered_tokens_by_outpoint() {
+        let path = unique_temp_file("brc721_list_reg_tokens_outpoint", "db");
+        let repo = SqliteStorage::new(&path);
+        repo.init().unwrap();
+
+        let tx = repo.begin_tx().unwrap();
+        let collection_id = CollectionKey::new(840_000, 2);
+        let owner_h160 = H160::from_str("0x00112233445566778899aabbccddeeff00112233").unwrap();
+
+        tx.save_registered_token(RegisteredTokenSave {
+            collection_id: &collection_id,
+            token_id: "1",
+            owner_h160,
+            reg_txid: "txid_a",
+            reg_vout: 1,
+            created_height: 840_001,
+            created_tx_index: 3,
+        })
+        .unwrap();
+        tx.save_registered_token(RegisteredTokenSave {
+            collection_id: &collection_id,
+            token_id: "2",
+            owner_h160,
+            reg_txid: "txid_a",
+            reg_vout: 1,
+            created_height: 840_001,
+            created_tx_index: 3,
+        })
+        .unwrap();
+        tx.save_registered_token(RegisteredTokenSave {
+            collection_id: &collection_id,
+            token_id: "3",
+            owner_h160,
+            reg_txid: "txid_b",
+            reg_vout: 2,
+            created_height: 840_002,
+            created_tx_index: 4,
+        })
+        .unwrap();
+        tx.commit().unwrap();
+
+        let tokens_a = repo.list_registered_tokens_by_outpoint("txid_a", 1).unwrap();
+        assert_eq!(tokens_a.len(), 2);
+
+        let tokens_b = repo.list_registered_tokens_by_outpoint("txid_b", 2).unwrap();
+        assert_eq!(tokens_b.len(), 1);
+
+        let tokens_none = repo.list_registered_tokens_by_outpoint("txid_a", 0).unwrap();
+        assert!(tokens_none.is_empty());
     }
 }
