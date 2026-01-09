@@ -1,6 +1,6 @@
 use crate::bitcoin_rpc::BitcoinRpc;
 use crate::storage::traits::{CollectionKey, StorageRead};
-use crate::types::{Brc721Command, Brc721Error, Brc721Tx, RegisterOwnershipData};
+use crate::types::{Brc721Command, Brc721Error, Brc721Token, Brc721Tx, RegisterOwnershipData};
 use bitcoin::hashes::{hash160, Hash};
 use ethereum_types::H160;
 
@@ -22,6 +22,61 @@ fn try_base_address_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R
     ))
 }
 
+fn token_id_decimal(slot_number: u128, base_address: H160) -> String {
+    match Brc721Token::new(slot_number, base_address) {
+        Ok(token) => token.to_u256().to_string(),
+        Err(_) => format!("<invalid slot {}>", slot_number),
+    }
+}
+
+fn asset_ids_for_payload(payload: &RegisterOwnershipData, base_address: H160) -> String {
+    const MAX_ASSET_IDS_PER_GROUP: u128 = 32;
+
+    payload
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(group_index, group)| {
+            let output_index = group_index + 1;
+
+            let mut total_count = 0u128;
+            let mut emitted_count = 0u128;
+            let mut assets = Vec::new();
+
+            for range in &group.ranges {
+                let count = range.end - range.start + 1;
+                total_count = total_count.saturating_add(count);
+
+                if emitted_count >= MAX_ASSET_IDS_PER_GROUP {
+                    continue;
+                }
+
+                let mut slot = range.start;
+                loop {
+                    if emitted_count >= MAX_ASSET_IDS_PER_GROUP {
+                        break;
+                    }
+                    assets.push(token_id_decimal(slot, base_address));
+                    emitted_count += 1;
+
+                    if slot == range.end {
+                        break;
+                    }
+                    slot += 1;
+                }
+            }
+
+            if emitted_count < total_count {
+                let remaining = total_count - emitted_count;
+                assets.push(format!("...+{} more", remaining));
+            }
+
+            format!("vout{}=[{}]", output_index, assets.join(","))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 pub fn digest<S: StorageRead, R: BitcoinRpc>(
     payload: &RegisterOwnershipData,
     brc721_tx: &Brc721Tx<'_>,
@@ -34,53 +89,43 @@ pub fn digest<S: StorageRead, R: BitcoinRpc>(
 
     let input0_prevout = brc721_tx.input0().map(|input0| input0.previous_output);
     let base_address = try_base_address_from_input0(brc721_tx, rpc);
+    let (base_address_log, asset_ids) = match base_address {
+        Some(base_address) => (
+            format!("{:#x}", base_address),
+            asset_ids_for_payload(payload, base_address),
+        ),
+        None => ("<unknown>".to_string(), "<unknown>".to_string()),
+    };
 
     match storage
         .load_collection(&collection_key)
         .map_err(|e| Brc721Error::StorageError(e.to_string()))?
     {
         Some(_) => {
-            match base_address {
-                Some(base_address) => log::error!(
-                    "register-ownership not supported yet (block {} tx {}, collection {}, groups={}, input0_prevout={:?}, base_address={:#x})",
-                    block_height,
-                    tx_index,
-                    collection_key,
-                    payload.groups.len(),
-                    input0_prevout,
-                    base_address
-                ),
-                None => log::error!(
-                    "register-ownership not supported yet (block {} tx {}, collection {}, groups={}, input0_prevout={:?}, base_address=<unknown>)",
-                    block_height,
-                    tx_index,
-                    collection_key,
-                    payload.groups.len(),
-                    input0_prevout
-                ),
-            }
+            log::error!(
+                "register-ownership not supported yet (block {} tx {}, collection {}, groups={}, asset_ids={}, input0_prevout={:?}, base_address={})",
+                block_height,
+                tx_index,
+                collection_key,
+                payload.groups.len(),
+                asset_ids,
+                input0_prevout,
+                base_address_log
+            );
             Err(Brc721Error::UnsupportedCommand {
                 cmd: Brc721Command::RegisterOwnership,
             })
         }
         None => {
-            match base_address {
-                Some(base_address) => log::warn!(
-                    "register-ownership references unknown collection {} (block {} tx {}, input0_prevout={:?}, base_address={:#x})",
-                    collection_key,
-                    block_height,
-                    tx_index,
-                    input0_prevout,
-                    base_address
-                ),
-                None => log::warn!(
-                    "register-ownership references unknown collection {} (block {} tx {}, input0_prevout={:?}, base_address=<unknown>)",
-                    collection_key,
-                    block_height,
-                    tx_index,
-                    input0_prevout
-                ),
-            }
+            log::warn!(
+                "register-ownership references unknown collection {} (block {} tx {}, asset_ids={}, input0_prevout={:?}, base_address={})",
+                collection_key,
+                block_height,
+                tx_index,
+                asset_ids,
+                input0_prevout,
+                base_address_log
+            );
             Ok(())
         }
     }

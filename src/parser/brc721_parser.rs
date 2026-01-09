@@ -36,9 +36,10 @@ impl Brc721Parser {
         };
 
         log::info!(
-            "📦 Found BRC-721 tx at block {}, tx {} (cmd={:?})",
+            "📦 Found BRC-721 tx at block {}, tx {} (txid={}, cmd={:?})",
             block_height,
             tx_index,
+            bitcoin_tx.compute_txid(),
             brc721_tx.payload().command()
         );
 
