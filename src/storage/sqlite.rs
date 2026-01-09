@@ -318,6 +318,7 @@ impl SqliteStorage {
         "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            log::info!("🗄️ Initialized SQLite schema to v{}", DB_SCHEMA_VERSION);
             return Ok(());
         }
 
@@ -338,6 +339,11 @@ impl SqliteStorage {
                 "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
+            log::info!(
+                "🗄️ Migrated SQLite schema from v{} to v{}",
+                version,
+                DB_SCHEMA_VERSION
+            );
             return Ok(());
         }
 
