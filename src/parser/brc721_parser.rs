@@ -21,6 +21,33 @@ impl Brc721Parser {
         block_height: u64,
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
+        let spend_txid = bitcoin_tx.compute_txid().to_string();
+        for txin in &bitcoin_tx.input {
+            let prevout = txin.previous_output;
+            if prevout == bitcoin::OutPoint::null() {
+                continue;
+            }
+
+            if let Err(e) = storage.mark_ownership_utxo_spent(
+                &prevout.txid.to_string(),
+                prevout.vout,
+                &spend_txid,
+                block_height,
+                tx_index,
+            ) {
+                log::error!(
+                    "storage error marking ownership UTXO spent (outpoint={}:{}, spent_by={} at {}#{}, err={})",
+                    prevout.txid,
+                    prevout.vout,
+                    spend_txid,
+                    block_height,
+                    tx_index,
+                    e
+                );
+                return Err(Brc721Error::StorageError(e.to_string()));
+            }
+        }
+
         let brc721_tx: Brc721Tx<'_> = match parse_brc721_tx(bitcoin_tx) {
             Ok(Some(tx)) => tx,
             Ok(None) => return Ok(()),
@@ -112,8 +139,8 @@ impl<T: StorageRead + StorageWrite> BlockParser<T> for Brc721Parser {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block as StorageBlock, Collection, CollectionKey, RegisteredToken, RegisteredTokenSave,
-        StorageRead, StorageTx, StorageWrite,
+        Block as StorageBlock, Collection, CollectionKey, OwnershipRange, OwnershipUtxo,
+        OwnershipUtxoSave, StorageRead, StorageTx, StorageWrite,
     };
     use crate::storage::Storage;
     use crate::types::Brc721Command;
@@ -287,12 +314,28 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn load_registered_token(
+        fn list_ownership_ranges(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Ok(vec![])
+        }
+
+        fn find_unspent_ownership_utxo_for_slot(
             &self,
             _collection_id: &CollectionKey,
-            _token_id: &str,
-        ) -> anyhow::Result<Option<RegisteredToken>> {
+            _base_h160: H160,
+            _slot: u128,
+        ) -> anyhow::Result<Option<OwnershipUtxo>> {
             Ok(None)
+        }
+
+        fn list_unspent_ownership_utxos_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
         }
     }
 
@@ -315,7 +358,28 @@ mod tests {
             Ok(())
         }
 
-        fn save_registered_token(&self, _token: RegisteredTokenSave<'_>) -> anyhow::Result<()> {
+        fn save_ownership_utxo(&self, _utxo: OwnershipUtxoSave<'_>) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn save_ownership_range(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn mark_ownership_utxo_spent(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _spent_txid: &str,
+            _spent_height: u64,
+            _spent_tx_index: u32,
+        ) -> anyhow::Result<()> {
             Ok(())
         }
     }

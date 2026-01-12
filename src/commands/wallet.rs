@@ -5,8 +5,9 @@ use crate::{cli, context};
 use age::secrecy::SecretString;
 use anyhow::{anyhow, Context, Result};
 use bdk_wallet::bip39::{Language, Mnemonic};
-use serde::Serialize;
+use ethereum_types::H160;
 use rand::{rngs::OsRng, RngCore};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -164,36 +165,68 @@ struct WalletAssetsJson {
     results: Vec<AddressAssetsJson>,
 }
 
-fn parse_slot_from_token_id(token_id: &str) -> Result<u128> {
-    let value = ethereum_types::U256::from_dec_str(token_id.trim())
-        .map_err(|err| anyhow!("invalid token id '{token_id}': {err}"))?;
-    let token = crate::types::Brc721Token::try_from(value)
-        .map_err(|err| anyhow!("invalid token id encoding '{token_id}': {err}"))?;
-    Ok(token.slot_number())
-}
+fn merge_ranges(mut ranges: Vec<(u128, u128)>) -> Vec<(u128, u128)> {
+    ranges.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
-fn merge_slots_to_ranges(mut slots: Vec<u128>) -> Vec<(u128, u128)> {
-    slots.sort_unstable();
-    slots.dedup();
+    let mut out = Vec::new();
+    for (start, end) in ranges {
+        let Some(last) = out.last_mut() else {
+            out.push((start, end));
+            continue;
+        };
 
-    let mut ranges = Vec::new();
-    let mut iter = slots.into_iter();
-    let Some(mut start) = iter.next() else {
-        return ranges;
-    };
-    let mut end = start;
-
-    for slot in iter {
-        if slot == end.saturating_add(1) {
-            end = slot;
+        if start <= last.1.saturating_add(1) {
+            last.1 = last.1.max(end);
             continue;
         }
-        ranges.push((start, end));
-        start = slot;
-        end = slot;
+
+        out.push((start, end));
     }
-    ranges.push((start, end));
-    ranges
+    out
+}
+
+fn token_id_decimal(slot_number: u128, base_h160: H160) -> String {
+    match crate::types::Brc721Token::new(slot_number, base_h160) {
+        Ok(token) => token.to_u256().to_string(),
+        Err(_) => format!("<invalid slot {}>", slot_number),
+    }
+}
+
+fn asset_ids_for_ranges(ranges: &[(u128, u128)], base_h160: H160) -> Vec<String> {
+    const MAX_ASSET_IDS_PER_UTXO: u128 = 32;
+
+    let mut total_count = 0u128;
+    let mut emitted_count = 0u128;
+    let mut assets = Vec::new();
+
+    for (start, end) in ranges {
+        let count = end.saturating_sub(*start).saturating_add(1);
+        total_count = total_count.saturating_add(count);
+
+        if emitted_count >= MAX_ASSET_IDS_PER_UTXO {
+            continue;
+        }
+
+        let mut slot = *start;
+        loop {
+            if emitted_count >= MAX_ASSET_IDS_PER_UTXO {
+                break;
+            }
+            assets.push(token_id_decimal(slot, base_h160));
+            emitted_count += 1;
+
+            if slot == *end {
+                break;
+            }
+            slot = slot.saturating_add(1);
+        }
+    }
+
+    if emitted_count < total_count {
+        assets.push(format!("...+{} more", total_count - emitted_count));
+    }
+
+    assets
 }
 
 fn format_ranges(ranges: &[(u128, u128)]) -> String {
@@ -216,7 +249,10 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
     let db_path = ctx.data_dir.join("brc721.sqlite");
     if !db_path.exists() {
         if json {
-            println!("{}", serde_json::to_string_pretty(&WalletAssetsJson { results: vec![] })?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&WalletAssetsJson { results: vec![] })?
+            );
         } else {
             log::info!(
                 "📭 No scanner database found at {} (run the daemon to build an index)",
@@ -227,9 +263,7 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
     }
 
     let wallet = load_wallet(ctx)?;
-    let unspent = wallet
-        .list_unspent(min_conf)
-        .context("list wallet UTXOs")?;
+    let unspent = wallet.list_unspent(min_conf).context("list wallet UTXOs")?;
 
     let storage = crate::storage::SqliteStorage::new(&db_path);
 
@@ -239,18 +273,38 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
         let txid = utxo.txid.to_string();
         let vout = utxo.vout;
 
-        let tokens = storage
-            .list_registered_tokens_by_outpoint(&txid, vout)
-            .with_context(|| format!("query registered tokens for {txid}:{vout}"))?;
-        if tokens.is_empty() {
+        let Some((ownership_utxo, ranges)) = storage
+            .load_ownership_utxo_with_ranges_by_outpoint(&txid, vout)
+            .with_context(|| format!("query ownership ranges for {txid}:{vout}"))?
+        else {
+            continue;
+        };
+
+        if let Some(spent_txid) = ownership_utxo.spent_txid.as_deref() {
+            log::warn!(
+                "Skipping ownership outpoint {}:{} marked spent in DB (spent_by={})",
+                txid,
+                vout,
+                spent_txid
+            );
             continue;
         }
 
-        let owner_h160 = {
+        let (owner_h160, owner_h160_raw) = {
             let hash = hash160::Hash::hash(utxo.script_pub_key.as_bytes());
-            let h160 = ethereum_types::H160::from_slice(hash.as_byte_array());
-            format!("{:#x}", h160)
+            let h160 = H160::from_slice(hash.as_byte_array());
+            (format!("{:#x}", h160), h160)
         };
+
+        if owner_h160_raw != ownership_utxo.owner_h160 {
+            log::warn!(
+                "Outpoint {}:{} ownerH160 mismatch (wallet={} db={:#x})",
+                txid,
+                vout,
+                owner_h160,
+                ownership_utxo.owner_h160
+            );
+        }
 
         let address = bitcoin::Address::from_script(&utxo.script_pub_key, ctx.network)
             .ok()
@@ -265,61 +319,45 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
                 format!("<unknown:{}>", hex::encode(utxo.script_pub_key.as_bytes()))
             });
 
-        let mut tokens_by_collection: BTreeMap<String, (u64, u32, Vec<(u128, String)>)> =
-            BTreeMap::new();
-        for token in tokens {
-            let slot = match parse_slot_from_token_id(&token.token_id) {
-                Ok(slot) => slot,
-                Err(err) => {
-                    log::warn!("Skipping invalid stored token id {}: {}", token.token_id, err);
-                    continue;
-                }
-            };
-
-            let entry = tokens_by_collection
-                .entry(token.collection_id.to_string())
-                .or_insert((token.created_height, token.created_tx_index, Vec::new()));
-            entry.2.push((slot, token.token_id));
-        }
-
-        for (collection_id, (created_height, created_tx_index, mut tokens)) in tokens_by_collection
-        {
-            tokens.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-            let slots = tokens.iter().map(|(slot, _)| *slot).collect::<Vec<_>>();
-            let ranges = merge_slots_to_ranges(slots);
-            let slot_ranges = ranges
+        let ranges = merge_ranges(
+            ranges
                 .iter()
-                .map(|(start, end)| SlotRangeJson {
-                    start: start.to_string(),
-                    end: end.to_string(),
-                })
-                .collect::<Vec<_>>();
+                .map(|range| (range.slot_start, range.slot_end))
+                .collect(),
+        );
 
-            let utxo_entry = OwnershipUtxoJson {
-                collection_id,
-                txid: txid.clone(),
-                vout,
-                created_height,
-                created_tx_index,
-                slot_ranges,
-                asset_ids: asset_ids.then(|| tokens.into_iter().map(|(_, id)| id).collect()),
-            };
+        let slot_ranges = ranges
+            .iter()
+            .map(|(start, end)| SlotRangeJson {
+                start: start.to_string(),
+                end: end.to_string(),
+            })
+            .collect::<Vec<_>>();
 
-            let addr_entry = by_address
-                .entry(address.clone())
-                .or_insert_with(|| (owner_h160.clone(), Vec::new()));
+        let utxo_entry = OwnershipUtxoJson {
+            collection_id: ownership_utxo.collection_id.to_string(),
+            txid: txid.clone(),
+            vout,
+            created_height: ownership_utxo.created_height,
+            created_tx_index: ownership_utxo.created_tx_index,
+            slot_ranges,
+            asset_ids: asset_ids.then(|| asset_ids_for_ranges(&ranges, ownership_utxo.base_h160)),
+        };
 
-            if addr_entry.0 != owner_h160 {
-                log::warn!(
-                    "Address {} has inconsistent ownerH160 values: {} vs {}",
-                    address,
-                    addr_entry.0,
-                    owner_h160
-                );
-            }
+        let addr_entry = by_address
+            .entry(address.clone())
+            .or_insert_with(|| (owner_h160.clone(), Vec::new()));
 
-            addr_entry.1.push(utxo_entry);
+        if addr_entry.0 != owner_h160 {
+            log::warn!(
+                "Address {} has inconsistent ownerH160 values: {} vs {}",
+                address,
+                addr_entry.0,
+                owner_h160
+            );
         }
+
+        addr_entry.1.push(utxo_entry);
     }
 
     let results = by_address
@@ -348,7 +386,10 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
     }
 
     if results.is_empty() {
-        log::info!("📭 No indexed BRC-721 assets found for this wallet (min_conf={})", min_conf);
+        log::info!(
+            "📭 No indexed BRC-721 assets found for this wallet (min_conf={})",
+            min_conf
+        );
         return Ok(());
     }
 
@@ -433,18 +474,16 @@ mod tests {
     }
 
     #[test]
-    fn merge_slots_to_ranges_merges_consecutive_slots() {
-        let ranges = merge_slots_to_ranges(vec![5, 3, 4, 4, 10]);
+    fn merge_ranges_merges_consecutive_slots() {
+        let ranges = merge_ranges(vec![(5, 5), (3, 4), (4, 4), (10, 10)]);
         assert_eq!(ranges, vec![(3, 5), (10, 10)]);
         assert_eq!(format_ranges(&ranges), "3..=5,10");
     }
 
     #[test]
-    fn parse_slot_from_token_id_extracts_slot() {
-        let token =
-            crate::types::Brc721Token::new(42, ethereum_types::H160::from_low_u64_be(1)).unwrap();
-        let token_id = token.to_u256().to_string();
-        let slot = parse_slot_from_token_id(&token_id).unwrap();
-        assert_eq!(slot, 42);
+    fn token_id_decimal_matches_brc721_token_encoding() {
+        let base_h160 = ethereum_types::H160::from_low_u64_be(1);
+        let token = crate::types::Brc721Token::new(42, base_h160).unwrap();
+        assert_eq!(token_id_decimal(42, base_h160), token.to_u256().to_string());
     }
 }

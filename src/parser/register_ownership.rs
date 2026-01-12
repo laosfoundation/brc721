@@ -1,15 +1,15 @@
 use crate::bitcoin_rpc::BitcoinRpc;
-use crate::storage::traits::{CollectionKey, RegisteredTokenSave, StorageRead, StorageWrite};
+use crate::storage::traits::{CollectionKey, OwnershipUtxoSave, StorageRead, StorageWrite};
 use crate::types::{Brc721Error, Brc721Token, Brc721Tx, RegisterOwnershipData};
 use bitcoin::hashes::{hash160, Hash};
 use ethereum_types::H160;
 
-fn base_address_from_spent_script_pubkey(script_pubkey: &bitcoin::ScriptBuf) -> H160 {
+fn h160_from_script_pubkey(script_pubkey: &bitcoin::ScriptBuf) -> H160 {
     let hash = hash160::Hash::hash(script_pubkey.as_bytes());
     H160::from_slice(hash.as_byte_array())
 }
 
-fn try_base_address_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R) -> Option<H160> {
+fn try_base_h160_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R) -> Option<H160> {
     let input0 = brc721_tx.input0()?;
     let prevout = input0.previous_output;
     if prevout == bitcoin::OutPoint::null() {
@@ -17,9 +17,7 @@ fn try_base_address_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R
     }
     let prev_tx = rpc.get_raw_transaction(&prevout.txid).ok()?;
     let prev_txout = prev_tx.output.get(prevout.vout as usize)?;
-    Some(base_address_from_spent_script_pubkey(
-        &prev_txout.script_pubkey,
-    ))
+    Some(h160_from_script_pubkey(&prev_txout.script_pubkey))
 }
 
 fn token_id_decimal(slot_number: u128, base_address: H160) -> String {
@@ -100,11 +98,11 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
     let collection_key = CollectionKey::new(payload.collection_height, payload.collection_tx_index);
 
     let input0_prevout = brc721_tx.input0().map(|input0| input0.previous_output);
-    let base_address = try_base_address_from_input0(brc721_tx, rpc);
-    let (base_address_log, asset_ids) = match base_address {
-        Some(base_address) => (
-            format!("{:#x}", base_address),
-            asset_ids_for_payload(payload, base_address),
+    let base_h160 = try_base_h160_from_input0(brc721_tx, rpc);
+    let (base_h160_log, asset_ids) = match base_h160 {
+        Some(base_h160) => (
+            format!("{:#x}", base_h160),
+            asset_ids_for_payload(payload, base_h160),
         ),
         None => ("<unknown>".to_string(), "<unknown>".to_string()),
     };
@@ -121,12 +119,12 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
             tx_index,
             asset_ids,
             input0_prevout,
-            base_address_log
+            base_h160_log
         );
         return Ok(());
     }
 
-    let Some(base_address) = base_address else {
+    let Some(base_h160) = base_h160 else {
         log::error!(
             "register-ownership missing base address (block {} tx {}, collection {}, groups={}, input0_prevout={:?})",
             block_height,
@@ -148,7 +146,7 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
             total_slots,
             MAX_REGISTERED_TOKENS_PER_TX,
             input0_prevout,
-            base_address_log
+            base_h160_log
         );
         return Ok(());
     }
@@ -160,40 +158,47 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
             Brc721Error::TxError("register-ownership vout out of range".to_string())
         })?;
 
+        let Some(owner_txout) = brc721_tx.output(reg_vout) else {
+            log::error!(
+                "register-ownership missing owner output (block {} tx {}, collection {}, reg_vout={})",
+                block_height,
+                tx_index,
+                collection_key,
+                reg_vout
+            );
+            return Ok(());
+        };
+        let owner_h160 = h160_from_script_pubkey(&owner_txout.script_pubkey);
+
+        storage
+            .save_ownership_utxo(OwnershipUtxoSave {
+                collection_id: &collection_key,
+                owner_h160,
+                base_h160,
+                reg_txid: &txid,
+                reg_vout,
+                created_height: block_height,
+                created_tx_index: tx_index,
+            })
+            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+
         for range in &group.ranges {
-            let mut slot = range.start;
-            loop {
-                let token_id = match Brc721Token::new(slot, base_address) {
-                    Ok(token) => token.to_u256().to_string(),
-                    Err(err) => {
-                        log::error!(
-                            "register-ownership invalid slot {} at block {} tx {}: {}",
-                            slot,
-                            block_height,
-                            tx_index,
-                            err
-                        );
-                        return Ok(());
-                    }
-                };
-
-                storage
-                    .save_registered_token(RegisteredTokenSave {
-                        collection_id: &collection_key,
-                        token_id: &token_id,
-                        owner_h160: base_address,
-                        reg_txid: &txid,
-                        reg_vout,
-                        created_height: block_height,
-                        created_tx_index: tx_index,
-                    })
-                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-
-                if slot == range.end {
-                    break;
-                }
-                slot += 1;
+            if Brc721Token::new(range.start, base_h160).is_err()
+                || Brc721Token::new(range.end, base_h160).is_err()
+            {
+                log::error!(
+                    "register-ownership invalid slot range {}..={} at block {} tx {}",
+                    range.start,
+                    range.end,
+                    block_height,
+                    tx_index
+                );
+                return Ok(());
             }
+
+            storage
+                .save_ownership_range(&txid, reg_vout, range.start, range.end)
+                .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         }
     }
 
@@ -206,7 +211,7 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
         payload.groups.len(),
         asset_ids,
         input0_prevout,
-        base_address_log
+        base_h160_log
     );
 
     Ok(())
