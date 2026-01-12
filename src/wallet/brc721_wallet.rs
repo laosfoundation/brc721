@@ -72,6 +72,10 @@ impl Brc721Wallet {
         self.remote.balances()
     }
 
+    pub fn list_unspent(&self, min_conf: u64) -> Result<Vec<json::ListUnspentResultEntry>> {
+        self.remote.list_unspent(min_conf)
+    }
+
     pub fn rescan_watch_only(&self) -> Result<()> {
         self.remote.rescan()
     }

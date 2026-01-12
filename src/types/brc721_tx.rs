@@ -1,5 +1,5 @@
 use crate::types::{Brc721Error, Brc721OpReturnOutput, Brc721Payload};
-use bitcoin::{Transaction, TxIn};
+use bitcoin::{Transaction, TxIn, TxOut, Txid};
 
 /// A parsed BRC-721 transaction envelope.
 ///
@@ -23,6 +23,14 @@ impl<'a> Brc721Tx<'a> {
 
     pub fn input0(&self) -> Option<&TxIn> {
         self.tx.input.first()
+    }
+
+    pub fn txid(&self) -> Txid {
+        self.tx.compute_txid()
+    }
+
+    pub fn output(&self, vout: u32) -> Option<&TxOut> {
+        self.tx.output.get(vout as usize)
     }
 
     pub fn payload(&self) -> &Brc721Payload {

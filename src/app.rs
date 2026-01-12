@@ -176,7 +176,8 @@ pub async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite,
+        Block, Collection, CollectionKey, OwnershipRange, OwnershipUtxo, OwnershipUtxoSave,
+        StorageRead, StorageTx, StorageWrite,
     };
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
@@ -217,6 +218,30 @@ mod tests {
         fn list_collections(&self) -> Result<Vec<Collection>> {
             Ok(Vec::new())
         }
+
+        fn list_ownership_ranges(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> Result<Vec<OwnershipRange>> {
+            Ok(vec![])
+        }
+
+        fn find_unspent_ownership_utxo_for_slot(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot: u128,
+        ) -> Result<Option<OwnershipUtxo>> {
+            Ok(None)
+        }
+
+        fn list_unspent_ownership_utxos_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -233,6 +258,31 @@ mod tests {
             _key: CollectionKey,
             _evm_collection_address: H160,
             _rebaseable: bool,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn save_ownership_utxo(&self, _utxo: OwnershipUtxoSave<'_>) -> Result<()> {
+            Ok(())
+        }
+
+        fn save_ownership_range(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn mark_ownership_utxo_spent(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _spent_txid: &str,
+            _spent_height: u64,
+            _spent_tx_index: u32,
         ) -> Result<()> {
             Ok(())
         }
