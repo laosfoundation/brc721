@@ -25,11 +25,7 @@ impl CommandRunner for cli::WalletCmd {
             cli::WalletCmd::Info => run_info(ctx),
             cli::WalletCmd::Load => run_load(ctx),
             cli::WalletCmd::Unload => run_unload(ctx),
-            cli::WalletCmd::Assets {
-                min_conf,
-                json,
-                asset_ids,
-            } => run_assets(ctx, *min_conf, *json, *asset_ids),
+            cli::WalletCmd::Assets { json, asset_ids } => run_assets(ctx, *json, *asset_ids),
         }
     }
 }
@@ -243,7 +239,7 @@ fn format_ranges(ranges: &[(u128, u128)]) -> String {
         .join(",")
 }
 
-fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool) -> Result<()> {
+fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()> {
     use bitcoin::hashes::{hash160, Hash};
 
     let db_path = ctx.data_dir.join("brc721.sqlite");
@@ -263,7 +259,7 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
     }
 
     let wallet = load_wallet(ctx)?;
-    let unspent = wallet.list_unspent(min_conf).context("list wallet UTXOs")?;
+    let unspent = wallet.list_unspent(0).context("list wallet UTXOs")?;
 
     let storage = crate::storage::SqliteStorage::new(&db_path);
 
@@ -386,18 +382,11 @@ fn run_assets(ctx: &context::Context, min_conf: u64, json: bool, asset_ids: bool
     }
 
     if results.is_empty() {
-        log::info!(
-            "📭 No indexed BRC-721 assets found for this wallet (min_conf={})",
-            min_conf
-        );
+        log::info!("📭 No indexed BRC-721 assets found for this wallet");
         return Ok(());
     }
 
-    log::info!(
-        "🎨 Indexed BRC-721 assets (wallet_id={}, min_conf={})",
-        wallet.id(),
-        min_conf
-    );
+    log::info!("🎨 Indexed BRC-721 assets (wallet_id={})", wallet.id());
 
     for entry in results {
         log::info!("🏠 {} (ownerH160={})", entry.address, entry.owner_h160);

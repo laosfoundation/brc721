@@ -71,13 +71,6 @@ pub enum WalletCmd {
     )]
     Assets {
         #[arg(
-            long = "min-conf",
-            value_name = "N",
-            default_value_t = 0u64,
-            help = "Only include ownership UTXOs with at least N confirmations"
-        )]
-        min_conf: u64,
-        #[arg(
             long,
             help = "Print JSON to stdout instead of human-readable logs",
             num_args(0),
