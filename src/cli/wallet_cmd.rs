@@ -41,6 +41,19 @@ pub enum WalletCmd {
     )]
     Address,
     #[command(
+        about = "List revealed receive addresses",
+        long_about = "List all previously revealed receive (external) addresses stored in the local wallet database."
+    )]
+    Addresses {
+        #[arg(
+            long,
+            help = "Print JSON to stdout instead of human-readable logs",
+            num_args(0),
+            default_value_t = false
+        )]
+        json: bool,
+    },
+    #[command(
         about = "Show wallet balance",
         long_about = "Display confirmed and unconfirmed wallet balances as tracked via the Core watch-only wallet and local index."
     )]

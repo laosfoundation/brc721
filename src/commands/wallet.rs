@@ -1,5 +1,6 @@
 use super::CommandRunner;
 use crate::wallet::brc721_wallet::Brc721Wallet;
+use crate::wallet::local_wallet::LocalWallet;
 use crate::wallet::passphrase::prompt_passphrase;
 use crate::{cli, context};
 use age::secrecy::SecretString;
@@ -20,6 +21,7 @@ impl CommandRunner for cli::WalletCmd {
             } => run_init(ctx, mnemonic.clone(), passphrase.clone()),
             cli::WalletCmd::Generate { short } => run_generate(*short),
             cli::WalletCmd::Address => run_address(ctx),
+            cli::WalletCmd::Addresses { json } => run_addresses(ctx, *json),
             cli::WalletCmd::Balance => run_balance(ctx),
             cli::WalletCmd::Rescan => run_rescan(ctx),
             cli::WalletCmd::Info => run_info(ctx),
@@ -76,6 +78,70 @@ fn run_address(ctx: &context::Context) -> Result<()> {
         .reveal_next_payment_address()
         .context("getting address")?;
     log::info!("🏠 {}", addr.address);
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WalletAddressJson {
+    index: u32,
+    address: String,
+    address_h160: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WalletAddressesJson {
+    results: Vec<WalletAddressJson>,
+}
+
+fn run_addresses(ctx: &context::Context, json: bool) -> Result<()> {
+    use bitcoin::hashes::{hash160, Hash};
+
+    let wallet = load_local_wallet(ctx)?;
+    let addresses = wallet.revealed_payment_addresses();
+
+    let results = addresses
+        .into_iter()
+        .map(|address| {
+            let script_pubkey = address.address.script_pubkey();
+            let hash = hash160::Hash::hash(script_pubkey.as_bytes());
+            let address_h160 = H160::from_slice(hash.as_byte_array());
+
+            WalletAddressJson {
+                index: address.index,
+                address: address.address.to_string(),
+                address_h160: format!("{:#x}", address_h160),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&WalletAddressesJson { results })?
+        );
+        return Ok(());
+    }
+
+    if results.is_empty() {
+        log::info!("📭 No revealed receive addresses for this wallet");
+        return Ok(());
+    }
+
+    log::info!(
+        "🏠 Revealed receive addresses (count={}, wallet_id={})",
+        results.len(),
+        wallet.id()
+    );
+    for addr in results {
+        log::info!(
+            "  - #{} {} (addressH160={})",
+            addr.index,
+            addr.address,
+            addr.address_h160
+        );
+    }
     Ok(())
 }
 
@@ -424,6 +490,10 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
 fn load_wallet(ctx: &context::Context) -> Result<Brc721Wallet> {
     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
         .context("loading wallet")
+}
+
+fn load_local_wallet(ctx: &context::Context) -> Result<LocalWallet> {
+    LocalWallet::load(&ctx.data_dir, ctx.network).context("loading local wallet")
 }
 
 fn resolve_passphrase_init(passphrase: Option<String>) -> SecretString {
