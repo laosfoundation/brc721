@@ -5,7 +5,11 @@ use crate::{cli, context};
 use age::secrecy::SecretString;
 use anyhow::{anyhow, Context, Result};
 use bdk_wallet::bip39::{Language, Mnemonic};
+use ethereum_types::H160;
 use rand::{rngs::OsRng, RngCore};
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::str::FromStr;
 
 impl CommandRunner for cli::WalletCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
@@ -21,6 +25,7 @@ impl CommandRunner for cli::WalletCmd {
             cli::WalletCmd::Info => run_info(ctx),
             cli::WalletCmd::Load => run_load(ctx),
             cli::WalletCmd::Unload => run_unload(ctx),
+            cli::WalletCmd::Assets { json, asset_ids } => run_assets(ctx, *json, *asset_ids),
         }
     }
 }
@@ -122,6 +127,300 @@ fn run_unload(ctx: &context::Context) -> Result<()> {
     Ok(())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SlotRangeJson {
+    start: String,
+    end: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnershipUtxoJson {
+    collection_id: String,
+    txid: String,
+    vout: u32,
+    init_owner_h160: String,
+    created_height: u64,
+    created_tx_index: u32,
+    slot_ranges: Vec<SlotRangeJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_ids: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddressAssetsJson {
+    address: String,
+    address_h160: String,
+    utxos: Vec<OwnershipUtxoJson>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WalletAssetsJson {
+    results: Vec<AddressAssetsJson>,
+}
+
+fn merge_ranges(mut ranges: Vec<(u128, u128)>) -> Vec<(u128, u128)> {
+    ranges.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut out = Vec::new();
+    for (start, end) in ranges {
+        let Some(last) = out.last_mut() else {
+            out.push((start, end));
+            continue;
+        };
+
+        if start <= last.1.saturating_add(1) {
+            last.1 = last.1.max(end);
+            continue;
+        }
+
+        out.push((start, end));
+    }
+    out
+}
+
+fn token_id_decimal(slot_number: u128, base_h160: H160) -> String {
+    match crate::types::Brc721Token::new(slot_number, base_h160) {
+        Ok(token) => token.to_u256().to_string(),
+        Err(_) => format!("<invalid slot {}>", slot_number),
+    }
+}
+
+fn asset_ids_for_ranges(ranges: &[(u128, u128)], base_h160: H160) -> Vec<String> {
+    const MAX_ASSET_IDS_PER_UTXO: u128 = 32;
+
+    let mut total_count = 0u128;
+    let mut emitted_count = 0u128;
+    let mut assets = Vec::new();
+
+    for (start, end) in ranges {
+        let count = end.saturating_sub(*start).saturating_add(1);
+        total_count = total_count.saturating_add(count);
+
+        if emitted_count >= MAX_ASSET_IDS_PER_UTXO {
+            continue;
+        }
+
+        let mut slot = *start;
+        loop {
+            if emitted_count >= MAX_ASSET_IDS_PER_UTXO {
+                break;
+            }
+            assets.push(token_id_decimal(slot, base_h160));
+            emitted_count += 1;
+
+            if slot == *end {
+                break;
+            }
+            slot = slot.saturating_add(1);
+        }
+    }
+
+    if emitted_count < total_count {
+        assets.push(format!("...+{} more", total_count - emitted_count));
+    }
+
+    assets
+}
+
+fn format_ranges(ranges: &[(u128, u128)]) -> String {
+    ranges
+        .iter()
+        .map(|(start, end)| {
+            if start == end {
+                start.to_string()
+            } else {
+                format!("{start}..={end}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()> {
+    use bitcoin::hashes::{hash160, Hash};
+
+    let db_path = ctx.data_dir.join("brc721.sqlite");
+    if !db_path.exists() {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&WalletAssetsJson { results: vec![] })?
+            );
+        } else {
+            log::info!(
+                "📭 No scanner database found at {} (run the daemon to build an index)",
+                db_path.to_string_lossy()
+            );
+        }
+        return Ok(());
+    }
+
+    let wallet = load_wallet(ctx)?;
+    let unspent = wallet.list_unspent(0).context("list wallet UTXOs")?;
+
+    let storage = crate::storage::SqliteStorage::new(&db_path);
+
+    let mut by_address: BTreeMap<String, (String, Vec<OwnershipUtxoJson>)> = BTreeMap::new();
+
+    for utxo in unspent {
+        let txid = utxo.txid.to_string();
+        let vout = utxo.vout;
+
+        let Some((ownership_utxo, ranges)) = storage
+            .load_ownership_utxo_with_ranges_by_outpoint(&txid, vout)
+            .with_context(|| format!("query ownership ranges for {txid}:{vout}"))?
+        else {
+            continue;
+        };
+
+        if let Some(spent_txid) = ownership_utxo.spent_txid.as_deref() {
+            log::warn!(
+                "Skipping ownership outpoint {}:{} marked spent in DB (spent_by={})",
+                txid,
+                vout,
+                spent_txid
+            );
+            continue;
+        }
+
+        let (address_h160, address_h160_raw) = {
+            let hash = hash160::Hash::hash(utxo.script_pub_key.as_bytes());
+            let h160 = H160::from_slice(hash.as_byte_array());
+            (format!("{:#x}", h160), h160)
+        };
+
+        if address_h160_raw != ownership_utxo.owner_h160 {
+            log::warn!(
+                "Outpoint {}:{} ownerH160 mismatch (wallet={} db={:#x})",
+                txid,
+                vout,
+                address_h160,
+                ownership_utxo.owner_h160
+            );
+        }
+
+        let address = bitcoin::Address::from_script(&utxo.script_pub_key, ctx.network)
+            .ok()
+            .map(|address| address.to_string())
+            .or_else(|| {
+                utxo.address
+                    .as_ref()
+                    .and_then(|address| address.clone().require_network(ctx.network).ok())
+                    .map(|address| address.to_string())
+            })
+            .unwrap_or_else(|| {
+                format!("<unknown:{}>", hex::encode(utxo.script_pub_key.as_bytes()))
+            });
+
+        let ranges = merge_ranges(
+            ranges
+                .iter()
+                .map(|range| (range.slot_start, range.slot_end))
+                .collect(),
+        );
+
+        let slot_ranges = ranges
+            .iter()
+            .map(|(start, end)| SlotRangeJson {
+                start: start.to_string(),
+                end: end.to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        let utxo_entry = OwnershipUtxoJson {
+            collection_id: ownership_utxo.collection_id.to_string(),
+            txid: txid.clone(),
+            vout,
+            init_owner_h160: format!("{:#x}", ownership_utxo.base_h160),
+            created_height: ownership_utxo.created_height,
+            created_tx_index: ownership_utxo.created_tx_index,
+            slot_ranges,
+            asset_ids: asset_ids.then(|| asset_ids_for_ranges(&ranges, ownership_utxo.base_h160)),
+        };
+
+        let addr_entry = by_address
+            .entry(address.clone())
+            .or_insert_with(|| (address_h160.clone(), Vec::new()));
+
+        if addr_entry.0 != address_h160 {
+            log::warn!(
+                "Address {} has inconsistent addressH160 values: {} vs {}",
+                address,
+                addr_entry.0,
+                address_h160
+            );
+        }
+
+        addr_entry.1.push(utxo_entry);
+    }
+
+    let results = by_address
+        .into_iter()
+        .map(|(address, (address_h160, mut utxos))| {
+            utxos.sort_by(|a, b| {
+                a.collection_id
+                    .cmp(&b.collection_id)
+                    .then_with(|| a.txid.cmp(&b.txid))
+                    .then_with(|| a.vout.cmp(&b.vout))
+            });
+            AddressAssetsJson {
+                address,
+                address_h160,
+                utxos,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&WalletAssetsJson { results })?
+        );
+        return Ok(());
+    }
+
+    if results.is_empty() {
+        log::info!("📭 No indexed BRC-721 assets found for this wallet");
+        return Ok(());
+    }
+
+    log::info!("🎨 Indexed BRC-721 assets (wallet_id={})", wallet.id());
+
+    for entry in results {
+        log::info!("🏠 {} (addressH160={})", entry.address, entry.address_h160);
+        for utxo in entry.utxos {
+            let ranges = utxo
+                .slot_ranges
+                .iter()
+                .filter_map(|r| {
+                    let start = u128::from_str(&r.start).ok()?;
+                    let end = u128::from_str(&r.end).ok()?;
+                    Some((start, end))
+                })
+                .collect::<Vec<_>>();
+            log::info!(
+                "  - collection={} outpoint={}:{} initOwnerH160={} created={}#{} slots={}",
+                utxo.collection_id,
+                utxo.txid,
+                utxo.vout,
+                utxo.init_owner_h160,
+                utxo.created_height,
+                utxo.created_tx_index,
+                format_ranges(&ranges)
+            );
+            if let Some(ids) = &utxo.asset_ids {
+                log::info!("    asset_ids=[{}]", ids.join(","));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn load_wallet(ctx: &context::Context) -> Result<Brc721Wallet> {
     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
         .context("loading wallet")
@@ -164,5 +463,19 @@ mod tests {
         assert_eq!(mnemonic.word_count(), 24);
         let parsed = Mnemonic::parse_in(Language::English, mnemonic.to_string()).expect("parse");
         assert_eq!(parsed.word_count(), 24);
+    }
+
+    #[test]
+    fn merge_ranges_merges_consecutive_slots() {
+        let ranges = merge_ranges(vec![(5, 5), (3, 4), (4, 4), (10, 10)]);
+        assert_eq!(ranges, vec![(3, 5), (10, 10)]);
+        assert_eq!(format_ranges(&ranges), "3..=5,10");
+    }
+
+    #[test]
+    fn token_id_decimal_matches_brc721_token_encoding() {
+        let base_h160 = ethereum_types::H160::from_low_u64_be(1);
+        let token = crate::types::Brc721Token::new(42, base_h160).unwrap();
+        assert_eq!(token_id_decimal(42, base_h160), token.to_u256().to_string());
     }
 }

@@ -7,7 +7,10 @@ use crate::storage::Storage;
 mod handlers;
 mod models;
 
-use handlers::{chain_state, get_collection, get_token_owner, health, list_collections, not_found};
+use handlers::{
+    chain_state, get_address_assets, get_collection, get_token_owner, health, list_collections,
+    not_found,
+};
 
 #[derive(Clone)]
 pub struct AppState<S: Storage> {
@@ -32,6 +35,7 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
         .route("/state", get(chain_state::<S>))
         .route("/collections/:id", get(get_collection::<S>))
         .route("/collections", get(list_collections::<S>))
+        .route("/addresses/:address/assets", get(get_address_assets::<S>))
         .route(
             "/collections/:collection_id/tokens/:token_id",
             get(get_token_owner::<S>),

@@ -44,7 +44,7 @@ pub struct Cli {
     #[arg(
         long,
         default_value_t = false,
-        help = "Reset all persisted state (delete the SQLite database) before starting"
+        help = "Delete the scanner SQLite index (brc721.sqlite) before starting"
     )]
     pub reset: bool,
 

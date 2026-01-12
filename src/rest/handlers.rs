@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use ethereum_types::U256;
+use ethereum_types::{H160, U256};
 
 use crate::{
     storage::{
@@ -18,8 +18,9 @@ use crate::{
 
 use super::{
     models::{
-        ChainStateResponse, CollectionResponse, CollectionsResponse, ErrorResponse, HealthResponse,
-        LastBlock, OwnershipStatus, TokenOwnerResponse,
+        AddressAssetsResponse, ChainStateResponse, CollectionResponse, CollectionsResponse,
+        ErrorResponse, HealthResponse, LastBlock, OwnershipStatus, OwnershipUtxoResponse,
+        SlotRangeResponse, TokenOwnerResponse,
     },
     AppState,
 };
@@ -116,13 +117,125 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         }
     };
 
-    let owner_h160 = format_owner_h160(&token);
+    let token_id = format_token_id(&token);
+    let initial_owner_h160 = format_owner_h160(&token);
 
-    Json(TokenOwnerResponse {
-        collection_id: key.to_string(),
-        token_id: format_token_id(&token),
-        ownership_status: OwnershipStatus::InitialOwner,
-        owner_h160,
+    match state.storage.find_unspent_ownership_utxo_for_slot(
+        &key,
+        token.h160_address(),
+        token.slot_number(),
+    ) {
+        Ok(Some(utxo)) => Json(TokenOwnerResponse {
+            collection_id: key.to_string(),
+            token_id,
+            ownership_status: OwnershipStatus::RegisteredOwner,
+            owner_h160: format!("{:#x}", utxo.owner_h160),
+        })
+        .into_response(),
+        Ok(None) => Json(TokenOwnerResponse {
+            collection_id: key.to_string(),
+            token_id,
+            ownership_status: OwnershipStatus::InitialOwner,
+            owner_h160: initial_owner_h160,
+        })
+        .into_response(),
+        Err(err) => {
+            log::error!(
+                "Failed to resolve token owner for collection {} token {}: {:?}",
+                key,
+                token_id,
+                err
+            );
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    use bitcoin::hashes::{hash160, Hash};
+
+    let address = match bitcoin::Address::from_str(&address) {
+        Ok(address) => address.assume_checked(),
+        Err(err) => {
+            log::warn!("Invalid address {}: {}", address, err);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    message: "invalid address".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let script_pubkey = address.script_pubkey();
+    let hash = hash160::Hash::hash(script_pubkey.as_bytes());
+    let owner_h160 = H160::from_slice(hash.as_byte_array());
+
+    let utxos = match state
+        .storage
+        .list_unspent_ownership_utxos_by_owner(owner_h160)
+    {
+        Ok(utxos) => utxos,
+        Err(err) => {
+            log::error!(
+                "Failed to list ownership UTXOs for address {}: {:?}",
+                address,
+                err
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut owned = Vec::with_capacity(utxos.len());
+    for utxo in utxos {
+        let ranges = match state
+            .storage
+            .list_ownership_ranges(&utxo.reg_txid, utxo.reg_vout)
+        {
+            Ok(ranges) => ranges,
+            Err(err) => {
+                log::error!(
+                    "Failed to list ownership ranges for outpoint {}:{}: {:?}",
+                    utxo.reg_txid,
+                    utxo.reg_vout,
+                    err
+                );
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+        owned.push(OwnershipUtxoResponse {
+            collection_id: utxo.collection_id.to_string(),
+            txid: utxo.reg_txid,
+            vout: utxo.reg_vout,
+            init_owner_h160: format!("{:#x}", utxo.base_h160),
+            created_height: utxo.created_height,
+            created_tx_index: utxo.created_tx_index,
+            slot_ranges: ranges
+                .into_iter()
+                .map(|range| SlotRangeResponse {
+                    start: range.slot_start.to_string(),
+                    end: range.slot_end.to_string(),
+                })
+                .collect(),
+        });
+    }
+
+    owned.sort_by(|a, b| {
+        a.collection_id
+            .cmp(&b.collection_id)
+            .then_with(|| a.txid.cmp(&b.txid))
+            .then_with(|| a.vout.cmp(&b.vout))
+    });
+
+    Json(AddressAssetsResponse {
+        address: address.to_string(),
+        address_h160: format!("{:#x}", owner_h160),
+        utxos: owned,
     })
     .into_response()
 }
@@ -204,7 +317,10 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::storage::{
-        traits::{Block, Collection, CollectionKey, StorageRead, StorageTx, StorageWrite},
+        traits::{
+            Block, Collection, CollectionKey, OwnershipRange, OwnershipUtxo, OwnershipUtxoSave,
+            StorageRead, StorageTx, StorageWrite,
+        },
         Storage,
     };
     use anyhow::anyhow;
@@ -249,7 +365,54 @@ mod tests {
 
         assert_eq!(payload.collection_id, collection_id);
         assert_eq!(payload.token_id, token_decimal);
+        assert!(matches!(
+            payload.ownership_status,
+            OwnershipStatus::InitialOwner
+        ));
         assert_eq!(payload.owner_h160, expected_owner_h160);
+    }
+
+    #[tokio::test]
+    async fn get_token_owner_returns_registered_owner_payload_when_registered() {
+        let collection = sample_collection();
+        let token = sample_token();
+        let token_decimal = format_token_id(&token);
+        let collection_id = collection.key.to_string();
+
+        let registered_owner = H160::from_low_u64_be(0x1234);
+        let utxo = OwnershipUtxo {
+            collection_id: collection.key.clone(),
+            reg_txid: "txid".to_string(),
+            reg_vout: 1,
+            owner_h160: registered_owner,
+            base_h160: token.h160_address(),
+            created_height: 840_001,
+            created_tx_index: 2,
+            spent_txid: None,
+            spent_height: None,
+            spent_tx_index: None,
+        };
+
+        let storage = TestStorage::with_collection(collection).with_ownership_utxo(
+            utxo,
+            vec![OwnershipRange {
+                slot_start: token.slot_number(),
+                slot_end: token.slot_number(),
+            }],
+        );
+
+        let response = issue_owner_request(storage, &collection_id, &token_decimal).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.token_id, token_decimal);
+        assert!(matches!(
+            payload.ownership_status,
+            OwnershipStatus::RegisteredOwner
+        ));
+        assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
     }
 
     #[tokio::test]
@@ -318,6 +481,8 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestStorage {
         collections: Arc<RwLock<Vec<Collection>>>,
+        ownership_utxos: Arc<RwLock<Vec<OwnershipUtxo>>>,
+        ownership_ranges: Arc<RwLock<Vec<(String, u32, OwnershipRange)>>>,
     }
 
     impl TestStorage {
@@ -328,6 +493,20 @@ mod tests {
                 guard.push(collection);
             }
             storage
+        }
+
+        fn with_ownership_utxo(self, utxo: OwnershipUtxo, ranges: Vec<OwnershipRange>) -> Self {
+            {
+                let mut guard = self.ownership_utxos.write().unwrap();
+                guard.push(utxo.clone());
+            }
+            {
+                let mut guard = self.ownership_ranges.write().unwrap();
+                for range in ranges {
+                    guard.push((utxo.reg_txid.clone(), utxo.reg_vout, range));
+                }
+            }
+            self
         }
     }
 
@@ -343,6 +522,62 @@ mod tests {
 
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Ok(self.collections.read().unwrap().clone())
+        }
+
+        fn list_ownership_ranges(
+            &self,
+            reg_txid: &str,
+            reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            let ranges = self.ownership_ranges.read().unwrap();
+            Ok(ranges
+                .iter()
+                .filter(|(txid, vout, _)| txid == reg_txid && *vout == reg_vout)
+                .map(|(_, _, range)| range.clone())
+                .collect())
+        }
+
+        fn find_unspent_ownership_utxo_for_slot(
+            &self,
+            collection_id: &CollectionKey,
+            base_h160: H160,
+            slot: u128,
+        ) -> anyhow::Result<Option<OwnershipUtxo>> {
+            let utxos = self.ownership_utxos.read().unwrap();
+            let ranges = self.ownership_ranges.read().unwrap();
+            for utxo in utxos.iter() {
+                if &utxo.collection_id != collection_id {
+                    continue;
+                }
+                if utxo.base_h160 != base_h160 {
+                    continue;
+                }
+                if utxo.spent_txid.is_some() {
+                    continue;
+                }
+                let covers = ranges.iter().any(|(txid, vout, range)| {
+                    txid == &utxo.reg_txid
+                        && *vout == utxo.reg_vout
+                        && range.slot_start <= slot
+                        && range.slot_end >= slot
+                });
+                if covers {
+                    return Ok(Some(utxo.clone()));
+                }
+            }
+            Ok(None)
+        }
+
+        fn list_unspent_ownership_utxos_by_owner(
+            &self,
+            owner_h160: H160,
+        ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            let utxos = self.ownership_utxos.read().unwrap();
+            Ok(utxos
+                .iter()
+                .filter(|utxo| utxo.spent_txid.is_none() && utxo.owner_h160 == owner_h160)
+                .cloned()
+                .collect())
         }
     }
 
@@ -368,6 +603,30 @@ mod tests {
         fn list_collections(&self) -> anyhow::Result<Vec<Collection>> {
             Err(anyhow!("not implemented"))
         }
+
+        fn list_ownership_ranges(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipRange>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn find_unspent_ownership_utxo_for_slot(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot: u128,
+        ) -> anyhow::Result<Option<OwnershipUtxo>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn list_unspent_ownership_utxos_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Err(anyhow!("not implemented"))
+        }
     }
 
     impl StorageWrite for NoopTx {
@@ -380,6 +639,31 @@ mod tests {
             _key: CollectionKey,
             _evm_collection_address: H160,
             _rebaseable: bool,
+        ) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn save_ownership_utxo(&self, _utxo: OwnershipUtxoSave<'_>) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn save_ownership_range(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<()> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn mark_ownership_utxo_spent(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _spent_txid: &str,
+            _spent_height: u64,
+            _spent_tx_index: u32,
         ) -> anyhow::Result<()> {
             Err(anyhow!("not implemented"))
         }

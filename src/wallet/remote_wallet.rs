@@ -24,6 +24,16 @@ impl RemoteWallet {
         client.get_balances().context("get balance")
     }
 
+    pub fn list_unspent(&self, min_conf: u64) -> Result<Vec<json::ListUnspentResultEntry>> {
+        let client = self.watch_client()?;
+        let min_conf: usize = min_conf
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("min-conf out of range: {}", min_conf))?;
+        client
+            .list_unspent(Some(min_conf), None, None, Some(true), None)
+            .context("listunspent")
+    }
+
     pub fn rescan(&self) -> Result<()> {
         let client = self.watch_client()?;
         let mut params = Vec::new();

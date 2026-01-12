@@ -65,4 +65,24 @@ pub enum WalletCmd {
         long_about = "Detach the watch-only wallet from Bitcoin Core without deleting its data."
     )]
     Unload,
+    #[command(
+        about = "List indexed BRC-721 assets owned by this wallet",
+        long_about = "List indexed (unspent) BRC-721 ownership ranges owned by this wallet. Requires the scanner to have ingested the relevant blocks."
+    )]
+    Assets {
+        #[arg(
+            long,
+            help = "Print JSON to stdout instead of human-readable logs",
+            num_args(0),
+            default_value_t = false
+        )]
+        json: bool,
+        #[arg(
+            long = "asset-ids",
+            help = "Also print asset ids (TokenID) as base-10 decimals",
+            num_args(0),
+            default_value_t = false
+        )]
+        asset_ids: bool,
+    },
 }

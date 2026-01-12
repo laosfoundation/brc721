@@ -50,6 +50,32 @@ pub struct TokenOwnerResponse {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OwnershipStatus {
     InitialOwner,
-    #[allow(dead_code)]
     RegisteredOwner,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressAssetsResponse {
+    pub address: String,
+    pub address_h160: String,
+    pub utxos: Vec<OwnershipUtxoResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnershipUtxoResponse {
+    pub collection_id: String,
+    pub txid: String,
+    pub vout: u32,
+    pub init_owner_h160: String,
+    pub created_height: u64,
+    pub created_tx_index: u32,
+    pub slot_ranges: Vec<SlotRangeResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotRangeResponse {
+    pub start: String,
+    pub end: String,
 }
