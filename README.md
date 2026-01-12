@@ -17,4 +17,11 @@ This architecture ensures that the protocol follows an **always-on-chain approac
 
 For detailed operational instructions, setup steps, and protocol references, consult the [project wiki](https://github.com/laosfoundation/brc721/wiki).
 
+## Recovery (resetting the index)
+
+The daemon maintains a local SQLite index at `.brc721/<network>/brc721.sqlite`. If the index becomes inconsistent (e.g. after a breaking schema change, or to recover from indexing issues), you can rebuild it from scratch:
+
+- Run the daemon with `--reset` (this deletes the SQLite index and rescans): `brc721 --reset`
+- Or delete the file manually: `rm .brc721/<network>/brc721.sqlite`
+
 **Disclaimer:** This is experimental software released under the GPLv3 License (`LICENSE`) and comes with no warranties or guarantees of any kind.

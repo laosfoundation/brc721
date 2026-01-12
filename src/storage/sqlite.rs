@@ -485,6 +485,7 @@ impl Storage for SqliteStorage {
         let conn = Connection::open(&self.path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
 
         conn.execute("BEGIN IMMEDIATE", [])?;
@@ -535,6 +536,7 @@ impl SqliteStorage {
         let conn = Connection::open(&self.path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
 
         Self::migrate(&conn)?;
@@ -563,23 +565,31 @@ impl SqliteStorage {
             );
             CREATE TABLE ownership_utxos (
                 reg_txid TEXT NOT NULL,
-                reg_vout INTEGER NOT NULL,
+                reg_vout INTEGER NOT NULL CHECK (reg_vout >= 0),
                 collection_id TEXT NOT NULL,
                 owner_h160 TEXT NOT NULL,
                 base_h160 TEXT NOT NULL,
-                created_height INTEGER NOT NULL,
-                created_tx_index INTEGER NOT NULL,
+                created_height INTEGER NOT NULL CHECK (created_height >= 0),
+                created_tx_index INTEGER NOT NULL CHECK (created_tx_index >= 0),
                 spent_txid TEXT,
-                spent_height INTEGER,
-                spent_tx_index INTEGER,
-                PRIMARY KEY (reg_txid, reg_vout)
+                spent_height INTEGER CHECK (spent_height IS NULL OR spent_height >= 0),
+                spent_tx_index INTEGER CHECK (spent_tx_index IS NULL OR spent_tx_index >= 0),
+                PRIMARY KEY (reg_txid, reg_vout),
+                CHECK (
+                    (spent_txid IS NULL AND spent_height IS NULL AND spent_tx_index IS NULL)
+                    OR (spent_txid IS NOT NULL AND spent_height IS NOT NULL AND spent_tx_index IS NOT NULL)
+                )
             );
             CREATE TABLE ownership_ranges (
                 reg_txid TEXT NOT NULL,
-                reg_vout INTEGER NOT NULL,
-                slot_start BLOB NOT NULL,
-                slot_end BLOB NOT NULL,
-                PRIMARY KEY (reg_txid, reg_vout, slot_start, slot_end)
+                reg_vout INTEGER NOT NULL CHECK (reg_vout >= 0),
+                slot_start BLOB NOT NULL CHECK (length(slot_start) = 12),
+                slot_end BLOB NOT NULL CHECK (length(slot_end) = 12),
+                PRIMARY KEY (reg_txid, reg_vout, slot_start, slot_end),
+                CHECK (slot_start <= slot_end),
+                FOREIGN KEY (reg_txid, reg_vout)
+                    REFERENCES ownership_utxos(reg_txid, reg_vout)
+                    ON DELETE CASCADE
             );
             CREATE INDEX ownership_utxos_unspent_owner_idx
                 ON ownership_utxos(owner_h160)
