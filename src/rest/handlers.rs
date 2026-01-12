@@ -212,7 +212,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
             collection_id: utxo.collection_id.to_string(),
             txid: utxo.reg_txid,
             vout: utxo.reg_vout,
-            base_h160: format!("{:#x}", utxo.base_h160),
+            init_owner_h160: format!("{:#x}", utxo.base_h160),
             created_height: utxo.created_height,
             created_tx_index: utxo.created_tx_index,
             slot_ranges: ranges
@@ -234,7 +234,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
 
     Json(AddressAssetsResponse {
         address: address.to_string(),
-        owner_h160: format!("{:#x}", owner_h160),
+        address_h160: format!("{:#x}", owner_h160),
         utxos: owned,
     })
     .into_response()

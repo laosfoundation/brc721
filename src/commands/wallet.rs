@@ -140,6 +140,7 @@ struct OwnershipUtxoJson {
     collection_id: String,
     txid: String,
     vout: u32,
+    init_owner_h160: String,
     created_height: u64,
     created_tx_index: u32,
     slot_ranges: Vec<SlotRangeJson>,
@@ -151,7 +152,7 @@ struct OwnershipUtxoJson {
 #[serde(rename_all = "camelCase")]
 struct AddressAssetsJson {
     address: String,
-    owner_h160: String,
+    address_h160: String,
     utxos: Vec<OwnershipUtxoJson>,
 }
 
@@ -286,18 +287,18 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
             continue;
         }
 
-        let (owner_h160, owner_h160_raw) = {
+        let (address_h160, address_h160_raw) = {
             let hash = hash160::Hash::hash(utxo.script_pub_key.as_bytes());
             let h160 = H160::from_slice(hash.as_byte_array());
             (format!("{:#x}", h160), h160)
         };
 
-        if owner_h160_raw != ownership_utxo.owner_h160 {
+        if address_h160_raw != ownership_utxo.owner_h160 {
             log::warn!(
                 "Outpoint {}:{} ownerH160 mismatch (wallet={} db={:#x})",
                 txid,
                 vout,
-                owner_h160,
+                address_h160,
                 ownership_utxo.owner_h160
             );
         }
@@ -334,6 +335,7 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
             collection_id: ownership_utxo.collection_id.to_string(),
             txid: txid.clone(),
             vout,
+            init_owner_h160: format!("{:#x}", ownership_utxo.base_h160),
             created_height: ownership_utxo.created_height,
             created_tx_index: ownership_utxo.created_tx_index,
             slot_ranges,
@@ -342,14 +344,14 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
 
         let addr_entry = by_address
             .entry(address.clone())
-            .or_insert_with(|| (owner_h160.clone(), Vec::new()));
+            .or_insert_with(|| (address_h160.clone(), Vec::new()));
 
-        if addr_entry.0 != owner_h160 {
+        if addr_entry.0 != address_h160 {
             log::warn!(
-                "Address {} has inconsistent ownerH160 values: {} vs {}",
+                "Address {} has inconsistent addressH160 values: {} vs {}",
                 address,
                 addr_entry.0,
-                owner_h160
+                address_h160
             );
         }
 
@@ -358,7 +360,7 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
 
     let results = by_address
         .into_iter()
-        .map(|(address, (owner_h160, mut utxos))| {
+        .map(|(address, (address_h160, mut utxos))| {
             utxos.sort_by(|a, b| {
                 a.collection_id
                     .cmp(&b.collection_id)
@@ -367,7 +369,7 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
             });
             AddressAssetsJson {
                 address,
-                owner_h160,
+                address_h160,
                 utxos,
             }
         })
@@ -389,7 +391,7 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
     log::info!("🎨 Indexed BRC-721 assets (wallet_id={})", wallet.id());
 
     for entry in results {
-        log::info!("🏠 {} (ownerH160={})", entry.address, entry.owner_h160);
+        log::info!("🏠 {} (addressH160={})", entry.address, entry.address_h160);
         for utxo in entry.utxos {
             let ranges = utxo
                 .slot_ranges
@@ -401,10 +403,11 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
                 })
                 .collect::<Vec<_>>();
             log::info!(
-                "  - collection={} outpoint={}:{} created={}#{} slots={}",
+                "  - collection={} outpoint={}:{} initOwnerH160={} created={}#{} slots={}",
                 utxo.collection_id,
                 utxo.txid,
                 utxo.vout,
+                utxo.init_owner_h160,
                 utxo.created_height,
                 utxo.created_tx_index,
                 format_ranges(&ranges)
