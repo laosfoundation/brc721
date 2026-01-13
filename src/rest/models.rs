@@ -16,6 +16,8 @@ pub struct ChainStateResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CollectionResponse {
     pub id: String,
+    pub height: u64,
+    pub tx_index: u32,
     pub evm_collection_address: String,
     pub rebaseable: bool,
 }
@@ -41,9 +43,15 @@ pub struct LastBlock {
 #[serde(rename_all = "camelCase")]
 pub struct TokenOwnerResponse {
     pub collection_id: String,
+    pub height: u64,
+    pub tx_index: u32,
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
     pub owner_h160: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub txid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vout: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]

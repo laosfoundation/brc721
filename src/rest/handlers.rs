@@ -6,14 +6,14 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use ethereum_types::{H160, U256};
+use ethereum_types::U256;
 
 use crate::{
     storage::{
         traits::{Collection, CollectionKey},
         Storage,
     },
-    types::{Brc721Error, Brc721Token},
+    types::{h160_from_script_pubkey, Brc721Error, Brc721Token},
 };
 
 use super::{
@@ -127,16 +127,24 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
     ) {
         Ok(Some(utxo)) => Json(TokenOwnerResponse {
             collection_id: key.to_string(),
+            height: key.block_height,
+            tx_index: key.tx_index,
             token_id,
             ownership_status: OwnershipStatus::RegisteredOwner,
             owner_h160: format!("{:#x}", utxo.owner_h160),
+            txid: Some(utxo.reg_txid),
+            vout: Some(utxo.reg_vout),
         })
         .into_response(),
         Ok(None) => Json(TokenOwnerResponse {
             collection_id: key.to_string(),
+            height: key.block_height,
+            tx_index: key.tx_index,
             token_id,
             ownership_status: OwnershipStatus::InitialOwner,
             owner_h160: initial_owner_h160,
+            txid: None,
+            vout: None,
         })
         .into_response(),
         Err(err) => {
@@ -155,8 +163,6 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    use bitcoin::hashes::{hash160, Hash};
-
     let address = match bitcoin::Address::from_str(&address) {
         Ok(address) => address.assume_checked(),
         Err(err) => {
@@ -172,8 +178,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
     };
 
     let script_pubkey = address.script_pubkey();
-    let hash = hash160::Hash::hash(script_pubkey.as_bytes());
-    let owner_h160 = H160::from_slice(hash.as_byte_array());
+    let owner_h160 = h160_from_script_pubkey(&script_pubkey);
 
     let utxos = match state
         .storage
@@ -252,6 +257,8 @@ pub async fn not_found() -> impl IntoResponse {
 fn collection_to_response(collection: Collection) -> CollectionResponse {
     CollectionResponse {
         id: collection.key.to_string(),
+        height: collection.key.block_height,
+        tx_index: collection.key.tx_index,
         evm_collection_address: format!("{:#x}", collection.evm_collection_address),
         rebaseable: collection.rebaseable,
     }
@@ -364,12 +371,16 @@ mod tests {
         let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
 
         assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.height, collection.key.block_height);
+        assert_eq!(payload.tx_index, collection.key.tx_index);
         assert_eq!(payload.token_id, token_decimal);
         assert!(matches!(
             payload.ownership_status,
             OwnershipStatus::InitialOwner
         ));
         assert_eq!(payload.owner_h160, expected_owner_h160);
+        assert_eq!(payload.txid, None);
+        assert_eq!(payload.vout, None);
     }
 
     #[tokio::test]
@@ -393,7 +404,7 @@ mod tests {
             spent_tx_index: None,
         };
 
-        let storage = TestStorage::with_collection(collection).with_ownership_utxo(
+        let storage = TestStorage::with_collection(collection.clone()).with_ownership_utxo(
             utxo,
             vec![OwnershipRange {
                 slot_start: token.slot_number(),
@@ -407,12 +418,16 @@ mod tests {
         let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
 
         assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.height, collection.key.block_height);
+        assert_eq!(payload.tx_index, collection.key.tx_index);
         assert_eq!(payload.token_id, token_decimal);
         assert!(matches!(
             payload.ownership_status,
             OwnershipStatus::RegisteredOwner
         ));
         assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
+        assert_eq!(payload.txid.as_deref(), Some("txid"));
+        assert_eq!(payload.vout, Some(1));
     }
 
     #[tokio::test]
