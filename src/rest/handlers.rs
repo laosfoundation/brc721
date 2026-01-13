@@ -127,6 +127,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
     ) {
         Ok(Some(utxo)) => Json(TokenOwnerResponse {
             collection_id: key.to_string(),
+            height: key.block_height,
+            tx_index: key.tx_index,
             token_id,
             ownership_status: OwnershipStatus::RegisteredOwner,
             owner_h160: format!("{:#x}", utxo.owner_h160),
@@ -136,6 +138,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         .into_response(),
         Ok(None) => Json(TokenOwnerResponse {
             collection_id: key.to_string(),
+            height: key.block_height,
+            tx_index: key.tx_index,
             token_id,
             ownership_status: OwnershipStatus::InitialOwner,
             owner_h160: initial_owner_h160,
@@ -253,6 +257,8 @@ pub async fn not_found() -> impl IntoResponse {
 fn collection_to_response(collection: Collection) -> CollectionResponse {
     CollectionResponse {
         id: collection.key.to_string(),
+        height: collection.key.block_height,
+        tx_index: collection.key.tx_index,
         evm_collection_address: format!("{:#x}", collection.evm_collection_address),
         rebaseable: collection.rebaseable,
     }
@@ -365,6 +371,8 @@ mod tests {
         let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
 
         assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.height, collection.key.block_height);
+        assert_eq!(payload.tx_index, collection.key.tx_index);
         assert_eq!(payload.token_id, token_decimal);
         assert!(matches!(
             payload.ownership_status,
@@ -396,7 +404,7 @@ mod tests {
             spent_tx_index: None,
         };
 
-        let storage = TestStorage::with_collection(collection).with_ownership_utxo(
+        let storage = TestStorage::with_collection(collection.clone()).with_ownership_utxo(
             utxo,
             vec![OwnershipRange {
                 slot_start: token.slot_number(),
@@ -410,6 +418,8 @@ mod tests {
         let payload: TokenOwnerResponse = serde_json::from_slice(&body_bytes).unwrap();
 
         assert_eq!(payload.collection_id, collection_id);
+        assert_eq!(payload.height, collection.key.block_height);
+        assert_eq!(payload.tx_index, collection.key.tx_index);
         assert_eq!(payload.token_id, token_decimal);
         assert!(matches!(
             payload.ownership_status,
