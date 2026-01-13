@@ -1,13 +1,9 @@
 use crate::bitcoin_rpc::BitcoinRpc;
 use crate::storage::traits::{CollectionKey, OwnershipUtxoSave, StorageRead, StorageWrite};
-use crate::types::{Brc721Error, Brc721Token, Brc721Tx, RegisterOwnershipData};
-use bitcoin::hashes::{hash160, Hash};
+use crate::types::{
+    h160_from_script_pubkey, Brc721Error, Brc721Token, Brc721Tx, RegisterOwnershipData,
+};
 use ethereum_types::H160;
-
-fn h160_from_script_pubkey(script_pubkey: &bitcoin::ScriptBuf) -> H160 {
-    let hash = hash160::Hash::hash(script_pubkey.as_bytes());
-    H160::from_slice(hash.as_byte_array())
-}
 
 fn try_base_h160_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R) -> Option<H160> {
     let input0 = brc721_tx.input0()?;

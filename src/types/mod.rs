@@ -19,3 +19,10 @@ pub use register_collection::RegisterCollectionData;
 pub use register_ownership::{RegisterOwnershipData, SlotRanges};
 
 pub const BRC721_CODE: opcodes::Opcode = opcodes::all::OP_PUSHNUM_15;
+
+pub(crate) fn h160_from_script_pubkey(script_pubkey: &bitcoin::ScriptBuf) -> ethereum_types::H160 {
+    use bitcoin::hashes::{hash160, Hash};
+
+    let hash = hash160::Hash::hash(script_pubkey.as_bytes());
+    ethereum_types::H160::from_slice(hash.as_byte_array())
+}

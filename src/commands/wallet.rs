@@ -1,4 +1,5 @@
 use super::CommandRunner;
+use crate::types::h160_from_script_pubkey;
 use crate::wallet::brc721_wallet::Brc721Wallet;
 use crate::wallet::local_wallet::LocalWallet;
 use crate::wallet::passphrase::prompt_passphrase;
@@ -96,8 +97,6 @@ struct WalletAddressesJson {
 }
 
 fn run_addresses(ctx: &context::Context, json: bool) -> Result<()> {
-    use bitcoin::hashes::{hash160, Hash};
-
     let wallet = load_local_wallet(ctx)?;
     let addresses = wallet.revealed_payment_addresses();
 
@@ -105,8 +104,7 @@ fn run_addresses(ctx: &context::Context, json: bool) -> Result<()> {
         .into_iter()
         .map(|address| {
             let script_pubkey = address.address.script_pubkey();
-            let hash = hash160::Hash::hash(script_pubkey.as_bytes());
-            let address_h160 = H160::from_slice(hash.as_byte_array());
+            let address_h160 = h160_from_script_pubkey(&script_pubkey);
 
             WalletAddressJson {
                 index: address.index,
@@ -307,8 +305,6 @@ fn format_ranges(ranges: &[(u128, u128)]) -> String {
 }
 
 fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()> {
-    use bitcoin::hashes::{hash160, Hash};
-
     let db_path = ctx.data_dir.join("brc721.sqlite");
     if !db_path.exists() {
         if json {
@@ -353,11 +349,8 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
             continue;
         }
 
-        let (address_h160, address_h160_raw) = {
-            let hash = hash160::Hash::hash(utxo.script_pub_key.as_bytes());
-            let h160 = H160::from_slice(hash.as_byte_array());
-            (format!("{:#x}", h160), h160)
-        };
+        let address_h160_raw = h160_from_script_pubkey(&utxo.script_pub_key);
+        let address_h160 = format!("{:#x}", address_h160_raw);
 
         if address_h160_raw != ownership_utxo.owner_h160 {
             log::warn!(

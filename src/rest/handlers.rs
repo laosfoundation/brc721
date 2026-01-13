@@ -6,14 +6,14 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use ethereum_types::{H160, U256};
+use ethereum_types::U256;
 
 use crate::{
     storage::{
         traits::{Collection, CollectionKey},
         Storage,
     },
-    types::{Brc721Error, Brc721Token},
+    types::{h160_from_script_pubkey, Brc721Error, Brc721Token},
 };
 
 use super::{
@@ -159,8 +159,6 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    use bitcoin::hashes::{hash160, Hash};
-
     let address = match bitcoin::Address::from_str(&address) {
         Ok(address) => address.assume_checked(),
         Err(err) => {
@@ -176,8 +174,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
     };
 
     let script_pubkey = address.script_pubkey();
-    let hash = hash160::Hash::hash(script_pubkey.as_bytes());
-    let owner_h160 = H160::from_slice(hash.as_byte_array());
+    let owner_h160 = h160_from_script_pubkey(&script_pubkey);
 
     let utxos = match state
         .storage
