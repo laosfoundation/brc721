@@ -44,6 +44,10 @@ pub struct TokenOwnerResponse {
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
     pub owner_h160: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub txid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vout: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]

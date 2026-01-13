@@ -130,6 +130,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             token_id,
             ownership_status: OwnershipStatus::RegisteredOwner,
             owner_h160: format!("{:#x}", utxo.owner_h160),
+            txid: Some(utxo.reg_txid),
+            vout: Some(utxo.reg_vout),
         })
         .into_response(),
         Ok(None) => Json(TokenOwnerResponse {
@@ -137,6 +139,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             token_id,
             ownership_status: OwnershipStatus::InitialOwner,
             owner_h160: initial_owner_h160,
+            txid: None,
+            vout: None,
         })
         .into_response(),
         Err(err) => {
@@ -370,6 +374,8 @@ mod tests {
             OwnershipStatus::InitialOwner
         ));
         assert_eq!(payload.owner_h160, expected_owner_h160);
+        assert_eq!(payload.txid, None);
+        assert_eq!(payload.vout, None);
     }
 
     #[tokio::test]
@@ -413,6 +419,8 @@ mod tests {
             OwnershipStatus::RegisteredOwner
         ));
         assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
+        assert_eq!(payload.txid.as_deref(), Some("txid"));
+        assert_eq!(payload.vout, Some(1));
     }
 
     #[tokio::test]
