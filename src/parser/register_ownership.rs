@@ -193,7 +193,14 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
             }
 
             storage
-                .save_ownership_range(&txid, reg_vout, range.start, range.end)
+                .save_ownership_range(
+                    &txid,
+                    reg_vout,
+                    &collection_key,
+                    base_h160,
+                    range.start,
+                    range.end,
+                )
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         }
     }

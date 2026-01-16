@@ -332,35 +332,15 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
         let txid = utxo.txid.to_string();
         let vout = utxo.vout;
 
-        let Some((ownership_utxo, ranges)) = storage
-            .load_ownership_utxo_with_ranges_by_outpoint(&txid, vout)
-            .with_context(|| format!("query ownership ranges for {txid}:{vout}"))?
-        else {
-            continue;
-        };
-
-        if let Some(spent_txid) = ownership_utxo.spent_txid.as_deref() {
-            log::warn!(
-                "Skipping ownership outpoint {}:{} marked spent in DB (spent_by={})",
-                txid,
-                vout,
-                spent_txid
-            );
+        let groups = storage
+            .load_unspent_ownership_utxos_with_ranges_by_outpoint(&txid, vout)
+            .with_context(|| format!("query ownership ranges for {txid}:{vout}"))?;
+        if groups.is_empty() {
             continue;
         }
 
         let address_h160_raw = h160_from_script_pubkey(&utxo.script_pub_key);
         let address_h160 = format!("{:#x}", address_h160_raw);
-
-        if address_h160_raw != ownership_utxo.owner_h160 {
-            log::warn!(
-                "Outpoint {}:{} ownerH160 mismatch (wallet={} db={:#x})",
-                txid,
-                vout,
-                address_h160,
-                ownership_utxo.owner_h160
-            );
-        }
 
         let address = bitcoin::Address::from_script(&utxo.script_pub_key, ctx.network)
             .ok()
@@ -375,32 +355,6 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
                 format!("<unknown:{}>", hex::encode(utxo.script_pub_key.as_bytes()))
             });
 
-        let ranges = merge_ranges(
-            ranges
-                .iter()
-                .map(|range| (range.slot_start, range.slot_end))
-                .collect(),
-        );
-
-        let slot_ranges = ranges
-            .iter()
-            .map(|(start, end)| SlotRangeJson {
-                start: start.to_string(),
-                end: end.to_string(),
-            })
-            .collect::<Vec<_>>();
-
-        let utxo_entry = OwnershipUtxoJson {
-            collection_id: ownership_utxo.collection_id.to_string(),
-            txid: txid.clone(),
-            vout,
-            init_owner_h160: format!("{:#x}", ownership_utxo.base_h160),
-            created_height: ownership_utxo.created_height,
-            created_tx_index: ownership_utxo.created_tx_index,
-            slot_ranges,
-            asset_ids: asset_ids.then(|| asset_ids_for_ranges(&ranges, ownership_utxo.base_h160)),
-        };
-
         let addr_entry = by_address
             .entry(address.clone())
             .or_insert_with(|| (address_h160.clone(), Vec::new()));
@@ -414,7 +368,56 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
             );
         }
 
-        addr_entry.1.push(utxo_entry);
+        for (ownership_utxo, ranges) in groups {
+            if let Some(spent_txid) = ownership_utxo.spent_txid.as_deref() {
+                log::warn!(
+                    "Skipping ownership outpoint {}:{} marked spent in DB (spent_by={})",
+                    txid,
+                    vout,
+                    spent_txid
+                );
+                continue;
+            }
+
+            if address_h160_raw != ownership_utxo.owner_h160 {
+                log::warn!(
+                    "Outpoint {}:{} ownerH160 mismatch (wallet={} db={:#x})",
+                    txid,
+                    vout,
+                    address_h160,
+                    ownership_utxo.owner_h160
+                );
+            }
+
+            let merged_ranges = merge_ranges(
+                ranges
+                    .iter()
+                    .map(|range| (range.slot_start, range.slot_end))
+                    .collect(),
+            );
+
+            let slot_ranges = merged_ranges
+                .iter()
+                .map(|(start, end)| SlotRangeJson {
+                    start: start.to_string(),
+                    end: end.to_string(),
+                })
+                .collect::<Vec<_>>();
+
+            let utxo_entry = OwnershipUtxoJson {
+                collection_id: ownership_utxo.collection_id.to_string(),
+                txid: txid.clone(),
+                vout,
+                init_owner_h160: format!("{:#x}", ownership_utxo.base_h160),
+                created_height: ownership_utxo.created_height,
+                created_tx_index: ownership_utxo.created_tx_index,
+                slot_ranges,
+                asset_ids: asset_ids
+                    .then(|| asset_ids_for_ranges(&merged_ranges, ownership_utxo.base_h160)),
+            };
+
+            addr_entry.1.push(utxo_entry);
+        }
     }
 
     let results = by_address

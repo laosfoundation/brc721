@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
-use bitcoin::{Address, ScriptBuf, Transaction, TxOut};
-use bitcoin::{Amount, Psbt};
+use bitcoin::Psbt;
+use bitcoin::{Address, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use bitcoincore_rpc::{json, Auth, Client, RpcApi};
+use serde::Deserialize;
+use std::collections::BTreeSet;
 use url::Url;
 
 pub struct RemoteWallet {
@@ -200,6 +202,71 @@ impl RemoteWallet {
         Ok(psbt)
     }
 
+    pub fn create_psbt_for_implicit_transfer(
+        &self,
+        token_inputs: &[OutPoint],
+        target_address: &Address,
+        amount_per_output: Amount,
+        fee_rate: Option<f64>,
+    ) -> Result<Psbt> {
+        let client = self.watch_client()?;
+        let (inputs, outputs, options) = walletcreatefundedpsbt_params_for_implicit_transfer(
+            token_inputs,
+            target_address,
+            amount_per_output,
+            fee_rate,
+        );
+
+        let funded: serde_json::Value = client
+            .call(
+                "walletcreatefundedpsbt",
+                &[
+                    inputs,
+                    outputs,
+                    serde_json::json!(0),
+                    options,
+                    serde_json::json!(true),
+                ],
+            )
+            .context("walletcreatefundedpsbt (implicit transfer)")?;
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        let psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
+        Ok(psbt)
+    }
+
+    pub fn list_locked_unspent(&self) -> Result<BTreeSet<OutPoint>> {
+        let client = self.watch_client()?;
+        let locked: Vec<LockedOutpoint> = client
+            .call("listlockunspent", &[])
+            .context("listlockunspent")?;
+
+        Ok(locked
+            .into_iter()
+            .map(|op| OutPoint {
+                txid: op.txid,
+                vout: op.vout,
+            })
+            .collect())
+    }
+
+    pub fn lock_unspent_outpoints(&self, outpoints: &[OutPoint]) -> Result<()> {
+        if outpoints.is_empty() {
+            return Ok(());
+        }
+        self.lockunspent(false, outpoints)
+            .context("lock outpoints")?;
+        Ok(())
+    }
+
+    pub fn unlock_unspent_outpoints(&self, outpoints: &[OutPoint]) -> Result<()> {
+        if outpoints.is_empty() {
+            return Ok(());
+        }
+        self.lockunspent(true, outpoints)
+            .context("unlock outpoints")?;
+        Ok(())
+    }
+
     pub fn create_psbt_from_txout(&self, output: TxOut, fee_rate: Option<f64>) -> Result<Psbt> {
         let client = self.watch_client()?;
 
@@ -312,6 +379,62 @@ impl RemoteWallet {
                 .unwrap_or(false)
         }))
     }
+
+    fn lockunspent(&self, unlock: bool, outpoints: &[OutPoint]) -> Result<()> {
+        let client = self.watch_client()?;
+        let ops = serde_json::Value::Array(outpoints.iter().map(outpoint_json).collect());
+        let ok: bool = client
+            .call("lockunspent", &[serde_json::json!(unlock), ops])
+            .context("lockunspent")?;
+        if !ok {
+            return Err(anyhow::anyhow!("lockunspent returned false"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LockedOutpoint {
+    txid: bitcoin::Txid,
+    vout: u32,
+}
+
+fn outpoint_json(outpoint: &OutPoint) -> serde_json::Value {
+    serde_json::json!({
+        "txid": outpoint.txid.to_string(),
+        "vout": outpoint.vout,
+    })
+}
+
+fn walletcreatefundedpsbt_params_for_implicit_transfer(
+    token_inputs: &[OutPoint],
+    target_address: &Address,
+    amount_per_output: Amount,
+    fee_rate: Option<f64>,
+) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+    let inputs = serde_json::Value::Array(token_inputs.iter().map(outpoint_json).collect());
+
+    let mut outputs_vec = Vec::with_capacity(token_inputs.len());
+    for _ in token_inputs {
+        outputs_vec.push(serde_json::json!({
+            target_address.to_string(): amount_per_output.to_btc()
+        }));
+    }
+    let change_position = outputs_vec.len();
+    let outputs = serde_json::Value::Array(outputs_vec);
+
+    let mut options = serde_json::json!({});
+    if let Some(fr) = fee_rate {
+        options["fee_rate"] = serde_json::json!(fr);
+    }
+    // We preselect the token UTXOs as mandatory inputs, but still need Core to add extra inputs
+    // (regular BTC UTXOs) to fund fees.
+    options["add_inputs"] = serde_json::json!(true);
+    // Ensure change is appended after all asset-carrying outputs so implicit transfer mapping
+    // sends the NFTs to the requested address outputs.
+    options["changePosition"] = serde_json::json!(change_position);
+
+    (inputs, outputs, options)
 }
 
 fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
@@ -426,6 +549,7 @@ mod tests {
         script::{Builder, PushBytesBuf},
         Network,
     };
+    use std::str::FromStr;
 
     fn create_wallet() -> Wallet {
         // Parse the deterministic 12-word BIP39 mnemonic seed phrase.
@@ -474,6 +598,36 @@ mod tests {
         remote_wallet
             .create_psbt_from_txout(output, None)
             .expect("psbt");
+    }
+
+    #[test]
+    fn walletcreatefundedpsbt_params_for_implicit_transfer_sets_change_position() {
+        let token_inputs = vec![
+            OutPoint {
+                txid: bitcoin::Txid::from_str(&"00".repeat(32)).unwrap(),
+                vout: 1,
+            },
+            OutPoint {
+                txid: bitcoin::Txid::from_str(&"11".repeat(32)).unwrap(),
+                vout: 7,
+            },
+        ];
+        let address = Address::from_str("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh")
+            .unwrap()
+            .require_network(Network::Bitcoin)
+            .unwrap();
+
+        let (inputs, outputs, options) = walletcreatefundedpsbt_params_for_implicit_transfer(
+            &token_inputs,
+            &address,
+            Amount::from_sat(546),
+            Some(12.3),
+        );
+
+        assert_eq!(inputs.as_array().unwrap().len(), 2);
+        assert_eq!(outputs.as_array().unwrap().len(), 2);
+        assert_eq!(options["changePosition"].as_u64().unwrap(), 2);
+        assert_eq!(options["fee_rate"].as_f64().unwrap(), 12.3);
     }
 
     #[test]
