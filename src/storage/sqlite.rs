@@ -11,7 +11,7 @@ use super::{
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 4;
+const DB_SCHEMA_VERSION: i64 = 5;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -212,41 +212,54 @@ fn map_ownership_range_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ownershi
     })
 }
 
-fn db_load_ownership_utxo(
+fn db_list_unspent_ownership_utxos_by_outpoint(
     conn: &Connection,
     reg_txid: &str,
     reg_vout: u32,
-) -> rusqlite::Result<Option<OwnershipUtxo>> {
-    conn.query_row(
+) -> rusqlite::Result<Vec<OwnershipUtxo>> {
+    let mut stmt = conn.prepare(
         r#"
         SELECT
             collection_id, reg_txid, reg_vout, owner_h160, base_h160,
             created_height, created_tx_index,
             spent_txid, spent_height, spent_tx_index
         FROM ownership_utxos
-        WHERE reg_txid = ?1 AND reg_vout = ?2
+        WHERE reg_txid = ?1 AND reg_vout = ?2 AND spent_txid IS NULL
+        ORDER BY collection_id, base_h160
         "#,
-        params![reg_txid, reg_vout as i64],
-        map_ownership_utxo_row,
-    )
-    .optional()
+    )?;
+    let mapped = stmt
+        .query_map(params![reg_txid, reg_vout as i64], map_ownership_utxo_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(mapped)
 }
 
 fn db_list_ownership_ranges(
     conn: &Connection,
-    reg_txid: &str,
-    reg_vout: u32,
+    utxo: &OwnershipUtxo,
 ) -> rusqlite::Result<Vec<OwnershipRange>> {
     let mut stmt = conn.prepare(
         r#"
         SELECT slot_start, slot_end
         FROM ownership_ranges
-        WHERE reg_txid = ?1 AND reg_vout = ?2
+        WHERE
+            reg_txid = ?1
+            AND reg_vout = ?2
+            AND collection_id = ?3
+            AND base_h160 = ?4
         ORDER BY slot_start, slot_end
         "#,
     )?;
     let mapped = stmt
-        .query_map(params![reg_txid, reg_vout as i64], map_ownership_range_row)?
+        .query_map(
+            params![
+                utxo.reg_txid,
+                utxo.reg_vout as i64,
+                utxo.collection_id.to_string(),
+                format!("0x{:x}", utxo.base_h160)
+            ],
+            map_ownership_range_row,
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(mapped)
 }
@@ -266,7 +279,10 @@ fn db_find_unspent_ownership_utxo_for_slot(
             u.spent_txid, u.spent_height, u.spent_tx_index
         FROM ownership_utxos u
         JOIN ownership_ranges r
-            ON r.reg_txid = u.reg_txid AND r.reg_vout = u.reg_vout
+            ON r.reg_txid = u.reg_txid
+            AND r.reg_vout = u.reg_vout
+            AND r.collection_id = u.collection_id
+            AND r.base_h160 = u.base_h160
         WHERE
             u.collection_id = ?1
             AND u.base_h160 = ?2
@@ -298,7 +314,7 @@ fn db_list_unspent_ownership_utxos_by_owner(
             spent_txid, spent_height, spent_tx_index
         FROM ownership_utxos
         WHERE owner_h160 = ?1 AND spent_txid IS NULL
-        ORDER BY collection_id, reg_txid, reg_vout
+        ORDER BY collection_id, reg_txid, reg_vout, base_h160
         "#,
     )?;
 
@@ -317,7 +333,7 @@ fn db_save_ownership_utxo(conn: &Connection, utxo: OwnershipUtxoSave<'_>) -> rus
         INSERT INTO ownership_utxos (
             collection_id, reg_txid, reg_vout, owner_h160, base_h160, created_height, created_tx_index
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        ON CONFLICT(reg_txid, reg_vout) DO NOTHING
+        ON CONFLICT(reg_txid, reg_vout, collection_id, base_h160) DO NOTHING
         "#,
         params![
             utxo.collection_id.to_string(),
@@ -336,6 +352,8 @@ fn db_save_ownership_range(
     conn: &Connection,
     reg_txid: &str,
     reg_vout: u32,
+    collection_id: &CollectionKey,
+    base_h160: H160,
     slot_start: u128,
     slot_end: u128,
 ) -> rusqlite::Result<()> {
@@ -344,13 +362,15 @@ fn db_save_ownership_range(
     conn.execute(
         r#"
         INSERT INTO ownership_ranges (
-            reg_txid, reg_vout, slot_start, slot_end
-        ) VALUES (?1, ?2, ?3, ?4)
-        ON CONFLICT(reg_txid, reg_vout, slot_start, slot_end) DO NOTHING
+            reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end) DO NOTHING
         "#,
         params![
             reg_txid,
             reg_vout as i64,
+            collection_id.to_string(),
+            format!("0x{:x}", base_h160),
             start_blob.as_slice(),
             end_blob.as_slice()
         ],
@@ -396,8 +416,18 @@ impl StorageRead for SqliteTx {
         Ok(db_list_collections(&self.conn)?)
     }
 
-    fn list_ownership_ranges(&self, reg_txid: &str, reg_vout: u32) -> Result<Vec<OwnershipRange>> {
-        Ok(db_list_ownership_ranges(&self.conn, reg_txid, reg_vout)?)
+    fn list_unspent_ownership_utxos_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<OwnershipUtxo>> {
+        Ok(db_list_unspent_ownership_utxos_by_outpoint(
+            &self.conn, reg_txid, reg_vout,
+        )?)
+    }
+
+    fn list_ownership_ranges(&self, utxo: &OwnershipUtxo) -> Result<Vec<OwnershipRange>> {
+        Ok(db_list_ownership_ranges(&self.conn, utxo)?)
     }
 
     fn find_unspent_ownership_utxo_for_slot(
@@ -451,11 +481,19 @@ impl StorageWrite for SqliteTx {
         &self,
         reg_txid: &str,
         reg_vout: u32,
+        collection_id: &CollectionKey,
+        base_h160: H160,
         slot_start: u128,
         slot_end: u128,
     ) -> Result<()> {
         Ok(db_save_ownership_range(
-            &self.conn, reg_txid, reg_vout, slot_start, slot_end,
+            &self.conn,
+            reg_txid,
+            reg_vout,
+            collection_id,
+            base_h160,
+            slot_start,
+            slot_end,
         )?)
     }
 
@@ -501,18 +539,19 @@ impl SqliteStorage {
         }
     }
 
-    pub fn load_ownership_utxo_with_ranges_by_outpoint(
+    pub fn load_unspent_ownership_utxos_with_ranges_by_outpoint(
         &self,
         reg_txid: &str,
         reg_vout: u32,
-    ) -> Result<Option<(OwnershipUtxo, Vec<OwnershipRange>)>> {
+    ) -> Result<Vec<(OwnershipUtxo, Vec<OwnershipRange>)>> {
         Ok(self.with_conn(|conn| {
-            let utxo = db_load_ownership_utxo(conn, reg_txid, reg_vout)?;
-            let Some(utxo) = utxo else {
-                return Ok(None);
-            };
-            let ranges = db_list_ownership_ranges(conn, reg_txid, reg_vout)?;
-            Ok(Some((utxo, ranges)))
+            let utxos = db_list_unspent_ownership_utxos_by_outpoint(conn, reg_txid, reg_vout)?;
+            let mut out = Vec::with_capacity(utxos.len());
+            for utxo in utxos {
+                let ranges = db_list_ownership_ranges(conn, &utxo)?;
+                out.push((utxo, ranges));
+            }
+            Ok(out)
         })?)
     }
 
@@ -574,7 +613,7 @@ impl SqliteStorage {
                 spent_txid TEXT,
                 spent_height INTEGER CHECK (spent_height IS NULL OR spent_height >= 0),
                 spent_tx_index INTEGER CHECK (spent_tx_index IS NULL OR spent_tx_index >= 0),
-                PRIMARY KEY (reg_txid, reg_vout),
+                PRIMARY KEY (reg_txid, reg_vout, collection_id, base_h160),
                 CHECK (
                     (spent_txid IS NULL AND spent_height IS NULL AND spent_tx_index IS NULL)
                     OR (spent_txid IS NOT NULL AND spent_height IS NOT NULL AND spent_tx_index IS NOT NULL)
@@ -583,12 +622,14 @@ impl SqliteStorage {
             CREATE TABLE ownership_ranges (
                 reg_txid TEXT NOT NULL,
                 reg_vout INTEGER NOT NULL CHECK (reg_vout >= 0),
+                collection_id TEXT NOT NULL,
+                base_h160 TEXT NOT NULL,
                 slot_start BLOB NOT NULL CHECK (length(slot_start) = 12),
                 slot_end BLOB NOT NULL CHECK (length(slot_end) = 12),
-                PRIMARY KEY (reg_txid, reg_vout, slot_start, slot_end),
+                PRIMARY KEY (reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end),
                 CHECK (slot_start <= slot_end),
-                FOREIGN KEY (reg_txid, reg_vout)
-                    REFERENCES ownership_utxos(reg_txid, reg_vout)
+                FOREIGN KEY (reg_txid, reg_vout, collection_id, base_h160)
+                    REFERENCES ownership_utxos(reg_txid, reg_vout, collection_id, base_h160)
                     ON DELETE CASCADE
             );
             CREATE INDEX ownership_utxos_unspent_owner_idx
@@ -597,8 +638,8 @@ impl SqliteStorage {
             CREATE INDEX ownership_utxos_unspent_collection_base_idx
                 ON ownership_utxos(collection_id, base_h160)
                 WHERE spent_txid IS NULL;
-            CREATE INDEX ownership_ranges_outpoint_idx
-                ON ownership_ranges(reg_txid, reg_vout);
+            CREATE INDEX ownership_ranges_group_idx
+                ON ownership_ranges(reg_txid, reg_vout, collection_id, base_h160);
         "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
@@ -635,8 +676,19 @@ impl StorageRead for SqliteStorage {
         Ok(rows)
     }
 
-    fn list_ownership_ranges(&self, reg_txid: &str, reg_vout: u32) -> Result<Vec<OwnershipRange>> {
-        let rows = self.with_conn(|conn| db_list_ownership_ranges(conn, reg_txid, reg_vout))?;
+    fn list_unspent_ownership_utxos_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<OwnershipUtxo>> {
+        let rows = self.with_conn(|conn| {
+            db_list_unspent_ownership_utxos_by_outpoint(conn, reg_txid, reg_vout)
+        })?;
+        Ok(rows)
+    }
+
+    fn list_ownership_ranges(&self, utxo: &OwnershipUtxo) -> Result<Vec<OwnershipRange>> {
+        let rows = self.with_conn(|conn| db_list_ownership_ranges(conn, utxo))?;
         Ok(rows)
     }
 
@@ -898,8 +950,10 @@ mod tests {
             created_tx_index: 3,
         })
         .unwrap();
-        tx.save_ownership_range("txid_a", 1, 0, 9).unwrap();
-        tx.save_ownership_range("txid_a", 1, 10, 19).unwrap();
+        tx.save_ownership_range("txid_a", 1, &collection_id, base_h160, 0, 9)
+            .unwrap();
+        tx.save_ownership_range("txid_a", 1, &collection_id, base_h160, 10, 19)
+            .unwrap();
 
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
@@ -911,27 +965,28 @@ mod tests {
             created_tx_index: 4,
         })
         .unwrap();
-        tx.save_ownership_range("txid_b", 2, 42, 42).unwrap();
+        tx.save_ownership_range("txid_b", 2, &collection_id, base_h160, 42, 42)
+            .unwrap();
         tx.commit().unwrap();
 
-        let entry_a = repo
-            .load_ownership_utxo_with_ranges_by_outpoint("txid_a", 1)
-            .unwrap()
-            .expect("expected ownership utxo");
-        assert_eq!(entry_a.0.collection_id, collection_id);
-        assert_eq!(entry_a.0.owner_h160, owner_h160);
-        assert_eq!(entry_a.0.base_h160, base_h160);
-        assert_eq!(entry_a.1.len(), 2);
+        let entries_a = repo
+            .load_unspent_ownership_utxos_with_ranges_by_outpoint("txid_a", 1)
+            .unwrap();
+        assert_eq!(entries_a.len(), 1);
+        assert_eq!(entries_a[0].0.collection_id, collection_id);
+        assert_eq!(entries_a[0].0.owner_h160, owner_h160);
+        assert_eq!(entries_a[0].0.base_h160, base_h160);
+        assert_eq!(entries_a[0].1.len(), 2);
 
-        let entry_b = repo
-            .load_ownership_utxo_with_ranges_by_outpoint("txid_b", 2)
-            .unwrap()
-            .expect("expected ownership utxo");
-        assert_eq!(entry_b.1.len(), 1);
+        let entries_b = repo
+            .load_unspent_ownership_utxos_with_ranges_by_outpoint("txid_b", 2)
+            .unwrap();
+        assert_eq!(entries_b.len(), 1);
+        assert_eq!(entries_b[0].1.len(), 1);
 
         let none = repo
-            .load_ownership_utxo_with_ranges_by_outpoint("txid_a", 0)
+            .load_unspent_ownership_utxos_with_ranges_by_outpoint("txid_a", 0)
             .unwrap();
-        assert!(none.is_none());
+        assert!(none.is_empty());
     }
 }

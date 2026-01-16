@@ -1,16 +1,17 @@
 use std::str::FromStr;
 
 use super::CommandRunner;
-use crate::storage::traits::CollectionKey;
+use crate::storage::traits::{CollectionKey, StorageRead};
 use crate::types::{
     Brc721OpReturnOutput, Brc721Payload, RegisterCollectionData, RegisterOwnershipData, SlotRanges,
 };
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use age::secrecy::SecretString;
-use anyhow::{Context, Result};
-use bitcoin::{Address, Amount};
+use anyhow::{anyhow, Context, Result};
+use bitcoin::{Address, Amount, OutPoint};
 use ethereum_types::H160;
+use std::collections::BTreeSet;
 
 impl CommandRunner for cli::TxCmd {
     fn run(&self, ctx: &context::Context) -> Result<()> {
@@ -45,6 +46,13 @@ impl CommandRunner for cli::TxCmd {
                 *fee_rate,
                 passphrase.clone(),
             ),
+            cli::TxCmd::SendAssets {
+                to,
+                outpoints,
+                dust_sat,
+                fee_rate,
+                passphrase,
+            } => run_send_assets(ctx, to, outpoints, *dust_sat, *fee_rate, passphrase.clone()),
         }
     }
 }
@@ -144,6 +152,101 @@ fn run_send_amount(
     Ok(())
 }
 
+fn run_send_assets(
+    ctx: &context::Context,
+    to: &str,
+    outpoints: &[String],
+    dust_sat: u64,
+    fee_rate: Option<f64>,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let db_path = ctx.data_dir.join("brc721.sqlite");
+    if !db_path.exists() {
+        return Err(anyhow!(
+            "scanner database not found at {} (run the daemon to build an index)",
+            db_path.to_string_lossy()
+        ));
+    }
+
+    let token_outpoints = parse_outpoints(outpoints)?;
+    if token_outpoints.is_empty() {
+        return Err(anyhow!("at least one --outpoint is required"));
+    }
+    let unique = token_outpoints.iter().cloned().collect::<BTreeSet<_>>();
+    if unique.len() != token_outpoints.len() {
+        return Err(anyhow!("duplicate --outpoint provided"));
+    }
+
+    let storage = crate::storage::SqliteStorage::new(&db_path);
+
+    for outpoint in &token_outpoints {
+        let groups = storage
+            .list_unspent_ownership_utxos_by_outpoint(&outpoint.txid.to_string(), outpoint.vout)
+            .with_context(|| {
+                format!(
+                    "query ownership ranges for {}:{}",
+                    outpoint.txid, outpoint.vout
+                )
+            })?;
+        if groups.is_empty() {
+            return Err(anyhow!(
+                "outpoint {}:{} not found in the BRC-721 index (not an ownership UTXO, or not scanned yet)",
+                outpoint.txid,
+                outpoint.vout
+            ));
+        }
+    }
+
+    let wallet = load_wallet(ctx)?;
+    let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
+
+    let wallet_outpoints = wallet_utxos
+        .iter()
+        .map(|utxo| OutPoint {
+            txid: utxo.txid,
+            vout: utxo.vout,
+        })
+        .collect::<BTreeSet<_>>();
+
+    for outpoint in &token_outpoints {
+        if !wallet_outpoints.contains(outpoint) {
+            return Err(anyhow!(
+                "outpoint {}:{} is not spendable by this wallet",
+                outpoint.txid,
+                outpoint.vout
+            ));
+        }
+    }
+
+    let address = Address::from_str(to)?.require_network(ctx.network)?;
+    let dust_amount = Amount::from_sat(dust_sat);
+    let passphrase = resolve_passphrase(passphrase);
+
+    let lock_outpoints =
+        compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &token_outpoints)
+            .context("compute lock set")?;
+
+    let tx = wallet
+        .build_implicit_transfer_tx(
+            &token_outpoints,
+            &address,
+            dust_amount,
+            fee_rate,
+            &lock_outpoints,
+            passphrase,
+        )
+        .context("build implicit transfer tx")?;
+
+    let txid = wallet.broadcast(&tx)?;
+    log::info!(
+        "✅ Sent {} ownership outpoint(s) to {} via implicit transfer (txid: {})",
+        token_outpoints.len(),
+        to,
+        txid
+    );
+    Ok(())
+}
+
 fn load_wallet(ctx: &context::Context) -> Result<Brc721Wallet> {
     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
 }
@@ -156,4 +259,57 @@ fn resolve_passphrase(passphrase: Option<String>) -> SecretString {
                 .unwrap_or_default(),
         )
     })
+}
+
+fn parse_outpoints(outpoints: &[String]) -> Result<Vec<OutPoint>> {
+    outpoints
+        .iter()
+        .map(|outpoint| {
+            OutPoint::from_str(outpoint)
+                .with_context(|| format!("invalid outpoint '{outpoint}' (expected TXID:VOUT)"))
+        })
+        .collect()
+}
+
+fn compute_wallet_token_outpoints_to_lock(
+    storage: &crate::storage::SqliteStorage,
+    wallet_utxos: &[bitcoincore_rpc::json::ListUnspentResultEntry],
+    spending: &[OutPoint],
+) -> Result<Vec<OutPoint>> {
+    let spending_set = spending.iter().cloned().collect::<BTreeSet<_>>();
+
+    // Build a set of wallet-owned outpoints that the index considers ownership UTXOs.
+    let mut wallet_token_outpoints = BTreeSet::new();
+    for utxo in wallet_utxos {
+        let txid = utxo.txid.to_string();
+        let vout = utxo.vout;
+        if storage
+            .list_unspent_ownership_utxos_by_outpoint(&txid, vout)
+            .with_context(|| format!("query ownership ranges for {txid}:{vout}"))?
+            .is_empty()
+        {
+            continue;
+        }
+
+        wallet_token_outpoints.insert(OutPoint {
+            txid: utxo.txid,
+            vout,
+        });
+    }
+
+    Ok(wallet_token_outpoints
+        .difference(&spending_set)
+        .cloned()
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_outpoints_rejects_invalid() {
+        let res = parse_outpoints(&["not-an-outpoint".to_string()]);
+        assert!(res.is_err());
+    }
 }

@@ -197,10 +197,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
 
     let mut owned = Vec::with_capacity(utxos.len());
     for utxo in utxos {
-        let ranges = match state
-            .storage
-            .list_ownership_ranges(&utxo.reg_txid, utxo.reg_vout)
-        {
+        let ranges = match state.storage.list_ownership_ranges(&utxo) {
             Ok(ranges) => ranges,
             Err(err) => {
                 log::error!(
@@ -493,11 +490,13 @@ mod tests {
             .unwrap()
     }
 
+    type StoredOwnershipRange = (String, u32, CollectionKey, H160, OwnershipRange);
+
     #[derive(Clone, Default)]
     struct TestStorage {
         collections: Arc<RwLock<Vec<Collection>>>,
         ownership_utxos: Arc<RwLock<Vec<OwnershipUtxo>>>,
-        ownership_ranges: Arc<RwLock<Vec<(String, u32, OwnershipRange)>>>,
+        ownership_ranges: Arc<RwLock<Vec<StoredOwnershipRange>>>,
     }
 
     impl TestStorage {
@@ -518,7 +517,13 @@ mod tests {
             {
                 let mut guard = self.ownership_ranges.write().unwrap();
                 for range in ranges {
-                    guard.push((utxo.reg_txid.clone(), utxo.reg_vout, range));
+                    guard.push((
+                        utxo.reg_txid.clone(),
+                        utxo.reg_vout,
+                        utxo.collection_id.clone(),
+                        utxo.base_h160,
+                        range,
+                    ));
                 }
             }
             self
@@ -539,16 +544,37 @@ mod tests {
             Ok(self.collections.read().unwrap().clone())
         }
 
-        fn list_ownership_ranges(
+        fn list_unspent_ownership_utxos_by_outpoint(
             &self,
             reg_txid: &str,
             reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            let utxos = self.ownership_utxos.read().unwrap();
+            Ok(utxos
+                .iter()
+                .filter(|utxo| {
+                    utxo.spent_txid.is_none()
+                        && utxo.reg_txid == reg_txid
+                        && utxo.reg_vout == reg_vout
+                })
+                .cloned()
+                .collect())
+        }
+
+        fn list_ownership_ranges(
+            &self,
+            utxo: &OwnershipUtxo,
         ) -> anyhow::Result<Vec<OwnershipRange>> {
             let ranges = self.ownership_ranges.read().unwrap();
             Ok(ranges
                 .iter()
-                .filter(|(txid, vout, _)| txid == reg_txid && *vout == reg_vout)
-                .map(|(_, _, range)| range.clone())
+                .filter(|(txid, vout, collection_id, base_h160, _)| {
+                    txid == &utxo.reg_txid
+                        && *vout == utxo.reg_vout
+                        && collection_id == &utxo.collection_id
+                        && *base_h160 == utxo.base_h160
+                })
+                .map(|(_, _, _, _, range)| range.clone())
                 .collect())
         }
 
@@ -570,12 +596,16 @@ mod tests {
                 if utxo.spent_txid.is_some() {
                     continue;
                 }
-                let covers = ranges.iter().any(|(txid, vout, range)| {
-                    txid == &utxo.reg_txid
-                        && *vout == utxo.reg_vout
-                        && range.slot_start <= slot
-                        && range.slot_end >= slot
-                });
+                let covers = ranges
+                    .iter()
+                    .any(|(txid, vout, collection_id, base_h160, range)| {
+                        txid == &utxo.reg_txid
+                            && *vout == utxo.reg_vout
+                            && collection_id == &utxo.collection_id
+                            && *base_h160 == utxo.base_h160
+                            && range.slot_start <= slot
+                            && range.slot_end >= slot
+                    });
                 if covers {
                     return Ok(Some(utxo.clone()));
                 }
@@ -619,10 +649,17 @@ mod tests {
             Err(anyhow!("not implemented"))
         }
 
-        fn list_ownership_ranges(
+        fn list_unspent_ownership_utxos_by_outpoint(
             &self,
             _reg_txid: &str,
             _reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn list_ownership_ranges(
+            &self,
+            _utxo: &OwnershipUtxo,
         ) -> anyhow::Result<Vec<OwnershipRange>> {
             Err(anyhow!("not implemented"))
         }
@@ -666,6 +703,8 @@ mod tests {
             &self,
             _reg_txid: &str,
             _reg_vout: u32,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
             _slot_start: u128,
             _slot_end: u128,
         ) -> anyhow::Result<()> {

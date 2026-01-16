@@ -1,8 +1,13 @@
 use crate::bitcoin_rpc::BitcoinRpc;
-use crate::storage::traits::{StorageRead, StorageWrite};
-use crate::types::{parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx};
+use crate::storage::traits::{
+    OwnershipRange, OwnershipUtxo, OwnershipUtxoSave, StorageRead, StorageWrite,
+};
+use crate::types::{
+    h160_from_script_pubkey, parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx,
+};
 use bitcoin::Block;
 use bitcoin::Transaction;
+use ethereum_types::H160;
 
 use crate::parser::BlockParser;
 
@@ -22,6 +27,46 @@ impl Brc721Parser {
         tx_index: u32,
     ) -> Result<(), Brc721Error> {
         let spend_txid = bitcoin_tx.compute_txid().to_string();
+
+        #[derive(Debug)]
+        struct TokenInput {
+            prev_txid: String,
+            prev_vout: u32,
+            groups: Vec<(OwnershipUtxo, Vec<OwnershipRange>)>,
+        }
+
+        let mut token_inputs: Vec<TokenInput> = Vec::new();
+        for txin in &bitcoin_tx.input {
+            let prevout = txin.previous_output;
+            if prevout == bitcoin::OutPoint::null() {
+                continue;
+            }
+
+            let prev_txid = prevout.txid.to_string();
+            let prev_vout = prevout.vout;
+
+            let utxos = storage
+                .list_unspent_ownership_utxos_by_outpoint(&prev_txid, prev_vout)
+                .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+            if utxos.is_empty() {
+                continue;
+            }
+
+            let mut groups = Vec::with_capacity(utxos.len());
+            for utxo in utxos {
+                let ranges = storage
+                    .list_ownership_ranges(&utxo)
+                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+                groups.push((utxo, ranges));
+            }
+
+            token_inputs.push(TokenInput {
+                prev_txid,
+                prev_vout,
+                groups,
+            });
+        }
+
         for txin in &bitcoin_tx.input {
             let prevout = txin.previous_output;
             if prevout == bitcoin::OutPoint::null() {
@@ -48,9 +93,9 @@ impl Brc721Parser {
             }
         }
 
-        let brc721_tx: Brc721Tx<'_> = match parse_brc721_tx(bitcoin_tx) {
-            Ok(Some(tx)) => tx,
-            Ok(None) => return Ok(()),
+        let brc721_tx: Option<Brc721Tx<'_>> = match parse_brc721_tx(bitcoin_tx) {
+            Ok(Some(tx)) => Some(tx),
+            Ok(None) => None,
             Err(e) => {
                 log::warn!(
                     "Invalid BRC-721 message at block {} tx {}: {:?}",
@@ -58,19 +103,129 @@ impl Brc721Parser {
                     tx_index,
                     e
                 );
-                return Ok(());
+                None
             }
         };
 
-        log::info!(
-            "📦 Found BRC-721 tx at block {}, tx {} (txid={}, cmd={:?})",
-            block_height,
-            tx_index,
-            bitcoin_tx.compute_txid(),
-            brc721_tx.payload().command()
-        );
+        if let Some(brc721_tx) = &brc721_tx {
+            log::info!(
+                "📦 Found BRC-721 tx at block {}, tx {} (txid={}, cmd={:?})",
+                block_height,
+                tx_index,
+                bitcoin_tx.compute_txid(),
+                brc721_tx.payload().command()
+            );
 
-        self.digest_brc721_tx(storage, &brc721_tx, block_height, tx_index, rpc)?;
+            self.digest_brc721_tx(storage, brc721_tx, block_height, tx_index, rpc)?;
+        }
+
+        if token_inputs.is_empty() {
+            return Ok(());
+        }
+
+        let remaining_outputs: Vec<(u32, &bitcoin::TxOut)> = bitcoin_tx
+            .output
+            .iter()
+            .enumerate()
+            .filter(|(_, out)| !out.script_pubkey.is_op_return())
+            .map(|(vout, out)| (vout as u32, out))
+            .collect();
+
+        if remaining_outputs.is_empty() {
+            // Burn: no valid outputs, assign tokens to the null owner on vout0 (provably unspendable OP_RETURN).
+            let burn_vout = 0u32;
+            for input in token_inputs {
+                log::info!(
+                    "🔥 Burning token input {}:{} (groups={}) at {}#{}",
+                    input.prev_txid,
+                    input.prev_vout,
+                    input.groups.len(),
+                    block_height,
+                    tx_index
+                );
+
+                for (utxo, ranges) in input.groups {
+                    storage
+                        .save_ownership_utxo(OwnershipUtxoSave {
+                            collection_id: &utxo.collection_id,
+                            owner_h160: H160::zero(),
+                            base_h160: utxo.base_h160,
+                            reg_txid: &spend_txid,
+                            reg_vout: burn_vout,
+                            created_height: block_height,
+                            created_tx_index: tx_index,
+                        })
+                        .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+
+                    for range in ranges {
+                        storage
+                            .save_ownership_range(
+                                &spend_txid,
+                                burn_vout,
+                                &utxo.collection_id,
+                                utxo.base_h160,
+                                range.slot_start,
+                                range.slot_end,
+                            )
+                            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+                    }
+                }
+            }
+
+            return Ok(());
+        }
+
+        let remaining_outputs_len = remaining_outputs.len();
+        for (input_index, input) in token_inputs.into_iter().enumerate() {
+            let (dest_vout, dest_txout) = if input_index < remaining_outputs_len {
+                remaining_outputs[input_index]
+            } else {
+                *remaining_outputs
+                    .last()
+                    .expect("non-empty remaining_outputs")
+            };
+
+            let dest_owner_h160 = h160_from_script_pubkey(&dest_txout.script_pubkey);
+
+            log::info!(
+                "🔁 Implicit transfer input {}:{} -> outpoint {}:{} (groups={}) at {}#{}",
+                input.prev_txid,
+                input.prev_vout,
+                spend_txid,
+                dest_vout,
+                input.groups.len(),
+                block_height,
+                tx_index
+            );
+
+            for (utxo, ranges) in input.groups {
+                storage
+                    .save_ownership_utxo(OwnershipUtxoSave {
+                        collection_id: &utxo.collection_id,
+                        owner_h160: dest_owner_h160,
+                        base_h160: utxo.base_h160,
+                        reg_txid: &spend_txid,
+                        reg_vout: dest_vout,
+                        created_height: block_height,
+                        created_tx_index: tx_index,
+                    })
+                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+
+                for range in ranges {
+                    storage
+                        .save_ownership_range(
+                            &spend_txid,
+                            dest_vout,
+                            &utxo.collection_id,
+                            utxo.base_h160,
+                            range.slot_start,
+                            range.slot_end,
+                        )
+                        .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -256,6 +411,339 @@ mod tests {
         tx.commit().unwrap();
     }
 
+    #[test]
+    fn implicit_transfer_maps_to_first_non_op_return_output() {
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_implicit_1.db"));
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+        let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+
+        let prev_txid = bitcoin::Txid::from_str(
+            "0101010101010101010101010101010101010101010101010101010101010101",
+        )
+        .unwrap();
+        let prev_txid_str = prev_txid.to_string();
+        let prev_vout = 7u32;
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160,
+            reg_txid: &prev_txid_str,
+            reg_vout: prev_vout,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_txid_str, prev_vout, &collection_id, base_h160, 0, 0)
+            .unwrap();
+
+        let op_return = bitcoin::script::Builder::new()
+            .push_opcode(OP_RETURN)
+            .into_script();
+
+        let dest_script = ScriptBuf::new_p2pkh(&PubkeyHash::all_zeros());
+        let dest_script_ignored = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"ignored"));
+
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: prev_txid,
+                    vout: prev_vout,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0xffffffff),
+                witness: Witness::default(),
+            }],
+            output: vec![
+                TxOut {
+                    value: Amount::from_sat(0),
+                    script_pubkey: op_return,
+                },
+                TxOut {
+                    value: Amount::from_sat(1_000),
+                    script_pubkey: dest_script.clone(),
+                },
+                TxOut {
+                    value: Amount::from_sat(2_000),
+                    script_pubkey: dest_script_ignored,
+                },
+            ],
+        };
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 100, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let prev_unspent = storage
+            .list_unspent_ownership_utxos_by_outpoint(&prev_txid_str, prev_vout)
+            .unwrap();
+        assert!(prev_unspent.is_empty());
+
+        let dest_utxos = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 1)
+            .unwrap();
+        assert_eq!(dest_utxos.len(), 1);
+        assert_eq!(dest_utxos[0].collection_id, collection_id);
+        assert_eq!(dest_utxos[0].base_h160, base_h160);
+        assert_eq!(
+            dest_utxos[0].owner_h160,
+            crate::types::h160_from_script_pubkey(&dest_script)
+        );
+
+        let ranges = storage.list_ownership_ranges(&dest_utxos[0]).unwrap();
+        assert_eq!(
+            ranges,
+            vec![OwnershipRange {
+                slot_start: 0,
+                slot_end: 0
+            }]
+        );
+
+        let ignored = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 2)
+            .unwrap();
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn implicit_transfer_buckets_remaining_inputs_to_last_output() {
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_implicit_2.db"));
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+
+        let base_a = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let base_b = H160::from_str("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+
+        let prev_txid_a = bitcoin::Txid::from_str(
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .unwrap();
+        let prev_txid_b = bitcoin::Txid::from_str(
+            "2222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .unwrap();
+
+        let prev_a_str = prev_txid_a.to_string();
+        let prev_b_str = prev_txid_b.to_string();
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160: base_a,
+            reg_txid: &prev_a_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_a_str, 0, &collection_id, base_a, 0, 0)
+            .unwrap();
+
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(2),
+            base_h160: base_b,
+            reg_txid: &prev_b_str,
+            reg_vout: 1,
+            created_height: 1,
+            created_tx_index: 1,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_b_str, 1, &collection_id, base_b, 1, 1)
+            .unwrap();
+
+        let op_return = bitcoin::script::Builder::new()
+            .push_opcode(OP_RETURN)
+            .into_script();
+        let dest_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest"));
+
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![
+                TxIn {
+                    previous_output: OutPoint {
+                        txid: prev_txid_a,
+                        vout: 0,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence(0xffffffff),
+                    witness: Witness::default(),
+                },
+                TxIn {
+                    previous_output: OutPoint {
+                        txid: prev_txid_b,
+                        vout: 1,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence(0xffffffff),
+                    witness: Witness::default(),
+                },
+            ],
+            output: vec![
+                TxOut {
+                    value: Amount::from_sat(0),
+                    script_pubkey: op_return,
+                },
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script.clone(),
+                },
+            ],
+        };
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 101, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let dest_utxos = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 1)
+            .unwrap();
+        assert_eq!(dest_utxos.len(), 2);
+
+        let mut bases = dest_utxos.iter().map(|u| u.base_h160).collect::<Vec<_>>();
+        bases.sort();
+        assert_eq!(bases, vec![base_a, base_b]);
+
+        for utxo in &dest_utxos {
+            assert_eq!(
+                utxo.owner_h160,
+                crate::types::h160_from_script_pubkey(&dest_script)
+            );
+        }
+
+        let ranges_a = dest_utxos
+            .iter()
+            .find(|u| u.base_h160 == base_a)
+            .map(|u| storage.list_ownership_ranges(u).unwrap())
+            .unwrap();
+        assert_eq!(
+            ranges_a,
+            vec![OwnershipRange {
+                slot_start: 0,
+                slot_end: 0
+            }]
+        );
+
+        let ranges_b = dest_utxos
+            .iter()
+            .find(|u| u.base_h160 == base_b)
+            .map(|u| storage.list_ownership_ranges(u).unwrap())
+            .unwrap();
+        assert_eq!(
+            ranges_b,
+            vec![OwnershipRange {
+                slot_start: 1,
+                slot_end: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn implicit_transfer_burns_when_no_valid_outputs() {
+        use bitcoin::{absolute, transaction, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_implicit_3.db"));
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+        let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let prev_txid = bitcoin::Txid::from_str(
+            "3333333333333333333333333333333333333333333333333333333333333333",
+        )
+        .unwrap();
+        let prev_txid_str = prev_txid.to_string();
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160,
+            reg_txid: &prev_txid_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_h160, 7, 7)
+            .unwrap();
+
+        let op_return = bitcoin::script::Builder::new()
+            .push_opcode(OP_RETURN)
+            .into_script();
+
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: prev_txid,
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0xffffffff),
+                witness: Witness::default(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(0),
+                script_pubkey: op_return,
+            }],
+        };
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 102, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let burned = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 0)
+            .unwrap();
+        assert_eq!(burned.len(), 1);
+        assert_eq!(burned[0].owner_h160, H160::zero());
+        assert_eq!(burned[0].collection_id, collection_id);
+        assert_eq!(burned[0].base_h160, base_h160);
+
+        let ranges = storage.list_ownership_ranges(&burned[0]).unwrap();
+        assert_eq!(
+            ranges,
+            vec![OwnershipRange {
+                slot_start: 7,
+                slot_end: 7
+            }]
+        );
+    }
+
     struct DummyStorageInner {
         last_height: Mutex<Option<u64>>,
         last_hash: Mutex<Option<String>>,
@@ -314,10 +802,17 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn list_ownership_ranges(
+        fn list_unspent_ownership_utxos_by_outpoint(
             &self,
             _reg_txid: &str,
             _reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+
+        fn list_ownership_ranges(
+            &self,
+            _utxo: &OwnershipUtxo,
         ) -> anyhow::Result<Vec<OwnershipRange>> {
             Ok(vec![])
         }
@@ -366,6 +861,8 @@ mod tests {
             &self,
             _reg_txid: &str,
             _reg_vout: u32,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
             _slot_start: u128,
             _slot_end: u128,
         ) -> anyhow::Result<()> {

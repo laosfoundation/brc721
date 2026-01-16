@@ -44,7 +44,12 @@ pub trait StorageRead {
     fn load_last(&self) -> Result<Option<Block>>;
     fn load_collection(&self, id: &CollectionKey) -> Result<Option<Collection>>;
     fn list_collections(&self) -> Result<Vec<Collection>>;
-    fn list_ownership_ranges(&self, reg_txid: &str, reg_vout: u32) -> Result<Vec<OwnershipRange>>;
+    fn list_unspent_ownership_utxos_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<OwnershipUtxo>>;
+    fn list_ownership_ranges(&self, utxo: &OwnershipUtxo) -> Result<Vec<OwnershipRange>>;
     fn find_unspent_ownership_utxo_for_slot(
         &self,
         collection_id: &CollectionKey,
@@ -68,6 +73,8 @@ pub trait StorageWrite {
         &self,
         reg_txid: &str,
         reg_vout: u32,
+        collection_id: &CollectionKey,
+        base_h160: H160,
         slot_start: u128,
         slot_end: u128,
     ) -> Result<()>;

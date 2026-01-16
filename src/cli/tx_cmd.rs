@@ -102,4 +102,41 @@ pub enum TxCmd {
         )]
         passphrase: Option<String>,
     },
+    #[command(
+        about = "Send BRC-721 assets to an address (implicit transfer)",
+        long_about = "Create and broadcast a transaction that spends one or more BRC-721 ownership UTXOs (without an OP_RETURN payload), triggering the protocol's implicit transfer rules to move the assets to the target address."
+    )]
+    SendAssets {
+        #[arg(value_name = "ADDRESS", help = "Target address to receive the assets")]
+        to: String,
+        #[arg(
+            long = "outpoint",
+            value_name = "TXID:VOUT",
+            required = true,
+            num_args = 1..,
+            help = "Ownership outpoint(s) to spend (repeat --outpoint for multiple)"
+        )]
+        outpoints: Vec<String>,
+        #[arg(
+            long = "dust-sat",
+            value_name = "SATOSHI",
+            default_value_t = 546,
+            help = "Satoshis to attach to each asset-carrying output"
+        )]
+        dust_sat: u64,
+        #[arg(
+            long = "fee-rate",
+            value_name = "SAT/VB",
+            required = false,
+            help = "Fee rate in sat/vB (optional)"
+        )]
+        fee_rate: Option<f64>,
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Passphrase for signing",
+            required = false
+        )]
+        passphrase: Option<String>,
+    },
 }

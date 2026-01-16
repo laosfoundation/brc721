@@ -3,7 +3,7 @@ use age::secrecy::SecretString;
 use anyhow::{Context, Result};
 use bdk_wallet::template::Bip86;
 use bdk_wallet::{bip39::Mnemonic, miniscript::psbt::PsbtExt, AddressInfo, KeychainKind};
-use bitcoin::{bip32::Xpriv, Address, Amount, Network, Psbt};
+use bitcoin::{bip32::Xpriv, Address, Amount, Network, OutPoint, Psbt};
 use bitcoincore_rpc::json;
 use bitcoincore_rpc::Auth;
 use std::path::Path;
@@ -143,6 +143,58 @@ impl Brc721Wallet {
 
     pub fn broadcast(&self, tx: &bitcoin::Transaction) -> Result<bitcoin::Txid> {
         self.remote.broadcast(tx)
+    }
+
+    pub fn build_implicit_transfer_tx(
+        &self,
+        token_outpoints: &[OutPoint],
+        target_address: &Address,
+        amount_per_output: Amount,
+        fee_rate: Option<f64>,
+        lock_outpoints: &[OutPoint],
+        passphrase: SecretString,
+    ) -> Result<bitcoin::Transaction> {
+        let locked = self.remote.list_locked_unspent()?;
+        let locked_spending = token_outpoints
+            .iter()
+            .filter(|outpoint| locked.contains(outpoint))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !locked_spending.is_empty() {
+            return Err(anyhow::anyhow!(
+                "cannot spend locked outpoints: {}",
+                locked_spending
+                    .iter()
+                    .map(|op| format!("{}:{}", op.txid, op.vout))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
+        let to_lock = lock_outpoints
+            .iter()
+            .filter(|outpoint| !locked.contains(outpoint))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.remote
+            .lock_unspent_outpoints(&to_lock)
+            .context("lock token outpoints")?;
+
+        let psbt_res = self.remote.create_psbt_for_implicit_transfer(
+            token_outpoints,
+            target_address,
+            amount_per_output,
+            fee_rate,
+        );
+
+        let unlock_res = self.remote.unlock_unspent_outpoints(&to_lock);
+        if let Err(unlock_err) = unlock_res {
+            log::warn!("Failed to unlock outpoints: {unlock_err:#}");
+        }
+
+        let psbt = psbt_res.context("create implicit transfer PSBT")?;
+        self.sign(psbt, &passphrase)
     }
 
     fn sign(&self, mut psbt: Psbt, passphrase: &SecretString) -> Result<bitcoin::Transaction> {

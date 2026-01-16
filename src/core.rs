@@ -130,11 +130,15 @@ mod tests {
             Ok(vec![])
         }
 
-        fn list_ownership_ranges(
+        fn list_unspent_ownership_utxos_by_outpoint(
             &self,
             _reg_txid: &str,
             _reg_vout: u32,
-        ) -> Result<Vec<OwnershipRange>> {
+        ) -> Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+
+        fn list_ownership_ranges(&self, _utxo: &OwnershipUtxo) -> Result<Vec<OwnershipRange>> {
             Ok(vec![])
         }
 
@@ -176,6 +180,8 @@ mod tests {
             &self,
             _reg_txid: &str,
             _reg_vout: u32,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
             _slot_start: u128,
             _slot_end: u128,
         ) -> Result<()> {
