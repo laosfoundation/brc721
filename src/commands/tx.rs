@@ -244,6 +244,14 @@ fn run_send_assets(
         to,
         txid
     );
+    log::info!(
+        "ℹ️ Ownership changes are reflected by the scanner after {} confirmation(s).",
+        ctx.confirmations
+    );
+    log::info!(
+        "   Until then, the sender/receiver asset views may still show the previous ownership state."
+    );
+    log::info!("   Conflicting transfers of the same outpoint(s) can only resolve once one transaction confirms.");
     Ok(())
 }
 
