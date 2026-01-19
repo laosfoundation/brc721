@@ -5,6 +5,7 @@ use super::Brc721Error;
 pub enum Brc721Command {
     RegisterCollection = 0x00,
     RegisterOwnership = 0x01,
+    Mix = 0x02,
 }
 
 impl std::convert::TryFrom<u8> for Brc721Command {
@@ -14,6 +15,7 @@ impl std::convert::TryFrom<u8> for Brc721Command {
         match value {
             0x00 => Ok(Brc721Command::RegisterCollection),
             0x01 => Ok(Brc721Command::RegisterOwnership),
+            0x02 => Ok(Brc721Command::Mix),
             x => Err(Brc721Error::UnknownCommand(x)),
         }
     }
@@ -58,5 +60,12 @@ mod tests {
         let cmd = Brc721Command::RegisterOwnership;
         let value: u8 = cmd.into();
         assert_eq!(value, 0x01);
+    }
+
+    #[test]
+    fn test_mix_command_value() {
+        let cmd = Brc721Command::Mix;
+        let value: u8 = cmd.into();
+        assert_eq!(value, 0x02);
     }
 }

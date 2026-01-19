@@ -343,6 +343,62 @@ impl RemoteWallet {
         Ok(psbt)
     }
 
+    pub fn create_psbt_for_mix(
+        &self,
+        token_inputs: &[OutPoint],
+        op_return: TxOut,
+        payments: Vec<(Address, Amount)>,
+        fee_rate: Option<f64>,
+    ) -> Result<Psbt> {
+        if token_inputs.is_empty() {
+            return Err(anyhow::anyhow!("mix requires at least one input"));
+        }
+
+        let client = self.watch_client()?;
+
+        let script = op_return.script_pubkey;
+        let dummy = dummy_op_return_data_for_target_script_len(script.len())?;
+
+        let mut outputs_vec = Vec::with_capacity(1 + payments.len());
+        outputs_vec.push(serde_json::json!({ "data": dummy }));
+        for (address, amount) in payments {
+            outputs_vec.push(serde_json::json!({ address.to_string(): amount.to_btc() }));
+        }
+        let change_position = outputs_vec.len();
+        let outputs = serde_json::Value::Array(outputs_vec);
+
+        let inputs = serde_json::Value::Array(token_inputs.iter().map(outpoint_json).collect());
+
+        let mut options = serde_json::json!({});
+        if let Some(fr) = fee_rate {
+            options["fee_rate"] = serde_json::json!(fr);
+        }
+        options["add_inputs"] = serde_json::json!(false);
+        options["changePosition"] = serde_json::json!(change_position);
+
+        let funded: serde_json::Value = client
+            .call(
+                "walletcreatefundedpsbt",
+                &[
+                    inputs,
+                    outputs,
+                    serde_json::json!(0),
+                    options,
+                    serde_json::json!(true),
+                ],
+            )
+            .context("walletcreatefundedpsbt (mix)")?;
+
+        let psbt_b64 = funded["psbt"].as_str().context("psbt base64")?;
+        let mut psbt: Psbt = psbt_b64.parse().context("parse psbt base64")?;
+
+        psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
+        psbt = move_opreturn_first(psbt);
+        psbt = reorder_psbt_inputs(psbt, token_inputs)?;
+
+        Ok(psbt)
+    }
+
     pub fn broadcast(&self, tx: &Transaction) -> Result<bitcoin::Txid> {
         let root = self.root_client()?;
         let txid = root.send_raw_transaction(tx).context("broadcast tx")?;
@@ -477,6 +533,47 @@ fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
     psbt.outputs = new_psbt_outputs;
 
     psbt
+}
+
+fn reorder_psbt_inputs(mut psbt: Psbt, desired: &[OutPoint]) -> Result<Psbt> {
+    let tx_inputs = &psbt.unsigned_tx.input;
+    if tx_inputs.len() != desired.len() {
+        return Err(anyhow::anyhow!(
+            "psbt input count {} does not match expected {}",
+            tx_inputs.len(),
+            desired.len()
+        ));
+    }
+
+    if psbt.inputs.len() != tx_inputs.len() {
+        return Err(anyhow::anyhow!(
+            "psbt metadata input count {} does not match tx inputs {}",
+            psbt.inputs.len(),
+            tx_inputs.len()
+        ));
+    }
+
+    let mut new_inputs = Vec::with_capacity(desired.len());
+    let mut new_meta = Vec::with_capacity(desired.len());
+
+    for outpoint in desired {
+        let idx = tx_inputs
+            .iter()
+            .position(|input| input.previous_output == *outpoint)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "psbt missing expected input {}:{}",
+                    outpoint.txid,
+                    outpoint.vout
+                )
+            })?;
+        new_inputs.push(tx_inputs[idx].clone());
+        new_meta.push(psbt.inputs[idx].clone());
+    }
+
+    psbt.unsigned_tx.input = new_inputs;
+    psbt.inputs = new_meta;
+    Ok(psbt)
 }
 
 /// Substitute the script of the first OP_RETURN output in a PSBT while keeping the amount unchanged.

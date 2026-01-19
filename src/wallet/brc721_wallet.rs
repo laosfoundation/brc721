@@ -197,6 +197,43 @@ impl Brc721Wallet {
         self.sign(psbt, &passphrase)
     }
 
+    pub fn build_mix_tx(
+        &self,
+        token_outpoints: &[OutPoint],
+        op_return: bitcoin::TxOut,
+        payments: Vec<(Address, Amount)>,
+        fee_rate: Option<f64>,
+        passphrase: SecretString,
+    ) -> Result<bitcoin::Transaction> {
+        if token_outpoints.is_empty() {
+            return Err(anyhow::anyhow!("mix requires at least one input"));
+        }
+
+        let locked = self.remote.list_locked_unspent()?;
+        let locked_spending = token_outpoints
+            .iter()
+            .filter(|outpoint| locked.contains(outpoint))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !locked_spending.is_empty() {
+            return Err(anyhow::anyhow!(
+                "cannot spend locked outpoints: {}",
+                locked_spending
+                    .iter()
+                    .map(|op| format!("{}:{}", op.txid, op.vout))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
+        let psbt = self
+            .remote
+            .create_psbt_for_mix(token_outpoints, op_return, payments, fee_rate)
+            .context("create mix PSBT")?;
+
+        self.sign(psbt, &passphrase)
+    }
+
     fn sign(&self, mut psbt: Psbt, passphrase: &SecretString) -> Result<bitcoin::Transaction> {
         let finalized = self
             .signer

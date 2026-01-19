@@ -217,6 +217,7 @@ fn db_list_unspent_ownership_utxos_by_outpoint(
     reg_txid: &str,
     reg_vout: u32,
 ) -> rusqlite::Result<Vec<OwnershipUtxo>> {
+    // Preserve insertion order so mix ordering remains stable across transfers.
     let mut stmt = conn.prepare(
         r#"
         SELECT
@@ -247,7 +248,7 @@ fn db_list_ownership_ranges(
             AND reg_vout = ?2
             AND collection_id = ?3
             AND base_h160 = ?4
-        ORDER BY slot_start, slot_end
+        ORDER BY rowid
         "#,
     )?;
     let mapped = stmt

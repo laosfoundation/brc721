@@ -1,4 +1,4 @@
-use super::{RegisterCollectionData, RegisterOwnershipData};
+use super::{MixData, RegisterCollectionData, RegisterOwnershipData};
 use crate::types::{Brc721Command, Brc721Error};
 use bitcoin::Transaction;
 
@@ -6,6 +6,7 @@ use bitcoin::Transaction;
 pub enum Brc721Payload {
     RegisterCollection(RegisterCollectionData),
     RegisterOwnership(RegisterOwnershipData),
+    Mix(MixData),
 }
 
 impl Brc721Payload {
@@ -13,6 +14,7 @@ impl Brc721Payload {
         match self {
             Brc721Payload::RegisterCollection(_) => Brc721Command::RegisterCollection,
             Brc721Payload::RegisterOwnership(_) => Brc721Command::RegisterOwnership,
+            Brc721Payload::Mix(_) => Brc721Command::Mix,
         }
     }
 
@@ -20,6 +22,7 @@ impl Brc721Payload {
         match self {
             Brc721Payload::RegisterCollection(_) => Ok(()),
             Brc721Payload::RegisterOwnership(data) => data.validate_in_tx(bitcoin_tx),
+            Brc721Payload::Mix(data) => data.validate_in_tx(bitcoin_tx),
         }
     }
 
@@ -30,6 +33,7 @@ impl Brc721Payload {
         match self {
             Brc721Payload::RegisterCollection(data) => out.extend(data.to_bytes()),
             Brc721Payload::RegisterOwnership(data) => out.extend(data.to_bytes()),
+            Brc721Payload::Mix(data) => out.extend(data.to_bytes()),
         };
 
         out
@@ -51,6 +55,7 @@ impl TryFrom<&[u8]> for Brc721Payload {
             Brc721Command::RegisterOwnership => {
                 Brc721Payload::RegisterOwnership(RegisterOwnershipData::try_from(rest)?)
             }
+            Brc721Command::Mix => Brc721Payload::Mix(MixData::try_from(rest)?),
         };
 
         Ok(msg)
@@ -60,8 +65,9 @@ impl TryFrom<&[u8]> for Brc721Payload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::mix::IndexRange;
     use crate::types::register_ownership::{OwnershipGroup, SlotRange};
-    use crate::types::{Brc721Command, Brc721Error};
+    use crate::types::{Brc721Command, Brc721Error, MixData};
     use crate::types::{RegisterCollectionData, RegisterOwnershipData};
     use ethereum_types::H160;
 
@@ -90,6 +96,15 @@ mod tests {
         let msg = Brc721Payload::RegisterOwnership(data);
 
         assert_eq!(msg.command(), Brc721Command::RegisterOwnership);
+    }
+
+    #[test]
+    fn command_matches_mix_variant() {
+        let mix = MixData::new(vec![vec![IndexRange { start: 0, end: 2 }], Vec::new()], 1)
+            .expect("valid mix data");
+        let msg = Brc721Payload::Mix(mix);
+
+        assert_eq!(msg.command(), Brc721Command::Mix);
     }
 
     #[test]
@@ -180,6 +195,25 @@ mod tests {
         )
         .expect("valid ownership data");
         let msg = Brc721Payload::RegisterOwnership(data.clone());
+
+        let bytes = msg.to_bytes();
+        let parsed = Brc721Payload::try_from(bytes.as_slice()).expect("parsing should succeed");
+
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn to_bytes_and_from_bytes_roundtrip_mix() {
+        let mix = MixData::new(
+            vec![
+                vec![IndexRange { start: 0, end: 3 }],
+                Vec::new(),
+                vec![IndexRange { start: 3, end: 5 }],
+            ],
+            1,
+        )
+        .expect("valid mix data");
+        let msg = Brc721Payload::Mix(mix.clone());
 
         let bytes = msg.to_bytes();
         let parsed = Brc721Payload::try_from(bytes.as_slice()).expect("parsing should succeed");
