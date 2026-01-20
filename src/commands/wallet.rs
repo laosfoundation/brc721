@@ -80,7 +80,9 @@ fn run_address(ctx: &context::Context) -> Result<()> {
     let addr = wallet
         .reveal_next_payment_address()
         .context("getting address")?;
-    log::info!("🏠 {}", addr.address);
+    let script_pubkey = addr.address.script_pubkey();
+    let address_h160 = h160_from_script_pubkey(&script_pubkey);
+    log::info!("🏠 {} (addressH160={:#x})", addr.address, address_h160);
     Ok(())
 }
 
