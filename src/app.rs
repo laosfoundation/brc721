@@ -176,8 +176,8 @@ pub async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Block, Collection, CollectionKey, OwnershipRange, OwnershipUtxo, OwnershipUtxoSave,
-        StorageRead, StorageTx, StorageWrite,
+        Block, Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup, OwnershipUtxo,
+        OwnershipUtxoSave, StorageRead, StorageTx, StorageWrite,
     };
     use bitcoin::hashes::Hash;
     use bitcoincore_rpc::Error as RpcError;
@@ -224,6 +224,14 @@ mod tests {
             _reg_txid: &str,
             _reg_vout: u32,
         ) -> Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+
+        fn list_unspent_ownership_ranges_by_outpoint(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> Result<Vec<OwnershipRangeWithGroup>> {
             Ok(vec![])
         }
 

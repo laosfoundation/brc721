@@ -139,4 +139,47 @@ pub enum TxCmd {
         )]
         passphrase: Option<String>,
     },
+    #[command(
+        about = "Mix BRC-721 assets across outputs (explicit mapping)",
+        long_about = "Create and broadcast a mix transaction that maps NFT indices across the provided ownership inputs to specific outputs using an OP_RETURN payload. Exactly one output mapping must be marked as the complement set. Use a single output with :complement to merge all tokens into one output."
+    )]
+    Mix {
+        #[arg(
+            long = "outpoint",
+            value_name = "TXID:VOUT",
+            required = true,
+            num_args = 1..,
+            help = "Ownership outpoint(s) to spend (repeat --outpoint for multiple)"
+        )]
+        outpoints: Vec<String>,
+        #[arg(
+            long = "output",
+            value_name = "ADDRESS:RANGES|ADDRESS:complement",
+            required = true,
+            num_args = 1..,
+            help = "Output mapping in the form ADDRESS:0..=10,12 (end inclusive) or ADDRESS:complement (repeat --output to define outputs in order; a single complement output merges all tokens)"
+        )]
+        outputs: Vec<String>,
+        #[arg(
+            long = "dust-sat",
+            value_name = "SATOSHI",
+            default_value_t = 546,
+            help = "Satoshis to attach to each asset-carrying output"
+        )]
+        dust_sat: u64,
+        #[arg(
+            long = "fee-rate",
+            value_name = "SAT/VB",
+            required = false,
+            help = "Fee rate in sat/vB (optional)"
+        )]
+        fee_rate: Option<f64>,
+        #[arg(
+            long,
+            value_name = "PASSPHRASE",
+            help = "Passphrase for signing",
+            required = false
+        )]
+        passphrase: Option<String>,
+    },
 }

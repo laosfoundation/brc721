@@ -4,6 +4,7 @@ mod brc721_op_return_output;
 mod brc721_payload;
 mod brc721_token;
 mod brc721_tx;
+pub(crate) mod mix;
 mod register_collection;
 mod register_ownership;
 pub(crate) mod varint96;
@@ -15,6 +16,7 @@ pub use brc721_error::Brc721Error;
 pub use brc721_op_return_output::Brc721OpReturnOutput;
 pub use brc721_payload::Brc721Payload;
 pub use brc721_tx::{parse_brc721_tx, Brc721Tx};
+pub use mix::{IndexRanges, MixData};
 pub use register_collection::RegisterCollectionData;
 pub use register_ownership::{RegisterOwnershipData, SlotRanges};
 

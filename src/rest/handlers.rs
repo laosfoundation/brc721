@@ -322,8 +322,8 @@ mod tests {
 
     use crate::storage::{
         traits::{
-            Block, Collection, CollectionKey, OwnershipRange, OwnershipUtxo, OwnershipUtxoSave,
-            StorageRead, StorageTx, StorageWrite,
+            Block, Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup,
+            OwnershipUtxo, OwnershipUtxoSave, StorageRead, StorageTx, StorageWrite,
         },
         Storage,
     };
@@ -561,6 +561,38 @@ mod tests {
                 .collect())
         }
 
+        fn list_unspent_ownership_ranges_by_outpoint(
+            &self,
+            reg_txid: &str,
+            reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipRangeWithGroup>> {
+            let utxos = self.ownership_utxos.read().unwrap();
+            let ranges = self.ownership_ranges.read().unwrap();
+
+            Ok(ranges
+                .iter()
+                .filter(|(txid, vout, collection_id, base_h160, _)| {
+                    *txid == reg_txid
+                        && *vout == reg_vout
+                        && utxos.iter().any(|utxo| {
+                            utxo.spent_txid.is_none()
+                                && utxo.reg_txid == *txid
+                                && utxo.reg_vout == *vout
+                                && utxo.collection_id == *collection_id
+                                && utxo.base_h160 == *base_h160
+                        })
+                })
+                .map(
+                    |(_, _, collection_id, base_h160, range)| OwnershipRangeWithGroup {
+                        collection_id: collection_id.clone(),
+                        base_h160: *base_h160,
+                        slot_start: range.slot_start,
+                        slot_end: range.slot_end,
+                    },
+                )
+                .collect())
+        }
+
         fn list_ownership_ranges(
             &self,
             utxo: &OwnershipUtxo,
@@ -654,6 +686,14 @@ mod tests {
             _reg_txid: &str,
             _reg_vout: u32,
         ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn list_unspent_ownership_ranges_by_outpoint(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipRangeWithGroup>> {
             Err(anyhow!("not implemented"))
         }
 
