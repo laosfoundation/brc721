@@ -357,6 +357,10 @@ fn run_mix(
         }
     }
 
+    let lock_outpoints =
+        compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &token_outpoints)
+            .context("compute lock set")?;
+
     let dust_amount = Amount::from_sat(dust_sat);
     let payments = output_addresses
         .into_iter()
@@ -370,7 +374,14 @@ fn run_mix(
 
     let passphrase = resolve_passphrase(passphrase);
     let tx = wallet
-        .build_mix_tx(&token_outpoints, op_return, payments, fee_rate, passphrase)
+        .build_mix_tx(
+            &token_outpoints,
+            op_return,
+            payments,
+            fee_rate,
+            &lock_outpoints,
+            passphrase,
+        )
         .context("build mix tx")?;
 
     let txid = wallet.broadcast(&tx)?;

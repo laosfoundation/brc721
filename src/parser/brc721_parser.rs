@@ -101,6 +101,8 @@ impl Brc721Parser {
         let spend_txid = bitcoin_tx.compute_txid().to_string();
 
         let mut token_inputs: Vec<TokenInput> = Vec::new();
+        let mut ownership_inputs_are_prefix = true;
+        let mut saw_non_ownership_input = false;
         for txin in &bitcoin_tx.input {
             let prevout = txin.previous_output;
             if prevout == bitcoin::OutPoint::null() {
@@ -114,7 +116,12 @@ impl Brc721Parser {
                 .list_unspent_ownership_ranges_by_outpoint(&prev_txid, prev_vout)
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
             if ranges.is_empty() {
+                saw_non_ownership_input = true;
                 continue;
+            }
+
+            if saw_non_ownership_input {
+                ownership_inputs_are_prefix = false;
             }
 
             token_inputs.push(TokenInput {
@@ -180,15 +187,15 @@ impl Brc721Parser {
             );
 
             if let Brc721Payload::Mix(payload) = brc721_tx.payload() {
-                let handled = crate::parser::mix::digest(
-                    payload,
-                    brc721_tx,
-                    &token_inputs,
+                let mix_ctx = crate::parser::mix::MixDigestContext {
+                    token_inputs: &token_inputs,
                     input_count,
+                    ownership_inputs_are_prefix,
                     storage,
                     block_height,
                     tx_index,
-                )?;
+                };
+                let handled = crate::parser::mix::digest(payload, brc721_tx, &mix_ctx)?;
                 if handled {
                     return Ok(());
                 }
@@ -935,6 +942,243 @@ mod tests {
                 slot_end: 1
             }]
         );
+    }
+
+    #[test]
+    fn mix_allows_extra_inputs_after_ownership() {
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_mix_extra.db"));
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+        let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+
+        let prev_txid = bitcoin::Txid::from_str(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+        let prev_txid_str = prev_txid.to_string();
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160,
+            reg_txid: &prev_txid_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_h160, 0, 1)
+            .unwrap();
+
+        let mix = crate::types::MixData::new(
+            vec![
+                vec![crate::types::mix::IndexRange { start: 1, end: 2 }],
+                Vec::new(),
+            ],
+            1,
+        )
+        .expect("mix payload");
+        let op_return =
+            crate::types::Brc721OpReturnOutput::new(crate::types::Brc721Payload::Mix(mix))
+                .into_txout()
+                .unwrap();
+
+        let dest_script_1 = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest1"));
+        let dest_script_2 = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest2"));
+
+        let funding_txid = bitcoin::Txid::from_str(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        )
+        .unwrap();
+
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![
+                TxIn {
+                    previous_output: OutPoint {
+                        txid: prev_txid,
+                        vout: 0,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence(0xffffffff),
+                    witness: Witness::default(),
+                },
+                TxIn {
+                    previous_output: OutPoint {
+                        txid: funding_txid,
+                        vout: 1,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence(0xffffffff),
+                    witness: Witness::default(),
+                },
+            ],
+            output: vec![
+                op_return,
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script_1.clone(),
+                },
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script_2.clone(),
+                },
+            ],
+        };
+
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 220, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let output1 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 1)
+            .unwrap();
+        assert_eq!(output1.len(), 1);
+        let ranges1 = storage.list_ownership_ranges(&output1[0]).unwrap();
+        assert_eq!(
+            ranges1,
+            vec![OwnershipRange {
+                slot_start: 1,
+                slot_end: 1
+            }]
+        );
+
+        let output2 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 2)
+            .unwrap();
+        assert_eq!(output2.len(), 1);
+        let ranges2 = storage.list_ownership_ranges(&output2[0]).unwrap();
+        assert_eq!(
+            ranges2,
+            vec![OwnershipRange {
+                slot_start: 0,
+                slot_end: 0
+            }]
+        );
+    }
+
+    #[test]
+    fn mix_rejects_non_ownership_inputs_before_ownership() {
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage = crate::storage::SqliteStorage::new(
+            temp_dir.path().join("brc721_mix_invalid_input_order.db"),
+        );
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+        let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+
+        let prev_txid = bitcoin::Txid::from_str(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .unwrap();
+        let prev_txid_str = prev_txid.to_string();
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160,
+            reg_txid: &prev_txid_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_h160, 0, 1)
+            .unwrap();
+
+        let mix = crate::types::MixData::new(
+            vec![
+                vec![crate::types::mix::IndexRange { start: 1, end: 2 }],
+                Vec::new(),
+            ],
+            1,
+        )
+        .expect("mix payload");
+        let op_return =
+            crate::types::Brc721OpReturnOutput::new(crate::types::Brc721Payload::Mix(mix))
+                .into_txout()
+                .unwrap();
+
+        let dest_script_1 = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest1"));
+        let dest_script_2 = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest2"));
+
+        let funding_txid = bitcoin::Txid::from_str(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        )
+        .unwrap();
+
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![
+                TxIn {
+                    previous_output: OutPoint {
+                        txid: funding_txid,
+                        vout: 1,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence(0xffffffff),
+                    witness: Witness::default(),
+                },
+                TxIn {
+                    previous_output: OutPoint {
+                        txid: prev_txid,
+                        vout: 0,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence(0xffffffff),
+                    witness: Witness::default(),
+                },
+            ],
+            output: vec![
+                op_return,
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script_1,
+                },
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script_2,
+                },
+            ],
+        };
+
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 221, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let output1 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 1)
+            .unwrap();
+        assert!(output1.is_empty());
+
+        let output2 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 2)
+            .unwrap();
+        assert!(output2.is_empty());
     }
 
     #[test]

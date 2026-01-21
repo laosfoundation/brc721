@@ -72,14 +72,19 @@ struct ExplicitRange {
     output_index: usize,
 }
 
+pub struct MixDigestContext<'a, S: StorageWrite> {
+    pub token_inputs: &'a [TokenInput],
+    pub input_count: usize,
+    pub ownership_inputs_are_prefix: bool,
+    pub storage: &'a S,
+    pub block_height: u64,
+    pub tx_index: u32,
+}
+
 pub fn digest<S: StorageWrite>(
     payload: &MixData,
     brc721_tx: &Brc721Tx<'_>,
-    token_inputs: &[TokenInput],
-    input_count: usize,
-    storage: &S,
-    block_height: u64,
-    tx_index: u32,
+    ctx: &MixDigestContext<'_, S>,
 ) -> Result<bool, Brc721Error> {
     let txid = brc721_tx.txid().to_string();
 
@@ -88,17 +93,17 @@ pub fn digest<S: StorageWrite>(
         return Ok(false);
     }
 
-    if token_inputs.is_empty() {
+    if ctx.token_inputs.is_empty() {
         log::warn!("mix has no ownership inputs (txid={})", txid);
         return Ok(false);
     }
 
-    if input_count != token_inputs.len() {
+    if !ctx.ownership_inputs_are_prefix {
         log::warn!(
-            "mix inputs must all be ownership UTXOs (txid={}, input_count={}, ownership_inputs={})",
+            "mix ownership inputs must be the first inputs (txid={}, input_count={}, ownership_inputs={})",
             txid,
-            input_count,
-            token_inputs.len()
+            ctx.input_count,
+            ctx.token_inputs.len()
         );
         return Ok(false);
     }
@@ -106,7 +111,7 @@ pub fn digest<S: StorageWrite>(
     let mut segments = Vec::new();
     let mut index_cursor: u128 = 0;
 
-    for input in token_inputs {
+    for input in ctx.token_inputs {
         for range in &input.ranges {
             let len = range
                 .slot_end
@@ -243,21 +248,21 @@ pub fn digest<S: StorageWrite>(
             .unwrap_or_else(H160::zero);
 
         for (collection_id, base_h160) in assignment.unique_groups() {
-            storage
+            ctx.storage
                 .save_ownership_utxo(OwnershipUtxoSave {
                     collection_id: &collection_id,
                     owner_h160,
                     base_h160,
                     reg_txid: &txid,
                     reg_vout: vout,
-                    created_height: block_height,
-                    created_tx_index: tx_index,
+                    created_height: ctx.block_height,
+                    created_tx_index: ctx.tx_index,
                 })
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         }
 
         for slice in assignment.slices {
-            storage
+            ctx.storage
                 .save_ownership_range(
                     &txid,
                     vout,
@@ -271,9 +276,10 @@ pub fn digest<S: StorageWrite>(
     }
 
     log::info!(
-        "mix indexed (txid={}, inputs={}, outputs={}, token_count={}, complement_output={})",
+        "mix indexed (txid={}, ownership_inputs={}, total_inputs={}, outputs={}, token_count={}, complement_output={})",
         txid,
-        input_count,
+        ctx.token_inputs.len(),
+        ctx.input_count,
         output_count,
         total_tokens,
         payload.complement_index + 1

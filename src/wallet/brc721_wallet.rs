@@ -203,6 +203,7 @@ impl Brc721Wallet {
         op_return: bitcoin::TxOut,
         payments: Vec<(Address, Amount)>,
         fee_rate: Option<f64>,
+        lock_outpoints: &[OutPoint],
         passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
         if token_outpoints.is_empty() {
@@ -226,10 +227,26 @@ impl Brc721Wallet {
             ));
         }
 
-        let psbt = self
-            .remote
-            .create_psbt_for_mix(token_outpoints, op_return, payments, fee_rate)
-            .context("create mix PSBT")?;
+        let to_lock = lock_outpoints
+            .iter()
+            .filter(|outpoint| !locked.contains(outpoint))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.remote
+            .lock_unspent_outpoints(&to_lock)
+            .context("lock token outpoints")?;
+
+        let psbt_res =
+            self.remote
+                .create_psbt_for_mix(token_outpoints, op_return, payments, fee_rate);
+
+        let unlock_res = self.remote.unlock_unspent_outpoints(&to_lock);
+        if let Err(unlock_err) = unlock_res {
+            log::warn!("Failed to unlock outpoints: {unlock_err:#}");
+        }
+
+        let psbt = psbt_res.context("create mix PSBT")?;
 
         self.sign(psbt, &passphrase)
     }

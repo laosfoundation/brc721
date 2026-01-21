@@ -373,7 +373,7 @@ impl RemoteWallet {
         if let Some(fr) = fee_rate {
             options["fee_rate"] = serde_json::json!(fr);
         }
-        options["add_inputs"] = serde_json::json!(false);
+        options["add_inputs"] = serde_json::json!(true);
         options["changePosition"] = serde_json::json!(change_position);
 
         let funded: serde_json::Value = client
@@ -394,6 +394,7 @@ impl RemoteWallet {
 
         psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
         psbt = move_opreturn_first(psbt);
+        // Keep ownership inputs first so mix indexing can ignore trailing funding inputs.
         psbt = reorder_psbt_inputs(psbt, token_inputs)?;
 
         Ok(psbt)
@@ -537,9 +538,9 @@ fn move_opreturn_first(mut psbt: Psbt) -> Psbt {
 
 fn reorder_psbt_inputs(mut psbt: Psbt, desired: &[OutPoint]) -> Result<Psbt> {
     let tx_inputs = &psbt.unsigned_tx.input;
-    if tx_inputs.len() != desired.len() {
+    if tx_inputs.len() < desired.len() {
         return Err(anyhow::anyhow!(
-            "psbt input count {} does not match expected {}",
+            "psbt input count {} does not include expected {}",
             tx_inputs.len(),
             desired.len()
         ));
@@ -553,8 +554,9 @@ fn reorder_psbt_inputs(mut psbt: Psbt, desired: &[OutPoint]) -> Result<Psbt> {
         ));
     }
 
-    let mut new_inputs = Vec::with_capacity(desired.len());
-    let mut new_meta = Vec::with_capacity(desired.len());
+    let mut used = vec![false; tx_inputs.len()];
+    let mut new_inputs = Vec::with_capacity(tx_inputs.len());
+    let mut new_meta = Vec::with_capacity(tx_inputs.len());
 
     for outpoint in desired {
         let idx = tx_inputs
@@ -567,7 +569,16 @@ fn reorder_psbt_inputs(mut psbt: Psbt, desired: &[OutPoint]) -> Result<Psbt> {
                     outpoint.vout
                 )
             })?;
+        used[idx] = true;
         new_inputs.push(tx_inputs[idx].clone());
+        new_meta.push(psbt.inputs[idx].clone());
+    }
+
+    for (idx, input) in tx_inputs.iter().enumerate() {
+        if used[idx] {
+            continue;
+        }
+        new_inputs.push(input.clone());
         new_meta.push(psbt.inputs[idx].clone());
     }
 
