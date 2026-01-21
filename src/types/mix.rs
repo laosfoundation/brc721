@@ -46,7 +46,7 @@ impl FromStr for IndexRanges {
         let raw = s.trim();
         if raw.is_empty() {
             return Err(IndexRangesParseError::new(
-                "index ranges cannot be empty (expected e.g. '0..10,11,20..25')",
+                "index ranges cannot be empty (expected e.g. '0..=9,10,20..=25')",
             ));
         }
 
@@ -55,11 +55,32 @@ impl FromStr for IndexRanges {
             let part = part.trim();
             if part.is_empty() {
                 return Err(IndexRangesParseError::new(
-                    "index ranges contains an empty range (expected e.g. '0..10,11,20..25')",
+                    "index ranges contains an empty range (expected e.g. '0..=9,10,20..=25')",
                 ));
             }
 
-            if let Some((start, end)) = part.split_once("..") {
+            if let Some((start, end)) = part.split_once("..=") {
+                let start = parse_index_str(start)?;
+                let end = parse_index_str(end)?;
+
+                if start > end {
+                    return Err(IndexRangesParseError::new(format!(
+                        "invalid index range '{part}': start {start} must be less than or equal to end {end}"
+                    )));
+                }
+
+                if end == VarInt96::MAX_VALUE {
+                    let max_inclusive = VarInt96::MAX_VALUE - 1;
+                    return Err(IndexRangesParseError::new(format!(
+                        "invalid index range '{part}': inclusive end {end} is too large (max {max_inclusive})"
+                    )));
+                }
+
+                ranges.push(IndexRange {
+                    start,
+                    end: end + 1,
+                });
+            } else if let Some((start, end)) = part.split_once("..") {
                 let start = parse_index_str(start)?;
                 let end = parse_index_str(end)?;
 
@@ -391,7 +412,7 @@ mod tests {
 
     #[test]
     fn index_ranges_parse_allows_single_and_ranges() {
-        let ranges = IndexRanges::from_str("0..3, 5,7..10").expect("parse");
+        let ranges = IndexRanges::from_str("0..=2, 5,7..10").expect("parse");
         assert_eq!(
             ranges,
             IndexRanges(vec![
@@ -404,7 +425,7 @@ mod tests {
 
     #[test]
     fn index_ranges_parse_rejects_overlap() {
-        let err = IndexRanges::from_str("0..3,2..4").unwrap_err();
+        let err = IndexRanges::from_str("0..=2,2..=3").unwrap_err();
         assert!(err.to_string().contains("overlapping index ranges"));
     }
 

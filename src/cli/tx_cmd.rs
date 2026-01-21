@@ -157,7 +157,7 @@ pub enum TxCmd {
             value_name = "ADDRESS:RANGES|ADDRESS:complement",
             required = true,
             num_args = 2..,
-            help = "Output mapping in the form ADDRESS:0..10,12 (end exclusive) or ADDRESS:complement (repeat --output to define outputs in order)"
+            help = "Output mapping in the form ADDRESS:0..=10,12 (end inclusive) or ADDRESS:complement (repeat --output to define outputs in order)"
         )]
         outputs: Vec<String>,
         #[arg(
