@@ -34,9 +34,7 @@ impl OutputAssignment {
         slot_end: u128,
     ) {
         if let Some(last) = self.slices.last_mut() {
-            if last.collection_id == *collection_id
-                && last.base_h160 == base_h160
-            {
+            if last.collection_id == *collection_id && last.base_h160 == base_h160 {
                 if let Some(next) = last.slot_end.checked_add(1) {
                     if next == slot_start {
                         last.slot_end = slot_end;
@@ -57,12 +55,9 @@ impl OutputAssignment {
     fn unique_groups(&self) -> Vec<(CollectionKey, H160)> {
         let mut groups = Vec::new();
         for slice in &self.slices {
-            if groups
-                .iter()
-                .any(|(collection_id, base_h160)| {
-                    *collection_id == slice.collection_id && *base_h160 == slice.base_h160
-                })
-            {
+            if groups.iter().any(|(collection_id, base_h160)| {
+                *collection_id == slice.collection_id && *base_h160 == slice.base_h160
+            }) {
                 continue;
             }
             groups.push((slice.collection_id.clone(), slice.base_h160));

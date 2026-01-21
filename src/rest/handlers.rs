@@ -582,12 +582,14 @@ mod tests {
                                 && utxo.base_h160 == *base_h160
                         })
                 })
-                .map(|(_, _, collection_id, base_h160, range)| OwnershipRangeWithGroup {
-                    collection_id: collection_id.clone(),
-                    base_h160: *base_h160,
-                    slot_start: range.slot_start,
-                    slot_end: range.slot_end,
-                })
+                .map(
+                    |(_, _, collection_id, base_h160, range)| OwnershipRangeWithGroup {
+                        collection_id: collection_id.clone(),
+                        base_h160: *base_h160,
+                        slot_start: range.slot_start,
+                        slot_end: range.slot_end,
+                    },
+                )
                 .collect())
         }
 

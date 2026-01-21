@@ -16,12 +16,9 @@ pub struct Brc721Parser;
 fn unique_groups_from_ranges(ranges: &[OwnershipRangeWithGroup]) -> Vec<(CollectionKey, H160)> {
     let mut groups = Vec::new();
     for range in ranges {
-        if groups
-            .iter()
-            .any(|(collection_id, base_h160)| {
-                *collection_id == range.collection_id && *base_h160 == range.base_h160
-            })
-        {
+        if groups.iter().any(|(collection_id, base_h160)| {
+            *collection_id == range.collection_id && *base_h160 == range.base_h160
+        }) {
             continue;
         }
         groups.push((range.collection_id.clone(), range.base_h160));
@@ -29,15 +26,11 @@ fn unique_groups_from_ranges(ranges: &[OwnershipRangeWithGroup]) -> Vec<(Collect
     groups
 }
 
-fn merge_ordered_ranges(
-    ranges: &[OwnershipRangeWithGroup],
-) -> Vec<OwnershipRangeWithGroup> {
-    let mut out = Vec::new();
+fn merge_ordered_ranges(ranges: &[OwnershipRangeWithGroup]) -> Vec<OwnershipRangeWithGroup> {
+    let mut out: Vec<OwnershipRangeWithGroup> = Vec::new();
     for range in ranges {
         if let Some(last) = out.last_mut() {
-            if last.collection_id == range.collection_id
-                && last.base_h160 == range.base_h160
-            {
+            if last.collection_id == range.collection_id && last.base_h160 == range.base_h160 {
                 if let Some(next) = last.slot_end.checked_add(1) {
                     if next == range.slot_start {
                         last.slot_end = range.slot_end;
