@@ -5,13 +5,13 @@ use std::{path::Path, str::FromStr};
 
 use super::{
     traits::{
-        Collection, CollectionKey, OwnershipRange, OwnershipUtxo, OwnershipUtxoSave, Storage,
-        StorageRead, StorageTx, StorageWrite,
+        Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup, OwnershipUtxo,
+        OwnershipUtxoSave, Storage, StorageRead, StorageTx, StorageWrite,
     },
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 5;
+const DB_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -212,12 +212,35 @@ fn map_ownership_range_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ownershi
     })
 }
 
+fn map_ownership_range_with_group_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<OwnershipRangeWithGroup> {
+    let collection_id_str: String = row.get(0)?;
+    let collection_id = CollectionKey::from_str(&collection_id_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))?;
+
+    let base_h160_str: String = row.get(1)?;
+    let base_h160 = H160::from_str(&base_h160_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(err)))?;
+
+    let slot_start_blob: Vec<u8> = row.get(2)?;
+    let slot_end_blob: Vec<u8> = row.get(3)?;
+    let slot_start = decode_slot96(&slot_start_blob, 2)?;
+    let slot_end = decode_slot96(&slot_end_blob, 3)?;
+
+    Ok(OwnershipRangeWithGroup {
+        collection_id,
+        base_h160,
+        slot_start,
+        slot_end,
+    })
+}
+
 fn db_list_unspent_ownership_utxos_by_outpoint(
     conn: &Connection,
     reg_txid: &str,
     reg_vout: u32,
 ) -> rusqlite::Result<Vec<OwnershipUtxo>> {
-    // Preserve insertion order so mix ordering remains stable across transfers.
     let mut stmt = conn.prepare(
         r#"
         SELECT
@@ -235,6 +258,33 @@ fn db_list_unspent_ownership_utxos_by_outpoint(
     Ok(mapped)
 }
 
+fn db_list_unspent_ownership_ranges_by_outpoint(
+    conn: &Connection,
+    reg_txid: &str,
+    reg_vout: u32,
+) -> rusqlite::Result<Vec<OwnershipRangeWithGroup>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT r.collection_id, r.base_h160, r.slot_start, r.slot_end
+        FROM ownership_ranges r
+        JOIN ownership_utxos u
+            ON r.reg_txid = u.reg_txid
+            AND r.reg_vout = u.reg_vout
+            AND r.collection_id = u.collection_id
+            AND r.base_h160 = u.base_h160
+        WHERE r.reg_txid = ?1 AND r.reg_vout = ?2 AND u.spent_txid IS NULL
+        ORDER BY r.range_seq
+        "#,
+    )?;
+    let mapped = stmt
+        .query_map(
+            params![reg_txid, reg_vout as i64],
+            map_ownership_range_with_group_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(mapped)
+}
+
 fn db_list_ownership_ranges(
     conn: &Connection,
     utxo: &OwnershipUtxo,
@@ -248,7 +298,7 @@ fn db_list_ownership_ranges(
             AND reg_vout = ?2
             AND collection_id = ?3
             AND base_h160 = ?4
-        ORDER BY rowid
+        ORDER BY range_seq
         "#,
     )?;
     let mapped = stmt
@@ -363,8 +413,15 @@ fn db_save_ownership_range(
     conn.execute(
         r#"
         INSERT INTO ownership_ranges (
-            reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end, range_seq
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            (
+                SELECT COALESCE(MAX(range_seq), -1) + 1
+                FROM ownership_ranges
+                WHERE reg_txid = ?1 AND reg_vout = ?2
+            )
+        )
         ON CONFLICT(reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end) DO NOTHING
         "#,
         params![
@@ -423,6 +480,16 @@ impl StorageRead for SqliteTx {
         reg_vout: u32,
     ) -> Result<Vec<OwnershipUtxo>> {
         Ok(db_list_unspent_ownership_utxos_by_outpoint(
+            &self.conn, reg_txid, reg_vout,
+        )?)
+    }
+
+    fn list_unspent_ownership_ranges_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<OwnershipRangeWithGroup>> {
+        Ok(db_list_unspent_ownership_ranges_by_outpoint(
             &self.conn, reg_txid, reg_vout,
         )?)
     }
@@ -627,6 +694,7 @@ impl SqliteStorage {
                 base_h160 TEXT NOT NULL,
                 slot_start BLOB NOT NULL CHECK (length(slot_start) = 12),
                 slot_end BLOB NOT NULL CHECK (length(slot_end) = 12),
+                range_seq INTEGER NOT NULL CHECK (range_seq >= 0),
                 PRIMARY KEY (reg_txid, reg_vout, collection_id, base_h160, slot_start, slot_end),
                 CHECK (slot_start <= slot_end),
                 FOREIGN KEY (reg_txid, reg_vout, collection_id, base_h160)
@@ -641,6 +709,8 @@ impl SqliteStorage {
                 WHERE spent_txid IS NULL;
             CREATE INDEX ownership_ranges_group_idx
                 ON ownership_ranges(reg_txid, reg_vout, collection_id, base_h160);
+            CREATE INDEX ownership_ranges_order_idx
+                ON ownership_ranges(reg_txid, reg_vout, range_seq);
         "#,
             )?;
             conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)?;
@@ -684,6 +754,17 @@ impl StorageRead for SqliteStorage {
     ) -> Result<Vec<OwnershipUtxo>> {
         let rows = self.with_conn(|conn| {
             db_list_unspent_ownership_utxos_by_outpoint(conn, reg_txid, reg_vout)
+        })?;
+        Ok(rows)
+    }
+
+    fn list_unspent_ownership_ranges_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<OwnershipRangeWithGroup>> {
+        let rows = self.with_conn(|conn| {
+            db_list_unspent_ownership_ranges_by_outpoint(conn, reg_txid, reg_vout)
         })?;
         Ok(rows)
     }

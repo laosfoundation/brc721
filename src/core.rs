@@ -75,8 +75,8 @@ impl<C: BitcoinRpc, S: Storage, P: BlockParser<S::Tx>> Core<C, S, P> {
 mod tests {
     use super::*;
     use crate::storage::traits::{
-        Collection, CollectionKey, OwnershipRange, OwnershipUtxo, OwnershipUtxoSave, StorageRead,
-        StorageWrite,
+        Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup, OwnershipUtxo,
+        OwnershipUtxoSave, StorageRead, StorageWrite,
     };
     use crate::types::Brc721Error;
     use bitcoin::blockdata::constants::genesis_block;
@@ -135,6 +135,14 @@ mod tests {
             _reg_txid: &str,
             _reg_vout: u32,
         ) -> Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+
+        fn list_unspent_ownership_ranges_by_outpoint(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> Result<Vec<OwnershipRangeWithGroup>> {
             Ok(vec![])
         }
 

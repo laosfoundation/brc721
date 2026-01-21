@@ -35,6 +35,14 @@ pub struct OwnershipRange {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnershipRangeWithGroup {
+    pub collection_id: CollectionKey,
+    pub base_h160: H160,
+    pub slot_start: u128,
+    pub slot_end: u128,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     pub height: u64,
     pub hash: String,
@@ -49,6 +57,11 @@ pub trait StorageRead {
         reg_txid: &str,
         reg_vout: u32,
     ) -> Result<Vec<OwnershipUtxo>>;
+    fn list_unspent_ownership_ranges_by_outpoint(
+        &self,
+        reg_txid: &str,
+        reg_vout: u32,
+    ) -> Result<Vec<OwnershipRangeWithGroup>>;
     fn list_ownership_ranges(&self, utxo: &OwnershipUtxo) -> Result<Vec<OwnershipRange>>;
     fn find_unspent_ownership_utxo_for_slot(
         &self,

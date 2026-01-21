@@ -1,5 +1,7 @@
 use crate::bitcoin_rpc::BitcoinRpc;
-use crate::storage::traits::{OwnershipUtxoSave, StorageRead, StorageWrite};
+use crate::storage::traits::{
+    CollectionKey, OwnershipRangeWithGroup, OwnershipUtxoSave, StorageRead, StorageWrite,
+};
 use crate::types::{
     h160_from_script_pubkey, parse_brc721_tx, Brc721Error, Brc721Payload, Brc721Tx,
 };
@@ -10,6 +12,85 @@ use ethereum_types::H160;
 use crate::parser::{BlockParser, TokenInput};
 
 pub struct Brc721Parser;
+
+fn unique_groups_from_ranges(ranges: &[OwnershipRangeWithGroup]) -> Vec<(CollectionKey, H160)> {
+    let mut groups = Vec::new();
+    for range in ranges {
+        if groups
+            .iter()
+            .any(|(collection_id, base_h160)| {
+                *collection_id == range.collection_id && *base_h160 == range.base_h160
+            })
+        {
+            continue;
+        }
+        groups.push((range.collection_id.clone(), range.base_h160));
+    }
+    groups
+}
+
+fn merge_ordered_ranges(
+    ranges: &[OwnershipRangeWithGroup],
+) -> Vec<OwnershipRangeWithGroup> {
+    let mut out = Vec::new();
+    for range in ranges {
+        if let Some(last) = out.last_mut() {
+            if last.collection_id == range.collection_id
+                && last.base_h160 == range.base_h160
+            {
+                if let Some(next) = last.slot_end.checked_add(1) {
+                    if next == range.slot_start {
+                        last.slot_end = range.slot_end;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(range.clone());
+    }
+    out
+}
+
+fn save_ranges_for_output<S: StorageWrite>(
+    storage: &S,
+    txid: &str,
+    vout: u32,
+    owner_h160: H160,
+    block_height: u64,
+    tx_index: u32,
+    ranges: &[OwnershipRangeWithGroup],
+) -> Result<(), Brc721Error> {
+    let groups = unique_groups_from_ranges(ranges);
+    for (collection_id, base_h160) in groups {
+        storage
+            .save_ownership_utxo(OwnershipUtxoSave {
+                collection_id: &collection_id,
+                owner_h160,
+                base_h160,
+                reg_txid: txid,
+                reg_vout: vout,
+                created_height: block_height,
+                created_tx_index: tx_index,
+            })
+            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+    }
+
+    let merged = merge_ordered_ranges(ranges);
+    for range in merged {
+        storage
+            .save_ownership_range(
+                txid,
+                vout,
+                &range.collection_id,
+                range.base_h160,
+                range.slot_start,
+                range.slot_end,
+            )
+            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+    }
+
+    Ok(())
+}
 
 impl Brc721Parser {
     pub fn new() -> Self {
@@ -36,25 +117,17 @@ impl Brc721Parser {
             let prev_txid = prevout.txid.to_string();
             let prev_vout = prevout.vout;
 
-            let utxos = storage
-                .list_unspent_ownership_utxos_by_outpoint(&prev_txid, prev_vout)
+            let ranges = storage
+                .list_unspent_ownership_ranges_by_outpoint(&prev_txid, prev_vout)
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-            if utxos.is_empty() {
+            if ranges.is_empty() {
                 continue;
-            }
-
-            let mut groups = Vec::with_capacity(utxos.len());
-            for utxo in utxos {
-                let ranges = storage
-                    .list_ownership_ranges(&utxo)
-                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-                groups.push((utxo, ranges));
             }
 
             token_inputs.push(TokenInput {
                 prev_txid,
                 prev_vout,
-                groups,
+                ranges,
             });
         }
 
@@ -152,41 +225,25 @@ impl Brc721Parser {
             // Burn: no valid outputs, assign tokens to the null owner on vout0 (provably unspendable OP_RETURN).
             let burn_vout = 0u32;
             for input in token_inputs {
+                let group_count = unique_groups_from_ranges(&input.ranges).len();
                 log::info!(
                     "🔥 Burning token input {}:{} (groups={}) at {}#{}",
                     input.prev_txid,
                     input.prev_vout,
-                    input.groups.len(),
+                    group_count,
                     block_height,
                     tx_index
                 );
 
-                for (utxo, ranges) in input.groups {
-                    storage
-                        .save_ownership_utxo(OwnershipUtxoSave {
-                            collection_id: &utxo.collection_id,
-                            owner_h160: H160::zero(),
-                            base_h160: utxo.base_h160,
-                            reg_txid: &spend_txid,
-                            reg_vout: burn_vout,
-                            created_height: block_height,
-                            created_tx_index: tx_index,
-                        })
-                        .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-
-                    for range in ranges {
-                        storage
-                            .save_ownership_range(
-                                &spend_txid,
-                                burn_vout,
-                                &utxo.collection_id,
-                                utxo.base_h160,
-                                range.slot_start,
-                                range.slot_end,
-                            )
-                            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-                    }
-                }
+                save_ranges_for_output(
+                    storage,
+                    &spend_txid,
+                    burn_vout,
+                    H160::zero(),
+                    block_height,
+                    tx_index,
+                    &input.ranges,
+                )?;
             }
 
             return Ok(());
@@ -203,6 +260,7 @@ impl Brc721Parser {
             };
 
             let dest_owner_h160 = h160_from_script_pubkey(&dest_txout.script_pubkey);
+            let group_count = unique_groups_from_ranges(&input.ranges).len();
 
             log::info!(
                 "🔁 Implicit transfer input {}:{} -> outpoint {}:{} (groups={}) at {}#{}",
@@ -210,37 +268,20 @@ impl Brc721Parser {
                 input.prev_vout,
                 spend_txid,
                 dest_vout,
-                input.groups.len(),
+                group_count,
                 block_height,
                 tx_index
             );
 
-            for (utxo, ranges) in input.groups {
-                storage
-                    .save_ownership_utxo(OwnershipUtxoSave {
-                        collection_id: &utxo.collection_id,
-                        owner_h160: dest_owner_h160,
-                        base_h160: utxo.base_h160,
-                        reg_txid: &spend_txid,
-                        reg_vout: dest_vout,
-                        created_height: block_height,
-                        created_tx_index: tx_index,
-                    })
-                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-
-                for range in ranges {
-                    storage
-                        .save_ownership_range(
-                            &spend_txid,
-                            dest_vout,
-                            &utxo.collection_id,
-                            utxo.base_h160,
-                            range.slot_start,
-                            range.slot_end,
-                        )
-                        .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-                }
-            }
+            save_ranges_for_output(
+                storage,
+                &spend_txid,
+                dest_vout,
+                dest_owner_h160,
+                block_height,
+                tx_index,
+                &input.ranges,
+            )?;
         }
 
         Ok(())
@@ -904,6 +945,135 @@ mod tests {
     }
 
     #[test]
+    fn mix_preserves_input_order_across_groups() {
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_mix_order.db"));
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+        let base_a = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let base_b = H160::from_str("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+
+        let prev_txid = bitcoin::Txid::from_str(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .unwrap();
+        let prev_txid_str = prev_txid.to_string();
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160: base_a,
+            reg_txid: &prev_txid_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(2),
+            base_h160: base_b,
+            reg_txid: &prev_txid_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 1,
+        })
+        .unwrap();
+
+        // Insert ranges in an interleaved order: A0, B100, A1.
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_a, 0, 0)
+            .unwrap();
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_b, 100, 100)
+            .unwrap();
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_a, 1, 1)
+            .unwrap();
+
+        let mix = crate::types::MixData::new(
+            vec![
+                vec![crate::types::mix::IndexRange { start: 1, end: 2 }],
+                Vec::new(),
+            ],
+            1,
+        )
+        .expect("mix payload");
+        let op_return =
+            crate::types::Brc721OpReturnOutput::new(crate::types::Brc721Payload::Mix(mix))
+                .into_txout()
+                .unwrap();
+
+        let dest_script_1 = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest1"));
+        let dest_script_2 = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest2"));
+
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: prev_txid,
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0xffffffff),
+                witness: Witness::default(),
+            }],
+            output: vec![
+                op_return,
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script_1.clone(),
+                },
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script_2.clone(),
+                },
+            ],
+        };
+
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 210, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let output1 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 1)
+            .unwrap();
+        assert_eq!(output1.len(), 1);
+        assert_eq!(output1[0].base_h160, base_b);
+        let ranges1 = storage.list_ownership_ranges(&output1[0]).unwrap();
+        assert_eq!(
+            ranges1,
+            vec![OwnershipRange {
+                slot_start: 100,
+                slot_end: 100
+            }]
+        );
+
+        let output2 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 2)
+            .unwrap();
+        assert_eq!(output2.len(), 1);
+        assert_eq!(output2[0].base_h160, base_a);
+        let ranges2 = storage.list_ownership_ranges(&output2[0]).unwrap();
+        assert_eq!(
+            ranges2,
+            vec![OwnershipRange {
+                slot_start: 0,
+                slot_end: 1
+            }]
+        );
+    }
+
+    #[test]
     fn mix_invalid_does_not_fallback_to_implicit_transfer() {
         use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
         use std::str::FromStr;
@@ -1050,6 +1220,14 @@ mod tests {
             _reg_txid: &str,
             _reg_vout: u32,
         ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+
+        fn list_unspent_ownership_ranges_by_outpoint(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> anyhow::Result<Vec<OwnershipRangeWithGroup>> {
             Ok(vec![])
         }
 

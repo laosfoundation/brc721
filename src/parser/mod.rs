@@ -7,11 +7,11 @@ mod traits;
 pub use brc721_parser::Brc721Parser;
 pub use traits::BlockParser;
 
-use crate::storage::traits::{OwnershipRange, OwnershipUtxo};
+use crate::storage::traits::OwnershipRangeWithGroup;
 
 #[derive(Debug)]
 pub(crate) struct TokenInput {
     pub prev_txid: String,
     pub prev_vout: u32,
-    pub groups: Vec<(OwnershipUtxo, Vec<OwnershipRange>)>,
+    pub ranges: Vec<OwnershipRangeWithGroup>,
 }

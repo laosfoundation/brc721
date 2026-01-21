@@ -1,5 +1,5 @@
 use crate::parser::TokenInput;
-use crate::storage::traits::{CollectionKey, OwnershipRange, OwnershipUtxoSave, StorageWrite};
+use crate::storage::traits::{CollectionKey, OwnershipUtxoSave, StorageWrite};
 use crate::types::{h160_from_script_pubkey, Brc721Error, Brc721Tx, MixData};
 use ethereum_types::H160;
 
@@ -14,50 +14,60 @@ struct InputSegment {
 
 #[derive(Default)]
 struct OutputAssignment {
-    groups: Vec<OutputGroup>,
+    slices: Vec<OutputSlice>,
 }
 
 #[derive(Clone)]
-struct OutputGroup {
+struct OutputSlice {
     collection_id: CollectionKey,
     base_h160: H160,
-    ranges: Vec<OwnershipRange>,
+    slot_start: u128,
+    slot_end: u128,
 }
 
 impl OutputAssignment {
-    fn push_range(
+    fn push_slice(
         &mut self,
         collection_id: &CollectionKey,
         base_h160: H160,
         slot_start: u128,
         slot_end: u128,
     ) {
-        let mut group = self
-            .groups
-            .iter_mut()
-            .find(|group| group.collection_id == *collection_id && group.base_h160 == base_h160);
-
-        if group.is_none() {
-            self.groups.push(OutputGroup {
-                collection_id: collection_id.clone(),
-                base_h160,
-                ranges: Vec::new(),
-            });
-            group = self.groups.last_mut();
-        }
-
-        let group = group.expect("group must exist");
-        if let Some(last) = group.ranges.last_mut() {
-            if last.slot_end + 1 == slot_start {
-                last.slot_end = slot_end;
-                return;
+        if let Some(last) = self.slices.last_mut() {
+            if last.collection_id == *collection_id
+                && last.base_h160 == base_h160
+            {
+                if let Some(next) = last.slot_end.checked_add(1) {
+                    if next == slot_start {
+                        last.slot_end = slot_end;
+                        return;
+                    }
+                }
             }
         }
 
-        group.ranges.push(OwnershipRange {
+        self.slices.push(OutputSlice {
+            collection_id: collection_id.clone(),
+            base_h160,
             slot_start,
             slot_end,
         });
+    }
+
+    fn unique_groups(&self) -> Vec<(CollectionKey, H160)> {
+        let mut groups = Vec::new();
+        for slice in &self.slices {
+            if groups
+                .iter()
+                .any(|(collection_id, base_h160)| {
+                    *collection_id == slice.collection_id && *base_h160 == slice.base_h160
+                })
+            {
+                continue;
+            }
+            groups.push((slice.collection_id.clone(), slice.base_h160));
+        }
+        groups
     }
 }
 
@@ -102,30 +112,26 @@ pub fn digest<S: StorageWrite>(
     let mut index_cursor: u128 = 0;
 
     for input in token_inputs {
-        for (utxo, ranges) in &input.groups {
-            for range in ranges {
-                let len = range
-                    .slot_end
-                    .checked_sub(range.slot_start)
-                    .and_then(|delta| delta.checked_add(1))
-                    .ok_or_else(|| {
-                        Brc721Error::TxError("mix input range length overflow".into())
-                    })?;
+        for range in &input.ranges {
+            let len = range
+                .slot_end
+                .checked_sub(range.slot_start)
+                .and_then(|delta| delta.checked_add(1))
+                .ok_or_else(|| Brc721Error::TxError("mix input range length overflow".into()))?;
 
-                let index_start = index_cursor;
-                let index_end = index_cursor
-                    .checked_add(len)
-                    .ok_or_else(|| Brc721Error::TxError("mix index overflow".into()))?;
+            let index_start = index_cursor;
+            let index_end = index_cursor
+                .checked_add(len)
+                .ok_or_else(|| Brc721Error::TxError("mix index overflow".into()))?;
 
-                segments.push(InputSegment {
-                    collection_id: utxo.collection_id.clone(),
-                    base_h160: utxo.base_h160,
-                    slot_start: range.slot_start,
-                    index_start,
-                    index_end,
-                });
-                index_cursor = index_end;
-            }
+            segments.push(InputSegment {
+                collection_id: range.collection_id.clone(),
+                base_h160: range.base_h160,
+                slot_start: range.slot_start,
+                index_start,
+                index_end,
+            });
+            index_cursor = index_end;
         }
     }
 
@@ -219,7 +225,7 @@ pub fn digest<S: StorageWrite>(
                 .checked_add(slice_len - 1)
                 .ok_or_else(|| Brc721Error::TxError("mix slot overflow".into()))?;
 
-            assignments[output_index].push_range(
+            assignments[output_index].push_slice(
                 &segment.collection_id,
                 segment.base_h160,
                 slot_start,
@@ -231,7 +237,7 @@ pub fn digest<S: StorageWrite>(
     }
 
     for (output_index, assignment) in assignments.into_iter().enumerate() {
-        if assignment.groups.is_empty() {
+        if assignment.slices.is_empty() {
             continue;
         }
 
@@ -241,31 +247,31 @@ pub fn digest<S: StorageWrite>(
             .map(|output| h160_from_script_pubkey(&output.script_pubkey))
             .unwrap_or_else(H160::zero);
 
-        for group in assignment.groups {
+        for (collection_id, base_h160) in assignment.unique_groups() {
             storage
                 .save_ownership_utxo(OwnershipUtxoSave {
-                    collection_id: &group.collection_id,
+                    collection_id: &collection_id,
                     owner_h160,
-                    base_h160: group.base_h160,
+                    base_h160,
                     reg_txid: &txid,
                     reg_vout: vout,
                     created_height: block_height,
                     created_tx_index: tx_index,
                 })
                 .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+        }
 
-            for range in group.ranges {
-                storage
-                    .save_ownership_range(
-                        &txid,
-                        vout,
-                        &group.collection_id,
-                        group.base_h160,
-                        range.slot_start,
-                        range.slot_end,
-                    )
-                    .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
-            }
+        for slice in assignment.slices {
+            storage
+                .save_ownership_range(
+                    &txid,
+                    vout,
+                    &slice.collection_id,
+                    slice.base_h160,
+                    slice.slot_start,
+                    slice.slot_end,
+                )
+                .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         }
     }
 
