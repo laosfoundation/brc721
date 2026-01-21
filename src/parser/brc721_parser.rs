@@ -126,6 +126,11 @@ impl Brc721Parser {
                 if handled {
                     return Ok(());
                 }
+                log::warn!(
+                    "mix rejected; skipping implicit transfer (txid={})",
+                    spend_txid
+                );
+                return Ok(());
             } else {
                 self.digest_brc721_tx(storage, brc721_tx, block_height, tx_index, rpc)?;
             }
@@ -896,6 +901,90 @@ mod tests {
                 slot_end: 1
             }]
         );
+    }
+
+    #[test]
+    fn mix_invalid_does_not_fallback_to_implicit_transfer() {
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Witness};
+        use std::str::FromStr;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage =
+            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_mix_invalid.db"));
+        storage.init().expect("init db");
+
+        let collection_id = CollectionKey::new(840_000, 0);
+        let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let prev_txid = bitcoin::Txid::from_str(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .unwrap();
+        let prev_txid_str = prev_txid.to_string();
+
+        let tx = storage.begin_tx().unwrap();
+        tx.save_ownership_utxo(OwnershipUtxoSave {
+            collection_id: &collection_id,
+            owner_h160: H160::from_low_u64_be(1),
+            base_h160,
+            reg_txid: &prev_txid_str,
+            reg_vout: 0,
+            created_height: 1,
+            created_tx_index: 0,
+        })
+        .unwrap();
+        tx.save_ownership_range(&prev_txid_str, 0, &collection_id, base_h160, 7, 7)
+            .unwrap();
+
+        let mix = crate::types::MixData::new(
+            vec![
+                vec![crate::types::mix::IndexRange { start: 0, end: 1 }],
+                Vec::new(),
+            ],
+            1,
+        )
+        .expect("mix payload");
+        let op_return =
+            crate::types::Brc721OpReturnOutput::new(crate::types::Brc721Payload::Mix(mix))
+                .into_txout()
+                .unwrap();
+
+        let dest_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"dest1"));
+
+        // Invalid mix: payload declares 2 outputs, but the transaction only has vout0 + vout1.
+        let spending_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: prev_txid,
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0xffffffff),
+                witness: Witness::default(),
+            }],
+            output: vec![
+                op_return,
+                TxOut {
+                    value: Amount::from_sat(5_000),
+                    script_pubkey: dest_script,
+                },
+            ],
+        };
+
+        let spend_txid_str = spending_tx.compute_txid().to_string();
+
+        let mut block = genesis_block(Network::Regtest);
+        block.txdata = vec![spending_tx];
+        let parser = Brc721Parser::new();
+        let rpc = DummyRpc;
+        parser.parse_block(&tx, &block, 201, &rpc).unwrap();
+        tx.commit().unwrap();
+
+        let output1 = storage
+            .list_unspent_ownership_utxos_by_outpoint(&spend_txid_str, 1)
+            .unwrap();
+        assert!(output1.is_empty());
     }
 
     struct DummyStorageInner {
