@@ -447,8 +447,8 @@ fn parse_mix_outputs(
     outputs: &[String],
     network: bitcoin::Network,
 ) -> Result<(Vec<Address>, MixData)> {
-    if outputs.len() < 2 {
-        return Err(anyhow!("mix requires at least two --output entries"));
+    if outputs.is_empty() {
+        return Err(anyhow!("mix requires at least one --output entry"));
     }
 
     let mut addresses = Vec::with_capacity(outputs.len());

@@ -223,9 +223,14 @@ impl MixData {
     }
 
     pub fn validate_token_count(&self, total_tokens: u128) -> Result<(), Brc721Error> {
-        let max_end = self.max_explicit_end().ok_or_else(|| {
-            Brc721Error::TxError("mix requires at least one explicit range".into())
-        })?;
+        let Some(max_end) = self.max_explicit_end() else {
+            if self.output_ranges.len() == 1 && self.complement_index == 0 {
+                return Ok(());
+            }
+            return Err(Brc721Error::TxError(
+                "mix requires at least one explicit range".into(),
+            ));
+        };
 
         if max_end == 0 {
             return Err(Brc721Error::TxError(
@@ -244,9 +249,9 @@ impl MixData {
     }
 
     fn validate_basic(&self) -> Result<(), Brc721Error> {
-        if self.output_ranges.len() < 2 {
+        if self.output_ranges.is_empty() {
             return Err(Brc721Error::TxError(
-                "mix requires at least 2 output mappings".into(),
+                "mix requires at least one output mapping".into(),
             ));
         }
 
@@ -301,6 +306,9 @@ impl MixData {
         }
 
         if all_ranges.is_empty() {
+            if self.output_ranges.len() == 1 && self.complement_index == 0 {
+                return Ok(());
+            }
             return Err(Brc721Error::TxError(
                 "mix requires at least one explicit range".into(),
             ));
@@ -336,9 +344,9 @@ impl TryFrom<&[u8]> for MixData {
                 usize::MAX
             ))
         })?;
-        if output_count < 2 {
+        if output_count < 1 {
             return Err(Brc721Error::TxError(format!(
-                "mix output_count must be at least 2, got {}",
+                "mix output_count must be at least 1, got {}",
                 output_count
             )));
         }
@@ -440,6 +448,16 @@ mod tests {
             1,
         )
         .expect("valid mix data");
+
+        let bytes = data.to_bytes();
+        let parsed = MixData::try_from(bytes.as_slice()).expect("parse ok");
+        assert_eq!(parsed, data);
+    }
+
+    #[test]
+    fn mix_roundtrip_single_complement_ok() {
+        let data = MixData::new(vec![Vec::new()], 0).expect("valid mix data");
+        data.validate_token_count(5).expect("token count ok");
 
         let bytes = data.to_bytes();
         let parsed = MixData::try_from(bytes.as_slice()).expect("parse ok");

@@ -141,7 +141,7 @@ pub enum TxCmd {
     },
     #[command(
         about = "Mix BRC-721 assets across outputs (explicit mapping)",
-        long_about = "Create and broadcast a mix transaction that maps NFT indices across the provided ownership inputs to specific outputs using an OP_RETURN payload. Exactly one output mapping must be marked as the complement set."
+        long_about = "Create and broadcast a mix transaction that maps NFT indices across the provided ownership inputs to specific outputs using an OP_RETURN payload. Exactly one output mapping must be marked as the complement set. Use a single output with :complement to merge all tokens into one output."
     )]
     Mix {
         #[arg(
@@ -156,8 +156,8 @@ pub enum TxCmd {
             long = "output",
             value_name = "ADDRESS:RANGES|ADDRESS:complement",
             required = true,
-            num_args = 2..,
-            help = "Output mapping in the form ADDRESS:0..=10,12 (end inclusive) or ADDRESS:complement (repeat --output to define outputs in order)"
+            num_args = 1..,
+            help = "Output mapping in the form ADDRESS:0..=10,12 (end inclusive) or ADDRESS:complement (repeat --output to define outputs in order; a single complement output merges all tokens)"
         )]
         outputs: Vec<String>,
         #[arg(
