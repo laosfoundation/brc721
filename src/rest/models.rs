@@ -53,9 +53,9 @@ pub struct TokenOwnerResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vout: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_height: Option<u64>,
+    pub utxo_height: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_tx_index: Option<u32>,
+    pub utxo_tx_index: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -87,8 +87,8 @@ pub struct UtxoOwnershipResponse {
     pub collection_id: String,
     pub owner_h160: String,
     pub init_owner_h160: String,
-    pub created_height: u64,
-    pub created_tx_index: u32,
+    pub utxo_height: u64,
+    pub utxo_tx_index: u32,
     pub slot_ranges: Vec<SlotRangeResponse>,
 }
 
@@ -99,8 +99,8 @@ pub struct OwnershipUtxoResponse {
     pub txid: String,
     pub vout: u32,
     pub init_owner_h160: String,
-    pub created_height: u64,
-    pub created_tx_index: u32,
+    pub utxo_height: u64,
+    pub utxo_tx_index: u32,
     pub slot_ranges: Vec<SlotRangeResponse>,
 }
 
