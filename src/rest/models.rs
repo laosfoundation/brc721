@@ -52,6 +52,10 @@ pub struct TokenOwnerResponse {
     pub txid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vout: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_height: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_tx_index: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]

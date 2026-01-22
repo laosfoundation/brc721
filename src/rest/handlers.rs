@@ -134,6 +134,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             owner_h160: format!("{:#x}", utxo.owner_h160),
             txid: Some(utxo.reg_txid),
             vout: Some(utxo.reg_vout),
+            created_height: Some(utxo.created_height),
+            created_tx_index: Some(utxo.created_tx_index),
         })
         .into_response(),
         Ok(None) => Json(TokenOwnerResponse {
@@ -145,6 +147,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             owner_h160: initial_owner_h160,
             txid: None,
             vout: None,
+            created_height: None,
+            created_tx_index: None,
         })
         .into_response(),
         Err(err) => {
@@ -378,6 +382,8 @@ mod tests {
         assert_eq!(payload.owner_h160, expected_owner_h160);
         assert_eq!(payload.txid, None);
         assert_eq!(payload.vout, None);
+        assert_eq!(payload.created_height, None);
+        assert_eq!(payload.created_tx_index, None);
     }
 
     #[tokio::test]
@@ -425,6 +431,8 @@ mod tests {
         assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
         assert_eq!(payload.txid.as_deref(), Some("txid"));
         assert_eq!(payload.vout, Some(1));
+        assert_eq!(payload.created_height, Some(840_001));
+        assert_eq!(payload.created_tx_index, Some(2));
     }
 
     #[tokio::test]
