@@ -75,6 +75,25 @@ pub struct AddressAssetsResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UtxoAssetsResponse {
+    pub txid: String,
+    pub vout: u32,
+    pub assets: Vec<UtxoOwnershipResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UtxoOwnershipResponse {
+    pub collection_id: String,
+    pub owner_h160: String,
+    pub init_owner_h160: String,
+    pub created_height: u64,
+    pub created_tx_index: u32,
+    pub slot_ranges: Vec<SlotRangeResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OwnershipUtxoResponse {
     pub collection_id: String,
     pub txid: String,

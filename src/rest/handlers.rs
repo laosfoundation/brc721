@@ -20,7 +20,7 @@ use super::{
     models::{
         AddressAssetsResponse, ChainStateResponse, CollectionResponse, CollectionsResponse,
         ErrorResponse, HealthResponse, LastBlock, OwnershipStatus, OwnershipUtxoResponse,
-        SlotRangeResponse, TokenOwnerResponse,
+        SlotRangeResponse, TokenOwnerResponse, UtxoAssetsResponse, UtxoOwnershipResponse,
     },
     AppState,
 };
@@ -246,6 +246,97 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
     .into_response()
 }
 
+pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+    Path((txid, vout_str)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let _ = match bitcoin::Txid::from_str(&txid) {
+        Ok(txid) => txid,
+        Err(err) => {
+            log::warn!("Invalid txid {}: {}", txid, err);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    message: "invalid txid".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let vout: u32 = match vout_str.parse() {
+        Ok(vout) => vout,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    message: "invalid vout".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let utxos = match state
+        .storage
+        .list_unspent_ownership_utxos_by_outpoint(&txid, vout)
+    {
+        Ok(utxos) => utxos,
+        Err(err) => {
+            log::error!(
+                "Failed to list ownership UTXOs for outpoint {}:{}: {:?}",
+                txid,
+                vout,
+                err
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    if utxos.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let mut assets = Vec::with_capacity(utxos.len());
+    for utxo in utxos {
+        let ranges = match state.storage.list_ownership_ranges(&utxo) {
+            Ok(ranges) => ranges,
+            Err(err) => {
+                log::error!(
+                    "Failed to list ownership ranges for outpoint {}:{}: {:?}",
+                    utxo.reg_txid,
+                    utxo.reg_vout,
+                    err
+                );
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+        assets.push(UtxoOwnershipResponse {
+            collection_id: utxo.collection_id.to_string(),
+            owner_h160: format!("{:#x}", utxo.owner_h160),
+            init_owner_h160: format!("{:#x}", utxo.base_h160),
+            created_height: utxo.created_height,
+            created_tx_index: utxo.created_tx_index,
+            slot_ranges: ranges
+                .into_iter()
+                .map(|range| SlotRangeResponse {
+                    start: range.slot_start.to_string(),
+                    end: range.slot_end.to_string(),
+                })
+                .collect(),
+        });
+    }
+
+    assets.sort_by(|a, b| {
+        a.collection_id
+            .cmp(&b.collection_id)
+            .then_with(|| a.init_owner_h160.cmp(&b.init_owner_h160))
+    });
+
+    Json(UtxoAssetsResponse { txid, vout, assets }).into_response()
+}
+
 pub async fn not_found() -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
@@ -456,6 +547,64 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[tokio::test]
+    async fn get_utxo_assets_returns_assets() {
+        let collection = sample_collection();
+        let token = sample_token();
+        let reg_txid =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+
+        let utxo = OwnershipUtxo {
+            collection_id: collection.key.clone(),
+            reg_txid: reg_txid.clone(),
+            reg_vout: 1,
+            owner_h160: H160::from_low_u64_be(0x1234),
+            base_h160: token.h160_address(),
+            created_height: 840_001,
+            created_tx_index: 2,
+            spent_txid: None,
+            spent_height: None,
+            spent_tx_index: None,
+        };
+
+        let storage = TestStorage::with_collection(collection.clone()).with_ownership_utxo(
+            utxo,
+            vec![OwnershipRange {
+                slot_start: token.slot_number(),
+                slot_end: token.slot_number(),
+            }],
+        );
+
+        let response = issue_utxo_request(storage, &reg_txid, "1").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: UtxoAssetsResponse = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(payload.txid, reg_txid);
+        assert_eq!(payload.vout, 1);
+        assert_eq!(payload.assets.len(), 1);
+        assert_eq!(payload.assets[0].collection_id, collection.key.to_string());
+        assert_eq!(
+            payload.assets[0].owner_h160,
+            format!("{:#x}", H160::from_low_u64_be(0x1234))
+        );
+        assert_eq!(
+            payload.assets[0].init_owner_h160,
+            format!("{:#x}", token.h160_address())
+        );
+        assert_eq!(payload.assets[0].created_height, 840_001);
+        assert_eq!(payload.assets[0].created_tx_index, 2);
+        assert_eq!(payload.assets[0].slot_ranges.len(), 1);
+        assert_eq!(
+            payload.assets[0].slot_ranges[0].start,
+            token.slot_number().to_string()
+        );
+        assert_eq!(
+            payload.assets[0].slot_ranges[0].end,
+            token.slot_number().to_string()
+        );
+    }
+
     fn sample_token() -> Brc721Token {
         Brc721Token::new(42, sample_address()).expect("valid token")
     }
@@ -490,6 +639,33 @@ mod tests {
                         "/collections/{}/tokens/{}",
                         collection_id, token_id
                     ))
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn issue_utxo_request(
+        storage: TestStorage,
+        txid: &str,
+        vout: &str,
+    ) -> axum::response::Response {
+        let router = Router::new()
+            .route(
+                "/utxos/:txid/:vout/assets",
+                get(get_utxo_assets::<TestStorage>),
+            )
+            .with_state(AppState {
+                storage,
+                started_at: SystemTime::now(),
+            });
+
+        router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/utxos/{}/{}/assets", txid, vout))
                     .method("GET")
                     .body(Body::empty())
                     .unwrap(),

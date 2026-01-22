@@ -8,8 +8,8 @@ mod handlers;
 mod models;
 
 use handlers::{
-    chain_state, get_address_assets, get_collection, get_token_owner, health, list_collections,
-    not_found,
+    chain_state, get_address_assets, get_collection, get_token_owner, get_utxo_assets, health,
+    list_collections, not_found,
 };
 
 #[derive(Clone)]
@@ -36,6 +36,7 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
         .route("/collections/:id", get(get_collection::<S>))
         .route("/collections", get(list_collections::<S>))
         .route("/addresses/:address/assets", get(get_address_assets::<S>))
+        .route("/utxos/:txid/:vout/assets", get(get_utxo_assets::<S>))
         .route(
             "/collections/:collection_id/tokens/:token_id",
             get(get_token_owner::<S>),
