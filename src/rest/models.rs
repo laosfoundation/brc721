@@ -52,6 +52,10 @@ pub struct TokenOwnerResponse {
     pub txid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vout: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_height: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_tx_index: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,6 +71,25 @@ pub struct AddressAssetsResponse {
     pub address: String,
     pub address_h160: String,
     pub utxos: Vec<OwnershipUtxoResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UtxoAssetsResponse {
+    pub txid: String,
+    pub vout: u32,
+    pub assets: Vec<UtxoOwnershipResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UtxoOwnershipResponse {
+    pub collection_id: String,
+    pub owner_h160: String,
+    pub init_owner_h160: String,
+    pub created_height: u64,
+    pub created_tx_index: u32,
+    pub slot_ranges: Vec<SlotRangeResponse>,
 }
 
 #[derive(Serialize, Deserialize)]
