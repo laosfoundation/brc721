@@ -78,6 +78,8 @@ pub struct AddressAssetsResponse {
 pub struct UtxoAssetsResponse {
     pub txid: String,
     pub vout: u32,
+    pub utxo_height: u64,
+    pub utxo_tx_index: u32,
     pub assets: Vec<UtxoOwnershipResponse>,
 }
 
@@ -87,8 +89,6 @@ pub struct UtxoOwnershipResponse {
     pub collection_id: String,
     pub owner_h160: String,
     pub init_owner_h160: String,
-    pub created_height: u64,
-    pub created_tx_index: u32,
     pub slot_ranges: Vec<SlotRangeResponse>,
 }
 
