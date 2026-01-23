@@ -337,9 +337,12 @@ pub async fn not_found() -> impl IntoResponse {
 }
 
 fn json_error(status: StatusCode, message: &str) -> Response {
-    (status, Json(ErrorResponse {
-        message: message.to_string(),
-    }))
+    (
+        status,
+        Json(ErrorResponse {
+            message: message.to_string(),
+        }),
+    )
         .into_response()
 }
 
