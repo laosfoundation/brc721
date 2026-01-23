@@ -78,6 +78,7 @@ pub struct AddressAssetsResponse {
 pub struct UtxoAssetsResponse {
     pub txid: String,
     pub vout: u32,
+    pub owner_h160: String,
     pub utxo_height: u64,
     pub utxo_tx_index: u32,
     pub assets: Vec<UtxoOwnershipResponse>,
@@ -87,7 +88,6 @@ pub struct UtxoAssetsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UtxoOwnershipResponse {
     pub collection_id: String,
-    pub owner_h160: String,
     pub init_owner_h160: String,
     pub slot_ranges: Vec<SlotRangeResponse>,
 }

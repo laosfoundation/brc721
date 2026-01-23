@@ -297,6 +297,7 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    let owner_h160 = format!("{:#x}", utxos[0].owner_h160);
     let utxo_height = utxos[0].created_height;
     let utxo_tx_index = utxos[0].created_tx_index;
     let mut assets = Vec::with_capacity(utxos.len());
@@ -316,7 +317,6 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
 
         assets.push(UtxoOwnershipResponse {
             collection_id: utxo.collection_id.to_string(),
-            owner_h160: format!("{:#x}", utxo.owner_h160),
             init_owner_h160: format!("{:#x}", utxo.base_h160),
             slot_ranges: ranges
                 .into_iter()
@@ -337,6 +337,7 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
     Json(UtxoAssetsResponse {
         txid,
         vout,
+        owner_h160,
         utxo_height,
         utxo_tx_index,
         assets,
@@ -589,14 +590,14 @@ mod tests {
 
         assert_eq!(payload.txid, reg_txid);
         assert_eq!(payload.vout, 1);
+        assert_eq!(
+            payload.owner_h160,
+            format!("{:#x}", H160::from_low_u64_be(0x1234))
+        );
         assert_eq!(payload.utxo_height, 840_001);
         assert_eq!(payload.utxo_tx_index, 2);
         assert_eq!(payload.assets.len(), 1);
         assert_eq!(payload.assets[0].collection_id, collection.key.to_string());
-        assert_eq!(
-            payload.assets[0].owner_h160,
-            format!("{:#x}", H160::from_low_u64_be(0x1234))
-        );
         assert_eq!(
             payload.assets[0].init_owner_h160,
             format!("{:#x}", token.h160_address())
