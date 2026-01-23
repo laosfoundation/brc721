@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     pub status: &'static str,
     pub uptime_secs: u64,
@@ -29,6 +30,7 @@ pub struct CollectionsResponse {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
     pub message: String,
 }
@@ -69,7 +71,7 @@ pub enum OwnershipStatus {
 #[serde(rename_all = "camelCase")]
 pub struct AddressAssetsResponse {
     pub address: String,
-    pub address_h160: String,
+    pub owner_h160: String,
     pub utxos: Vec<OwnershipUtxoResponse>,
 }
 

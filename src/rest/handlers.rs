@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use ethereum_types::U256;
@@ -41,24 +41,35 @@ pub async fn health<S: Storage + Clone + Send + Sync + 'static>(
 pub async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
-    let last = state.storage.load_last().ok().flatten().map(|b| LastBlock {
-        height: b.height,
-        hash: b.hash,
-    });
-    Json(ChainStateResponse { last })
+    match state.storage.load_last() {
+        Ok(last) => {
+            let last = last.map(|b| LastBlock {
+                height: b.height,
+                hash: b.hash,
+            });
+            Json(ChainStateResponse { last }).into_response()
+        }
+        Err(err) => {
+            log::error!("Failed to load chain state: {:?}", err);
+            internal_error()
+        }
+    }
 }
 
 pub async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
-    let collections = state
-        .storage
-        .list_collections()
-        .unwrap_or_default()
-        .into_iter()
-        .map(collection_to_response)
-        .collect();
-    Json(CollectionsResponse { collections })
+    let collections = match state.storage.list_collections() {
+        Ok(collections) => collections
+            .into_iter()
+            .map(collection_to_response)
+            .collect(),
+        Err(err) => {
+            log::error!("Failed to list collections: {:?}", err);
+            return internal_error();
+        }
+    };
+    Json(CollectionsResponse { collections }).into_response()
 }
 
 pub async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
@@ -69,15 +80,15 @@ pub async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
         Ok(key) => key,
         Err(err) => {
             log::warn!("Invalid collection id {}: {}", id, err);
-            return StatusCode::BAD_REQUEST.into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid collection id");
         }
     };
     match state.storage.load_collection(&key) {
         Ok(Some(collection)) => Json(collection_to_response(collection)).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "collection not found"),
         Err(err) => {
             log::error!("Failed to load collection {}: {:?}", id, err);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            internal_error()
         }
     }
 }
@@ -90,16 +101,16 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         Ok(key) => key,
         Err(err) => {
             log::warn!("Invalid collection id {}: {}", collection_id, err);
-            return StatusCode::BAD_REQUEST.into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid collection id");
         }
     };
 
     match state.storage.load_collection(&key) {
         Ok(Some(_)) => {}
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "collection not found"),
         Err(err) => {
             log::error!("Failed to load collection {}: {:?}", key, err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return internal_error();
         }
     }
 
@@ -107,13 +118,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         Ok(token) => token,
         Err(err) => {
             log::warn!("Invalid token id {}: {}", token_id, err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid token id".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid token id");
         }
     };
 
@@ -158,7 +163,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
                 token_id,
                 err
             );
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            internal_error()
         }
     }
 }
@@ -171,13 +176,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
         Ok(address) => address.assume_checked(),
         Err(err) => {
             log::warn!("Invalid address {}: {}", address, err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid address".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid address");
         }
     };
 
@@ -195,7 +194,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
                 address,
                 err
             );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return internal_error();
         }
     };
 
@@ -240,7 +239,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
 
     Json(AddressAssetsResponse {
         address: address.to_string(),
-        address_h160: format!("{:#x}", owner_h160),
+        owner_h160: format!("{:#x}", owner_h160),
         utxos: owned,
     })
     .into_response()
@@ -254,26 +253,14 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
         Ok(txid) => txid,
         Err(err) => {
             log::warn!("Invalid txid {}: {}", txid, err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid txid".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid txid");
         }
     };
 
     let vout: u32 = match vout_str.parse() {
         Ok(vout) => vout,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid vout".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid vout");
         }
     };
 
@@ -289,12 +276,12 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
                 vout,
                 err
             );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return internal_error();
         }
     };
 
     if utxos.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
+        return json_error(StatusCode::NOT_FOUND, "utxo not found");
     }
 
     let owner_h160 = format!("{:#x}", utxos[0].owner_h160);
@@ -311,7 +298,7 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
                     utxo.reg_vout,
                     err
                 );
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return internal_error();
             }
         };
 
@@ -346,12 +333,18 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
 }
 
 pub async fn not_found() -> impl IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        Json(ErrorResponse {
-            message: "endpoint not found".to_string(),
-        }),
-    )
+    json_error(StatusCode::NOT_FOUND, "endpoint not found")
+}
+
+fn json_error(status: StatusCode, message: &str) -> Response {
+    (status, Json(ErrorResponse {
+        message: message.to_string(),
+    }))
+        .into_response()
+}
+
+fn internal_error() -> Response {
+    json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
 }
 
 fn collection_to_response(collection: Collection) -> CollectionResponse {
@@ -553,6 +546,10 @@ mod tests {
         let token_decimal = format_token_id(&sample_token());
         let response = issue_owner_request(storage, "850123:0", &token_decimal).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: ErrorResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(payload.message, "collection not found");
     }
 
     #[tokio::test]
