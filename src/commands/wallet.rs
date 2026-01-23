@@ -209,8 +209,8 @@ struct OwnershipUtxoJson {
     txid: String,
     vout: u32,
     init_owner_h160: String,
-    created_height: u64,
-    created_tx_index: u32,
+    utxo_height: u64,
+    utxo_tx_index: u32,
     slot_ranges: Vec<SlotRangeJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     asset_ids: Option<Vec<String>>,
@@ -391,8 +391,8 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
                     txid: txid.clone(),
                     vout,
                     init_owner_h160: format!("{:#x}", ownership_utxo.base_h160),
-                    created_height: ownership_utxo.created_height,
-                    created_tx_index: ownership_utxo.created_tx_index,
+                    utxo_height: ownership_utxo.created_height,
+                    utxo_tx_index: ownership_utxo.created_tx_index,
                     slot_ranges,
                     asset_ids: asset_ids
                         .then(|| asset_ids_for_ranges(&merged_ranges, ownership_utxo.base_h160)),
@@ -448,13 +448,13 @@ fn run_assets(ctx: &context::Context, json: bool, asset_ids: bool) -> Result<()>
                 })
                 .collect::<Vec<_>>();
             log::info!(
-                "  - collection={} outpoint={}:{} initOwnerH160={} created={}#{} slots={}",
+                "  - collection={} outpoint={}:{} initOwnerH160={} utxo={}#{} slots={}",
                 utxo.collection_id,
                 utxo.txid,
                 utxo.vout,
                 utxo.init_owner_h160,
-                utxo.created_height,
-                utxo.created_tx_index,
+                utxo.utxo_height,
+                utxo.utxo_tx_index,
                 format_ranges(&ranges)
             );
             if let Some(ids) = &utxo.asset_ids {

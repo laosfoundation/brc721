@@ -134,8 +134,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             owner_h160: format!("{:#x}", utxo.owner_h160),
             txid: Some(utxo.reg_txid),
             vout: Some(utxo.reg_vout),
-            created_height: Some(utxo.created_height),
-            created_tx_index: Some(utxo.created_tx_index),
+            utxo_height: Some(utxo.created_height),
+            utxo_tx_index: Some(utxo.created_tx_index),
         })
         .into_response(),
         Ok(None) => Json(TokenOwnerResponse {
@@ -147,8 +147,8 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             owner_h160: initial_owner_h160,
             txid: None,
             vout: None,
-            created_height: None,
-            created_tx_index: None,
+            utxo_height: None,
+            utxo_tx_index: None,
         })
         .into_response(),
         Err(err) => {
@@ -219,8 +219,8 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
             txid: utxo.reg_txid,
             vout: utxo.reg_vout,
             init_owner_h160: format!("{:#x}", utxo.base_h160),
-            created_height: utxo.created_height,
-            created_tx_index: utxo.created_tx_index,
+            utxo_height: utxo.created_height,
+            utxo_tx_index: utxo.created_tx_index,
             slot_ranges: ranges
                 .into_iter()
                 .map(|range| SlotRangeResponse {
@@ -316,8 +316,8 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
             collection_id: utxo.collection_id.to_string(),
             owner_h160: format!("{:#x}", utxo.owner_h160),
             init_owner_h160: format!("{:#x}", utxo.base_h160),
-            created_height: utxo.created_height,
-            created_tx_index: utxo.created_tx_index,
+            utxo_height: utxo.created_height,
+            utxo_tx_index: utxo.created_tx_index,
             slot_ranges: ranges
                 .into_iter()
                 .map(|range| SlotRangeResponse {
@@ -473,8 +473,8 @@ mod tests {
         assert_eq!(payload.owner_h160, expected_owner_h160);
         assert_eq!(payload.txid, None);
         assert_eq!(payload.vout, None);
-        assert_eq!(payload.created_height, None);
-        assert_eq!(payload.created_tx_index, None);
+        assert_eq!(payload.utxo_height, None);
+        assert_eq!(payload.utxo_tx_index, None);
     }
 
     #[tokio::test]
@@ -522,8 +522,8 @@ mod tests {
         assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
         assert_eq!(payload.txid.as_deref(), Some("txid"));
         assert_eq!(payload.vout, Some(1));
-        assert_eq!(payload.created_height, Some(840_001));
-        assert_eq!(payload.created_tx_index, Some(2));
+        assert_eq!(payload.utxo_height, Some(840_001));
+        assert_eq!(payload.utxo_tx_index, Some(2));
     }
 
     #[tokio::test]
@@ -592,8 +592,8 @@ mod tests {
             payload.assets[0].init_owner_h160,
             format!("{:#x}", token.h160_address())
         );
-        assert_eq!(payload.assets[0].created_height, 840_001);
-        assert_eq!(payload.assets[0].created_tx_index, 2);
+        assert_eq!(payload.assets[0].utxo_height, 840_001);
+        assert_eq!(payload.assets[0].utxo_tx_index, 2);
         assert_eq!(payload.assets[0].slot_ranges.len(), 1);
         assert_eq!(
             payload.assets[0].slot_ranges[0].start,
