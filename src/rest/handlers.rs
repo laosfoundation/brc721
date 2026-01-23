@@ -297,6 +297,8 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    let utxo_height = utxos[0].created_height;
+    let utxo_tx_index = utxos[0].created_tx_index;
     let mut assets = Vec::with_capacity(utxos.len());
     for utxo in utxos {
         let ranges = match state.storage.list_ownership_ranges(&utxo) {
@@ -316,8 +318,6 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
             collection_id: utxo.collection_id.to_string(),
             owner_h160: format!("{:#x}", utxo.owner_h160),
             init_owner_h160: format!("{:#x}", utxo.base_h160),
-            utxo_height: utxo.created_height,
-            utxo_tx_index: utxo.created_tx_index,
             slot_ranges: ranges
                 .into_iter()
                 .map(|range| SlotRangeResponse {
@@ -334,7 +334,14 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
             .then_with(|| a.init_owner_h160.cmp(&b.init_owner_h160))
     });
 
-    Json(UtxoAssetsResponse { txid, vout, assets }).into_response()
+    Json(UtxoAssetsResponse {
+        txid,
+        vout,
+        utxo_height,
+        utxo_tx_index,
+        assets,
+    })
+    .into_response()
 }
 
 pub async fn not_found() -> impl IntoResponse {
@@ -582,6 +589,8 @@ mod tests {
 
         assert_eq!(payload.txid, reg_txid);
         assert_eq!(payload.vout, 1);
+        assert_eq!(payload.utxo_height, 840_001);
+        assert_eq!(payload.utxo_tx_index, 2);
         assert_eq!(payload.assets.len(), 1);
         assert_eq!(payload.assets[0].collection_id, collection.key.to_string());
         assert_eq!(
@@ -592,8 +601,6 @@ mod tests {
             payload.assets[0].init_owner_h160,
             format!("{:#x}", token.h160_address())
         );
-        assert_eq!(payload.assets[0].utxo_height, 840_001);
-        assert_eq!(payload.assets[0].utxo_tx_index, 2);
         assert_eq!(payload.assets[0].slot_ranges.len(), 1);
         assert_eq!(
             payload.assets[0].slot_ranges[0].start,
