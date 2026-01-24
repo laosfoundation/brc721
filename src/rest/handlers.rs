@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use ethereum_types::U256;
@@ -41,24 +41,35 @@ pub async fn health<S: Storage + Clone + Send + Sync + 'static>(
 pub async fn chain_state<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
-    let last = state.storage.load_last().ok().flatten().map(|b| LastBlock {
-        height: b.height,
-        hash: b.hash,
-    });
-    Json(ChainStateResponse { last })
+    match state.storage.load_last() {
+        Ok(last) => {
+            let last = last.map(|b| LastBlock {
+                height: b.height,
+                hash: b.hash,
+            });
+            Json(ChainStateResponse { last }).into_response()
+        }
+        Err(err) => {
+            log::error!("Failed to load chain state: {:?}", err);
+            internal_error()
+        }
+    }
 }
 
 pub async fn list_collections<S: Storage + Clone + Send + Sync + 'static>(
     State(state): State<AppState<S>>,
 ) -> impl IntoResponse {
-    let collections = state
-        .storage
-        .list_collections()
-        .unwrap_or_default()
-        .into_iter()
-        .map(collection_to_response)
-        .collect();
-    Json(CollectionsResponse { collections })
+    let collections = match state.storage.list_collections() {
+        Ok(collections) => collections
+            .into_iter()
+            .map(collection_to_response)
+            .collect(),
+        Err(err) => {
+            log::error!("Failed to list collections: {:?}", err);
+            return internal_error();
+        }
+    };
+    Json(CollectionsResponse { collections }).into_response()
 }
 
 pub async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
@@ -69,15 +80,15 @@ pub async fn get_collection<S: Storage + Clone + Send + Sync + 'static>(
         Ok(key) => key,
         Err(err) => {
             log::warn!("Invalid collection id {}: {}", id, err);
-            return StatusCode::BAD_REQUEST.into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid collection id");
         }
     };
     match state.storage.load_collection(&key) {
         Ok(Some(collection)) => Json(collection_to_response(collection)).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "collection not found"),
         Err(err) => {
             log::error!("Failed to load collection {}: {:?}", id, err);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            internal_error()
         }
     }
 }
@@ -90,16 +101,16 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         Ok(key) => key,
         Err(err) => {
             log::warn!("Invalid collection id {}: {}", collection_id, err);
-            return StatusCode::BAD_REQUEST.into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid collection id");
         }
     };
 
     match state.storage.load_collection(&key) {
         Ok(Some(_)) => {}
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "collection not found"),
         Err(err) => {
             log::error!("Failed to load collection {}: {:?}", key, err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return internal_error();
         }
     }
 
@@ -107,13 +118,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
         Ok(token) => token,
         Err(err) => {
             log::warn!("Invalid token id {}: {}", token_id, err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid token id".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid token id");
         }
     };
 
@@ -132,6 +137,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             token_id,
             ownership_status: OwnershipStatus::RegisteredOwner,
             owner_h160: format!("{:#x}", utxo.owner_h160),
+            owner: owner_address_from_script_pubkey(&utxo.owner_script_pubkey, state.network),
             txid: Some(utxo.reg_txid),
             vout: Some(utxo.reg_vout),
             utxo_height: Some(utxo.created_height),
@@ -145,6 +151,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             token_id,
             ownership_status: OwnershipStatus::InitialOwner,
             owner_h160: initial_owner_h160,
+            owner: None,
             txid: None,
             vout: None,
             utxo_height: None,
@@ -158,7 +165,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
                 token_id,
                 err
             );
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            internal_error()
         }
     }
 }
@@ -171,13 +178,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
         Ok(address) => address.assume_checked(),
         Err(err) => {
             log::warn!("Invalid address {}: {}", address, err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid address".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid address");
         }
     };
 
@@ -195,7 +196,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
                 address,
                 err
             );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return internal_error();
         }
     };
 
@@ -240,7 +241,7 @@ pub async fn get_address_assets<S: Storage + Clone + Send + Sync + 'static>(
 
     Json(AddressAssetsResponse {
         address: address.to_string(),
-        address_h160: format!("{:#x}", owner_h160),
+        owner_h160: format!("{:#x}", owner_h160),
         utxos: owned,
     })
     .into_response()
@@ -254,26 +255,14 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
         Ok(txid) => txid,
         Err(err) => {
             log::warn!("Invalid txid {}: {}", txid, err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid txid".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid txid");
         }
     };
 
     let vout: u32 = match vout_str.parse() {
         Ok(vout) => vout,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    message: "invalid vout".to_string(),
-                }),
-            )
-                .into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid vout");
         }
     };
 
@@ -289,14 +278,18 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
                 vout,
                 err
             );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return internal_error();
         }
     };
 
     if utxos.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
+        return json_error(StatusCode::NOT_FOUND, "utxo not found");
     }
 
+    let owner_h160 = format!("{:#x}", utxos[0].owner_h160);
+    let owner = owner_address_from_script_pubkey(&utxos[0].owner_script_pubkey, state.network);
+    let utxo_height = utxos[0].created_height;
+    let utxo_tx_index = utxos[0].created_tx_index;
     let mut assets = Vec::with_capacity(utxos.len());
     for utxo in utxos {
         let ranges = match state.storage.list_ownership_ranges(&utxo) {
@@ -308,16 +301,13 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
                     utxo.reg_vout,
                     err
                 );
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return internal_error();
             }
         };
 
         assets.push(UtxoOwnershipResponse {
             collection_id: utxo.collection_id.to_string(),
-            owner_h160: format!("{:#x}", utxo.owner_h160),
             init_owner_h160: format!("{:#x}", utxo.base_h160),
-            utxo_height: utxo.created_height,
-            utxo_tx_index: utxo.created_tx_index,
             slot_ranges: ranges
                 .into_iter()
                 .map(|range| SlotRangeResponse {
@@ -334,16 +324,48 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
             .then_with(|| a.init_owner_h160.cmp(&b.init_owner_h160))
     });
 
-    Json(UtxoAssetsResponse { txid, vout, assets }).into_response()
+    Json(UtxoAssetsResponse {
+        txid,
+        vout,
+        owner_h160,
+        owner,
+        utxo_height,
+        utxo_tx_index,
+        assets,
+    })
+    .into_response()
 }
 
 pub async fn not_found() -> impl IntoResponse {
+    json_error(StatusCode::NOT_FOUND, "endpoint not found")
+}
+
+fn json_error(status: StatusCode, message: &str) -> Response {
     (
-        StatusCode::NOT_FOUND,
+        status,
         Json(ErrorResponse {
-            message: "endpoint not found".to_string(),
+            message: message.to_string(),
         }),
     )
+        .into_response()
+}
+
+fn internal_error() -> Response {
+    json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+}
+
+fn owner_address_from_script_pubkey(
+    script_pubkey: &[u8],
+    network: bitcoin::Network,
+) -> Option<String> {
+    if script_pubkey.is_empty() {
+        return None;
+    }
+
+    let script = bitcoin::ScriptBuf::from(script_pubkey.to_vec());
+    bitcoin::Address::from_script(&script, network)
+        .ok()
+        .map(|addr| addr.to_string())
 }
 
 fn collection_to_response(collection: Collection) -> CollectionResponse {
@@ -407,6 +429,8 @@ mod tests {
         routing::get,
         Router,
     };
+    use bitcoin::hashes::Hash;
+    use bitcoin::{Network, PubkeyHash, ScriptBuf};
     use ethereum_types::{H160, U256};
     use http_body_util::BodyExt;
     use std::{
@@ -471,6 +495,7 @@ mod tests {
             OwnershipStatus::InitialOwner
         ));
         assert_eq!(payload.owner_h160, expected_owner_h160);
+        assert_eq!(payload.owner, None);
         assert_eq!(payload.txid, None);
         assert_eq!(payload.vout, None);
         assert_eq!(payload.utxo_height, None);
@@ -484,12 +509,14 @@ mod tests {
         let token_decimal = format_token_id(&token);
         let collection_id = collection.key.to_string();
 
-        let registered_owner = H160::from_low_u64_be(0x1234);
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
+        let registered_owner = h160_from_script_pubkey(&owner_script);
         let utxo = OwnershipUtxo {
             collection_id: collection.key.clone(),
             reg_txid: "txid".to_string(),
             reg_vout: 1,
             owner_h160: registered_owner,
+            owner_script_pubkey: owner_script.as_bytes().to_vec(),
             base_h160: token.h160_address(),
             created_height: 840_001,
             created_tx_index: 2,
@@ -520,6 +547,12 @@ mod tests {
             OwnershipStatus::RegisteredOwner
         ));
         assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
+        assert_eq!(
+            payload.owner,
+            bitcoin::Address::from_script(&owner_script, Network::Regtest)
+                .ok()
+                .map(|addr| addr.to_string())
+        );
         assert_eq!(payload.txid.as_deref(), Some("txid"));
         assert_eq!(payload.vout, Some(1));
         assert_eq!(payload.utxo_height, Some(840_001));
@@ -545,6 +578,10 @@ mod tests {
         let token_decimal = format_token_id(&sample_token());
         let response = issue_owner_request(storage, "850123:0", &token_decimal).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: ErrorResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(payload.message, "collection not found");
     }
 
     #[tokio::test]
@@ -553,12 +590,15 @@ mod tests {
         let token = sample_token();
         let reg_txid =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
+        let owner_h160 = h160_from_script_pubkey(&owner_script);
 
         let utxo = OwnershipUtxo {
             collection_id: collection.key.clone(),
             reg_txid: reg_txid.clone(),
             reg_vout: 1,
-            owner_h160: H160::from_low_u64_be(0x1234),
+            owner_h160,
+            owner_script_pubkey: owner_script.as_bytes().to_vec(),
             base_h160: token.h160_address(),
             created_height: 840_001,
             created_tx_index: 2,
@@ -582,18 +622,21 @@ mod tests {
 
         assert_eq!(payload.txid, reg_txid);
         assert_eq!(payload.vout, 1);
+        assert_eq!(payload.owner_h160, format!("{:#x}", owner_h160));
+        assert_eq!(
+            payload.owner,
+            bitcoin::Address::from_script(&owner_script, Network::Regtest)
+                .ok()
+                .map(|addr| addr.to_string())
+        );
+        assert_eq!(payload.utxo_height, 840_001);
+        assert_eq!(payload.utxo_tx_index, 2);
         assert_eq!(payload.assets.len(), 1);
         assert_eq!(payload.assets[0].collection_id, collection.key.to_string());
-        assert_eq!(
-            payload.assets[0].owner_h160,
-            format!("{:#x}", H160::from_low_u64_be(0x1234))
-        );
         assert_eq!(
             payload.assets[0].init_owner_h160,
             format!("{:#x}", token.h160_address())
         );
-        assert_eq!(payload.assets[0].utxo_height, 840_001);
-        assert_eq!(payload.assets[0].utxo_tx_index, 2);
         assert_eq!(payload.assets[0].slot_ranges.len(), 1);
         assert_eq!(
             payload.assets[0].slot_ranges[0].start,
@@ -630,6 +673,7 @@ mod tests {
             .with_state(AppState {
                 storage,
                 started_at: SystemTime::now(),
+                network: Network::Regtest,
             });
 
         router
@@ -660,6 +704,7 @@ mod tests {
             .with_state(AppState {
                 storage,
                 started_at: SystemTime::now(),
+                network: Network::Regtest,
             });
 
         router

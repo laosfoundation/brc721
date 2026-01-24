@@ -44,13 +44,18 @@ fn merge_ordered_ranges(ranges: &[OwnershipRangeWithGroup]) -> Vec<OwnershipRang
     out
 }
 
-fn save_ranges_for_output<S: StorageWrite>(
-    storage: &S,
-    txid: &str,
+struct OutputOwnershipContext<'a> {
+    txid: &'a str,
     vout: u32,
     owner_h160: H160,
+    owner_script_pubkey: &'a [u8],
     block_height: u64,
     tx_index: u32,
+}
+
+fn save_ranges_for_output<S: StorageWrite>(
+    storage: &S,
+    ctx: OutputOwnershipContext<'_>,
     ranges: &[OwnershipRangeWithGroup],
 ) -> Result<(), Brc721Error> {
     let groups = unique_groups_from_ranges(ranges);
@@ -58,12 +63,13 @@ fn save_ranges_for_output<S: StorageWrite>(
         storage
             .save_ownership_utxo(OwnershipUtxoSave {
                 collection_id: &collection_id,
-                owner_h160,
+                owner_h160: ctx.owner_h160,
+                owner_script_pubkey: ctx.owner_script_pubkey,
                 base_h160,
-                reg_txid: txid,
-                reg_vout: vout,
-                created_height: block_height,
-                created_tx_index: tx_index,
+                reg_txid: ctx.txid,
+                reg_vout: ctx.vout,
+                created_height: ctx.block_height,
+                created_tx_index: ctx.tx_index,
             })
             .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
     }
@@ -72,8 +78,8 @@ fn save_ranges_for_output<S: StorageWrite>(
     for range in merged {
         storage
             .save_ownership_range(
-                txid,
-                vout,
+                ctx.txid,
+                ctx.vout,
                 &range.collection_id,
                 range.base_h160,
                 range.slot_start,
@@ -224,6 +230,11 @@ impl Brc721Parser {
         if remaining_outputs.is_empty() {
             // Burn: no valid outputs, assign tokens to the null owner on vout0 (provably unspendable OP_RETURN).
             let burn_vout = 0u32;
+            let burn_script_pubkey = bitcoin_tx
+                .output
+                .get(burn_vout as usize)
+                .map(|output| output.script_pubkey.as_bytes())
+                .unwrap_or_else(|| &[]);
             for input in token_inputs {
                 let group_count = unique_groups_from_ranges(&input.ranges).len();
                 log::info!(
@@ -237,11 +248,14 @@ impl Brc721Parser {
 
                 save_ranges_for_output(
                     storage,
-                    &spend_txid,
-                    burn_vout,
-                    H160::zero(),
-                    block_height,
-                    tx_index,
+                    OutputOwnershipContext {
+                        txid: &spend_txid,
+                        vout: burn_vout,
+                        owner_h160: H160::zero(),
+                        owner_script_pubkey: burn_script_pubkey,
+                        block_height,
+                        tx_index,
+                    },
                     &input.ranges,
                 )?;
             }
@@ -275,11 +289,14 @@ impl Brc721Parser {
 
             save_ranges_for_output(
                 storage,
-                &spend_txid,
-                dest_vout,
-                dest_owner_h160,
-                block_height,
-                tx_index,
+                OutputOwnershipContext {
+                    txid: &spend_txid,
+                    vout: dest_vout,
+                    owner_h160: dest_owner_h160,
+                    owner_script_pubkey: dest_txout.script_pubkey.as_bytes(),
+                    block_height,
+                    tx_index,
+                },
                 &input.ranges,
             )?;
         }
@@ -485,6 +502,7 @@ mod tests {
 
         let collection_id = CollectionKey::new(840_000, 0);
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
 
         let prev_txid = bitcoin::Txid::from_str(
             "0101010101010101010101010101010101010101010101010101010101010101",
@@ -497,6 +515,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: &prev_txid_str,
             reg_vout: prev_vout,
@@ -595,6 +614,8 @@ mod tests {
 
         let base_a = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
         let base_b = H160::from_str("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        let owner_script_a = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner_a"));
+        let owner_script_b = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner_b"));
 
         let prev_txid_a = bitcoin::Txid::from_str(
             "1111111111111111111111111111111111111111111111111111111111111111",
@@ -612,6 +633,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script_a.as_bytes(),
             base_h160: base_a,
             reg_txid: &prev_a_str,
             reg_vout: 0,
@@ -625,6 +647,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(2),
+            owner_script_pubkey: owner_script_b.as_bytes(),
             base_h160: base_b,
             reg_txid: &prev_b_str,
             reg_vout: 1,
@@ -738,6 +761,7 @@ mod tests {
 
         let collection_id = CollectionKey::new(840_000, 0);
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let owner_script = ScriptBuf::new();
         let prev_txid = bitcoin::Txid::from_str(
             "3333333333333333333333333333333333333333333333333333333333333333",
         )
@@ -748,6 +772,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: &prev_txid_str,
             reg_vout: 0,
@@ -817,6 +842,8 @@ mod tests {
 
         let collection_id = CollectionKey::new(840_000, 0);
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let owner_script_a = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner_a"));
+        let owner_script_b = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner_b"));
 
         let prev_txid_a = bitcoin::Txid::from_str(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -833,6 +860,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script_a.as_bytes(),
             base_h160,
             reg_txid: &prev_a_str,
             reg_vout: 0,
@@ -846,6 +874,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(2),
+            owner_script_pubkey: owner_script_b.as_bytes(),
             base_h160,
             reg_txid: &prev_b_str,
             reg_vout: 1,
@@ -956,6 +985,7 @@ mod tests {
 
         let collection_id = CollectionKey::new(840_000, 0);
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
 
         let prev_txid = bitcoin::Txid::from_str(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -967,6 +997,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: &prev_txid_str,
             reg_vout: 0,
@@ -1083,6 +1114,7 @@ mod tests {
 
         let collection_id = CollectionKey::new(840_000, 0);
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
 
         let prev_txid = bitcoin::Txid::from_str(
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -1094,6 +1126,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: &prev_txid_str,
             reg_vout: 0,
@@ -1194,6 +1227,8 @@ mod tests {
         let collection_id = CollectionKey::new(840_000, 0);
         let base_a = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
         let base_b = H160::from_str("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        let owner_script_a = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner_a"));
+        let owner_script_b = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner_b"));
 
         let prev_txid = bitcoin::Txid::from_str(
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -1205,6 +1240,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script_a.as_bytes(),
             base_h160: base_a,
             reg_txid: &prev_txid_str,
             reg_vout: 0,
@@ -1215,6 +1251,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(2),
+            owner_script_pubkey: owner_script_b.as_bytes(),
             base_h160: base_b,
             reg_txid: &prev_txid_str,
             reg_vout: 0,
@@ -1322,6 +1359,7 @@ mod tests {
 
         let collection_id = CollectionKey::new(840_000, 0);
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
         let prev_txid = bitcoin::Txid::from_str(
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         )
@@ -1332,6 +1370,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160: H160::from_low_u64_be(1),
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: &prev_txid_str,
             reg_vout: 0,

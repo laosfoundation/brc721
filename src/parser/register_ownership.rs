@@ -170,6 +170,7 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
             .save_ownership_utxo(OwnershipUtxoSave {
                 collection_id: &collection_key,
                 owner_h160,
+                owner_script_pubkey: owner_txout.script_pubkey.as_bytes(),
                 base_h160,
                 reg_txid: &txid,
                 reg_vout,

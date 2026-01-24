@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{routing::get, Router};
+use bitcoin::Network;
 
 use crate::storage::Storage;
 
@@ -16,11 +17,13 @@ use handlers::{
 pub struct AppState<S: Storage> {
     pub storage: S,
     pub started_at: std::time::SystemTime,
+    pub network: Network,
 }
 
 pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     addr: SocketAddr,
     storage: S,
+    network: Network,
     shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
     log::info!("🌐 REST service on http://{}", addr);
@@ -28,6 +31,7 @@ pub async fn serve<S: Storage + Clone + Send + Sync + 'static>(
     let state = AppState {
         storage,
         started_at: std::time::SystemTime::now(),
+        network,
     };
 
     let app = Router::new()

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     pub status: &'static str,
     pub uptime_secs: u64,
@@ -29,6 +30,7 @@ pub struct CollectionsResponse {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
     pub message: String,
 }
@@ -48,6 +50,8 @@ pub struct TokenOwnerResponse {
     pub token_id: String,
     pub ownership_status: OwnershipStatus,
     pub owner_h160: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub txid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,7 +73,7 @@ pub enum OwnershipStatus {
 #[serde(rename_all = "camelCase")]
 pub struct AddressAssetsResponse {
     pub address: String,
-    pub address_h160: String,
+    pub owner_h160: String,
     pub utxos: Vec<OwnershipUtxoResponse>,
 }
 
@@ -78,6 +82,11 @@ pub struct AddressAssetsResponse {
 pub struct UtxoAssetsResponse {
     pub txid: String,
     pub vout: u32,
+    pub owner_h160: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    pub utxo_height: u64,
+    pub utxo_tx_index: u32,
     pub assets: Vec<UtxoOwnershipResponse>,
 }
 
@@ -85,10 +94,7 @@ pub struct UtxoAssetsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UtxoOwnershipResponse {
     pub collection_id: String,
-    pub owner_h160: String,
     pub init_owner_h160: String,
-    pub utxo_height: u64,
-    pub utxo_tx_index: u32,
     pub slot_ranges: Vec<SlotRangeResponse>,
 }
 
