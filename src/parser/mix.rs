@@ -246,12 +246,17 @@ pub fn digest<S: StorageWrite>(
             .output(vout)
             .map(|output| h160_from_script_pubkey(&output.script_pubkey))
             .unwrap_or_else(H160::zero);
+        let owner_script_pubkey = brc721_tx
+            .output(vout)
+            .map(|output| output.script_pubkey.as_bytes())
+            .unwrap_or_else(|| &[]);
 
         for (collection_id, base_h160) in assignment.unique_groups() {
             ctx.storage
                 .save_ownership_utxo(OwnershipUtxoSave {
                     collection_id: &collection_id,
                     owner_h160,
+                    owner_script_pubkey,
                     base_h160,
                     reg_txid: &txid,
                     reg_vout: vout,

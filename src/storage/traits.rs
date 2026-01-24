@@ -9,6 +9,7 @@ pub struct OwnershipUtxo {
     pub reg_txid: String,
     pub reg_vout: u32,
     pub owner_h160: H160,
+    pub owner_script_pubkey: Vec<u8>,
     pub base_h160: H160,
     pub created_height: u64,
     pub created_tx_index: u32,
@@ -21,6 +22,7 @@ pub struct OwnershipUtxo {
 pub struct OwnershipUtxoSave<'a> {
     pub collection_id: &'a CollectionKey,
     pub owner_h160: H160,
+    pub owner_script_pubkey: &'a [u8],
     pub base_h160: H160,
     pub reg_txid: &'a str,
     pub reg_vout: u32,

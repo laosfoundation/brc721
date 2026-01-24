@@ -137,6 +137,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             token_id,
             ownership_status: OwnershipStatus::RegisteredOwner,
             owner_h160: format!("{:#x}", utxo.owner_h160),
+            owner: owner_address_from_script_pubkey(&utxo.owner_script_pubkey, state.network),
             txid: Some(utxo.reg_txid),
             vout: Some(utxo.reg_vout),
             utxo_height: Some(utxo.created_height),
@@ -150,6 +151,7 @@ pub async fn get_token_owner<S: Storage + Clone + Send + Sync + 'static>(
             token_id,
             ownership_status: OwnershipStatus::InitialOwner,
             owner_h160: initial_owner_h160,
+            owner: None,
             txid: None,
             vout: None,
             utxo_height: None,
@@ -285,6 +287,7 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
     }
 
     let owner_h160 = format!("{:#x}", utxos[0].owner_h160);
+    let owner = owner_address_from_script_pubkey(&utxos[0].owner_script_pubkey, state.network);
     let utxo_height = utxos[0].created_height;
     let utxo_tx_index = utxos[0].created_tx_index;
     let mut assets = Vec::with_capacity(utxos.len());
@@ -325,6 +328,7 @@ pub async fn get_utxo_assets<S: Storage + Clone + Send + Sync + 'static>(
         txid,
         vout,
         owner_h160,
+        owner,
         utxo_height,
         utxo_tx_index,
         assets,
@@ -348,6 +352,20 @@ fn json_error(status: StatusCode, message: &str) -> Response {
 
 fn internal_error() -> Response {
     json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+}
+
+fn owner_address_from_script_pubkey(
+    script_pubkey: &[u8],
+    network: bitcoin::Network,
+) -> Option<String> {
+    if script_pubkey.is_empty() {
+        return None;
+    }
+
+    let script = bitcoin::ScriptBuf::from(script_pubkey.to_vec());
+    bitcoin::Address::from_script(&script, network)
+        .ok()
+        .map(|addr| addr.to_string())
 }
 
 fn collection_to_response(collection: Collection) -> CollectionResponse {
@@ -411,6 +429,8 @@ mod tests {
         routing::get,
         Router,
     };
+    use bitcoin::hashes::Hash;
+    use bitcoin::{Network, PubkeyHash, ScriptBuf};
     use ethereum_types::{H160, U256};
     use http_body_util::BodyExt;
     use std::{
@@ -475,6 +495,7 @@ mod tests {
             OwnershipStatus::InitialOwner
         ));
         assert_eq!(payload.owner_h160, expected_owner_h160);
+        assert_eq!(payload.owner, None);
         assert_eq!(payload.txid, None);
         assert_eq!(payload.vout, None);
         assert_eq!(payload.utxo_height, None);
@@ -488,12 +509,14 @@ mod tests {
         let token_decimal = format_token_id(&token);
         let collection_id = collection.key.to_string();
 
-        let registered_owner = H160::from_low_u64_be(0x1234);
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
+        let registered_owner = h160_from_script_pubkey(&owner_script);
         let utxo = OwnershipUtxo {
             collection_id: collection.key.clone(),
             reg_txid: "txid".to_string(),
             reg_vout: 1,
             owner_h160: registered_owner,
+            owner_script_pubkey: owner_script.as_bytes().to_vec(),
             base_h160: token.h160_address(),
             created_height: 840_001,
             created_tx_index: 2,
@@ -524,6 +547,12 @@ mod tests {
             OwnershipStatus::RegisteredOwner
         ));
         assert_eq!(payload.owner_h160, format!("{:#x}", registered_owner));
+        assert_eq!(
+            payload.owner,
+            bitcoin::Address::from_script(&owner_script, Network::Regtest)
+                .ok()
+                .map(|addr| addr.to_string())
+        );
         assert_eq!(payload.txid.as_deref(), Some("txid"));
         assert_eq!(payload.vout, Some(1));
         assert_eq!(payload.utxo_height, Some(840_001));
@@ -561,12 +590,15 @@ mod tests {
         let token = sample_token();
         let reg_txid =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
+        let owner_h160 = h160_from_script_pubkey(&owner_script);
 
         let utxo = OwnershipUtxo {
             collection_id: collection.key.clone(),
             reg_txid: reg_txid.clone(),
             reg_vout: 1,
-            owner_h160: H160::from_low_u64_be(0x1234),
+            owner_h160,
+            owner_script_pubkey: owner_script.as_bytes().to_vec(),
             base_h160: token.h160_address(),
             created_height: 840_001,
             created_tx_index: 2,
@@ -590,9 +622,12 @@ mod tests {
 
         assert_eq!(payload.txid, reg_txid);
         assert_eq!(payload.vout, 1);
+        assert_eq!(payload.owner_h160, format!("{:#x}", owner_h160));
         assert_eq!(
-            payload.owner_h160,
-            format!("{:#x}", H160::from_low_u64_be(0x1234))
+            payload.owner,
+            bitcoin::Address::from_script(&owner_script, Network::Regtest)
+                .ok()
+                .map(|addr| addr.to_string())
         );
         assert_eq!(payload.utxo_height, 840_001);
         assert_eq!(payload.utxo_tx_index, 2);
@@ -638,6 +673,7 @@ mod tests {
             .with_state(AppState {
                 storage,
                 started_at: SystemTime::now(),
+                network: Network::Regtest,
             });
 
         router
@@ -668,6 +704,7 @@ mod tests {
             .with_state(AppState {
                 storage,
                 started_at: SystemTime::now(),
+                network: Network::Regtest,
             });
 
         router

@@ -11,7 +11,7 @@ use super::{
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 6;
+const DB_SCHEMA_VERSION: i64 = 7;
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -153,36 +153,38 @@ fn map_ownership_utxo_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ownership
     let owner_h160 = H160::from_str(&owner_h160_str)
         .map_err(|err| rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(err)))?;
 
-    let base_h160_str: String = row.get(4)?;
-    let base_h160 = H160::from_str(&base_h160_str)
-        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(4, Type::Text, Box::new(err)))?;
+    let owner_script_pubkey: Vec<u8> = row.get(4)?;
 
-    let created_height_raw: i64 = row.get(5)?;
+    let base_h160_str: String = row.get(5)?;
+    let base_h160 = H160::from_str(&base_h160_str)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(5, Type::Text, Box::new(err)))?;
+
+    let created_height_raw: i64 = row.get(6)?;
     let created_height: u64 = created_height_raw
         .try_into()
-        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, created_height_raw))?;
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, created_height_raw))?;
 
-    let created_tx_index_raw: i64 = row.get(6)?;
+    let created_tx_index_raw: i64 = row.get(7)?;
     let created_tx_index: u32 = created_tx_index_raw
         .try_into()
-        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, created_tx_index_raw))?;
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(7, created_tx_index_raw))?;
 
-    let spent_txid: Option<String> = row.get(7)?;
+    let spent_txid: Option<String> = row.get(8)?;
 
-    let spent_height_raw: Option<i64> = row.get(8)?;
+    let spent_height_raw: Option<i64> = row.get(9)?;
     let spent_height = match spent_height_raw {
         Some(raw) => Some(
             raw.try_into()
-                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(8, raw))?,
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(9, raw))?,
         ),
         None => None,
     };
 
-    let spent_tx_index_raw: Option<i64> = row.get(9)?;
+    let spent_tx_index_raw: Option<i64> = row.get(10)?;
     let spent_tx_index = match spent_tx_index_raw {
         Some(raw) => Some(
             raw.try_into()
-                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(9, raw))?,
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(10, raw))?,
         ),
         None => None,
     };
@@ -192,6 +194,7 @@ fn map_ownership_utxo_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ownership
         reg_txid,
         reg_vout,
         owner_h160,
+        owner_script_pubkey,
         base_h160,
         created_height,
         created_tx_index,
@@ -244,7 +247,7 @@ fn db_list_unspent_ownership_utxos_by_outpoint(
     let mut stmt = conn.prepare(
         r#"
         SELECT
-            collection_id, reg_txid, reg_vout, owner_h160, base_h160,
+            collection_id, reg_txid, reg_vout, owner_h160, owner_script_pubkey, base_h160,
             created_height, created_tx_index,
             spent_txid, spent_height, spent_tx_index
         FROM ownership_utxos
@@ -325,8 +328,8 @@ fn db_find_unspent_ownership_utxo_for_slot(
     conn.query_row(
         r#"
         SELECT
-            u.collection_id, u.reg_txid, u.reg_vout, u.owner_h160, u.base_h160,
-            u.created_height, u.created_tx_index,
+            u.collection_id, u.reg_txid, u.reg_vout, u.owner_h160, u.owner_script_pubkey,
+            u.base_h160, u.created_height, u.created_tx_index,
             u.spent_txid, u.spent_height, u.spent_tx_index
         FROM ownership_utxos u
         JOIN ownership_ranges r
@@ -360,7 +363,7 @@ fn db_list_unspent_ownership_utxos_by_owner(
     let mut stmt = conn.prepare(
         r#"
         SELECT
-            collection_id, reg_txid, reg_vout, owner_h160, base_h160,
+            collection_id, reg_txid, reg_vout, owner_h160, owner_script_pubkey, base_h160,
             created_height, created_tx_index,
             spent_txid, spent_height, spent_tx_index
         FROM ownership_utxos
@@ -382,8 +385,15 @@ fn db_save_ownership_utxo(conn: &Connection, utxo: OwnershipUtxoSave<'_>) -> rus
     conn.execute(
         r#"
         INSERT INTO ownership_utxos (
-            collection_id, reg_txid, reg_vout, owner_h160, base_h160, created_height, created_tx_index
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            collection_id,
+            reg_txid,
+            reg_vout,
+            owner_h160,
+            owner_script_pubkey,
+            base_h160,
+            created_height,
+            created_tx_index
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         ON CONFLICT(reg_txid, reg_vout, collection_id, base_h160) DO NOTHING
         "#,
         params![
@@ -391,6 +401,7 @@ fn db_save_ownership_utxo(conn: &Connection, utxo: OwnershipUtxoSave<'_>) -> rus
             utxo.reg_txid,
             utxo.reg_vout as i64,
             format!("0x{:x}", utxo.owner_h160),
+            utxo.owner_script_pubkey,
             format!("0x{:x}", utxo.base_h160),
             utxo.created_height as i64,
             utxo.created_tx_index as i64,
@@ -675,6 +686,7 @@ impl SqliteStorage {
                 reg_vout INTEGER NOT NULL CHECK (reg_vout >= 0),
                 collection_id TEXT NOT NULL,
                 owner_h160 TEXT NOT NULL,
+                owner_script_pubkey BLOB NOT NULL,
                 base_h160 TEXT NOT NULL,
                 created_height INTEGER NOT NULL CHECK (created_height >= 0),
                 created_tx_index INTEGER NOT NULL CHECK (created_tx_index >= 0),
@@ -800,6 +812,8 @@ impl StorageRead for SqliteStorage {
 mod tests {
     use super::*;
     use crate::storage::sqlite::DB_SCHEMA_VERSION;
+    use bitcoin::hashes::Hash;
+    use bitcoin::{PubkeyHash, ScriptBuf};
     use rusqlite::{Connection, OptionalExtension};
     use std::{
         str::FromStr,
@@ -1020,11 +1034,13 @@ mod tests {
         let tx = repo.begin_tx().unwrap();
         let collection_id = CollectionKey::new(840_000, 2);
         let owner_h160 = H160::from_str("0x00112233445566778899aabbccddeeff00112233").unwrap();
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
         let base_h160 = H160::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
 
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160,
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: "txid_a",
             reg_vout: 1,
@@ -1040,6 +1056,7 @@ mod tests {
         tx.save_ownership_utxo(OwnershipUtxoSave {
             collection_id: &collection_id,
             owner_h160,
+            owner_script_pubkey: owner_script.as_bytes(),
             base_h160,
             reg_txid: "txid_b",
             reg_vout: 2,
@@ -1057,6 +1074,7 @@ mod tests {
         assert_eq!(entries_a.len(), 1);
         assert_eq!(entries_a[0].0.collection_id, collection_id);
         assert_eq!(entries_a[0].0.owner_h160, owner_h160);
+        assert_eq!(entries_a[0].0.owner_script_pubkey, owner_script.as_bytes());
         assert_eq!(entries_a[0].0.base_h160, base_h160);
         assert_eq!(entries_a[0].1.len(), 2);
 

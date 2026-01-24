@@ -46,8 +46,9 @@ impl App {
         let storage = storage::SqliteStorage::new(self.db_path.clone());
         let token = self.shutdown.clone();
 
+        let network = self.config.network;
         tokio::spawn(async move {
-            if let Err(e) = rest::serve(addr, storage, token).await {
+            if let Err(e) = rest::serve(addr, storage, network, token).await {
                 log::error!("REST server failed: {:#}", e);
             }
         })
@@ -447,8 +448,10 @@ mod tests {
     async fn spawn_rest_server_starts_and_serves_health_check() {
         let storage = DummyStorage::new();
         let (mut app, _rpc, _temp) = make_app_with_storage(storage);
-        // Use a random-ish port to avoid conflicts
-        let port = 34567;
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .map(|addr| addr.port())
+            .expect("pick open port");
         app.config.api_listen = format!("127.0.0.1:{}", port).parse().unwrap();
 
         let handle = app.spawn_rest_server();
@@ -479,7 +482,7 @@ mod tests {
 
         assert!(response.contains("200 OK"));
         // Check JSON content (field name depends on serde rename, checking raw field)
-        assert!(response.contains("uptime_secs"));
+        assert!(response.contains("uptimeSecs"));
 
         // Cleanup
         app.shutdown.cancel();

@@ -51,6 +51,8 @@ pub struct TokenOwnerResponse {
     pub ownership_status: OwnershipStatus,
     pub owner_h160: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub txid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vout: Option<u32>,
@@ -81,6 +83,8 @@ pub struct UtxoAssetsResponse {
     pub txid: String,
     pub vout: u32,
     pub owner_h160: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
     pub utxo_height: u64,
     pub utxo_tx_index: u32,
     pub assets: Vec<UtxoOwnershipResponse>,
