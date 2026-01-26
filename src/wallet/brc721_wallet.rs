@@ -25,7 +25,7 @@ impl Brc721Wallet {
         auth: Auth,
     ) -> Result<Brc721Wallet> {
         let seed = mnemonic.to_seed(String::default());
-        let master_xprv = Xpriv::new_master(network, &seed).expect("master_key");
+        let master_xprv = Xpriv::new_master(network, &seed).context("create master key")?;
         let external = Bip86(master_xprv, KeychainKind::External);
         let internal = Bip86(master_xprv, KeychainKind::Internal);
 

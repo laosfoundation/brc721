@@ -264,13 +264,14 @@ impl Brc721Parser {
         }
 
         let remaining_outputs_len = remaining_outputs.len();
+        let last_output = remaining_outputs.last().ok_or_else(|| {
+            Brc721Error::TxError("implicit transfer requires at least one spendable output".into())
+        })?;
         for (input_index, input) in token_inputs.into_iter().enumerate() {
             let (dest_vout, dest_txout) = if input_index < remaining_outputs_len {
                 remaining_outputs[input_index]
             } else {
-                *remaining_outputs
-                    .last()
-                    .expect("non-empty remaining_outputs")
+                *last_output
             };
 
             let dest_owner_h160 = h160_from_script_pubkey(&dest_txout.script_pubkey);
