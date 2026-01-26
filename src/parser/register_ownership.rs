@@ -9,9 +9,9 @@ fn base_h160_from_input0<R: BitcoinRpc>(
     brc721_tx: &Brc721Tx<'_>,
     rpc: &R,
 ) -> Result<H160, Brc721Error> {
-    let input0 = brc721_tx.input0().ok_or_else(|| {
-        Brc721Error::TxError("register-ownership requires an input0".to_string())
-    })?;
+    let input0 = brc721_tx
+        .input0()
+        .ok_or_else(|| Brc721Error::TxError("register-ownership requires an input0".to_string()))?;
     let prevout = input0.previous_output;
     if prevout == bitcoin::OutPoint::null() {
         return Err(Brc721Error::TxError(
@@ -222,14 +222,16 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result as AnyResult;
     use crate::storage::traits::{
         Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup, OwnershipUtxo,
         OwnershipUtxoSave, StorageRead, StorageWrite,
     };
     use crate::types::{Brc721OpReturnOutput, Brc721Payload, SlotRanges};
+    use anyhow::Result as AnyResult;
     use bitcoin::blockdata::transaction::Version;
-    use bitcoin::{absolute, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
+    use bitcoin::{
+        absolute, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
+    };
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
     use std::str::FromStr;
@@ -246,7 +248,10 @@ mod tests {
         fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
             unimplemented!()
         }
-        fn get_raw_transaction(&self, _txid: &bitcoin::Txid) -> Result<bitcoin::Transaction, RpcError> {
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
             Err(RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
                 bitcoincore_rpc::jsonrpc::error::RpcError {
                     code: -5,
