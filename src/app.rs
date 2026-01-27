@@ -151,7 +151,7 @@ pub async fn run() -> Result<()> {
     log::info!("🚀 Starting brc721");
 
     let cli = crate::cli::parse();
-    let ctx = context::Context::from_cli(&cli);
+    let ctx = context::Context::from_cli(&cli)?;
 
     if let Some(path) = ctx.log_file.as_deref() {
         log::info!("📝 Log file: {}", path.to_string_lossy());

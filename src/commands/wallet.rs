@@ -55,7 +55,7 @@ fn run_init(
         Mnemonic::parse_in(Language::English, mnemonic_str).context("invalid mnemonic")?;
 
     // Resolve passphrase
-    let passphrase = resolve_passphrase_init(passphrase);
+    let passphrase = resolve_passphrase_init(passphrase)?;
 
     // Create new wallet
     let wallet = Brc721Wallet::create(
@@ -475,21 +475,24 @@ fn load_local_wallet(ctx: &context::Context) -> Result<LocalWallet> {
     LocalWallet::load(&ctx.data_dir, ctx.network).context("loading local wallet")
 }
 
-fn resolve_passphrase_init(passphrase: Option<String>) -> SecretString {
-    passphrase.map(SecretString::from).unwrap_or_else(|| {
-        SecretString::from(prompt_passphrase().expect("prompt").unwrap_or_default())
-    })
+fn resolve_passphrase_init(passphrase: Option<String>) -> Result<SecretString> {
+    if let Some(passphrase) = passphrase {
+        return Ok(SecretString::from(passphrase));
+    }
+
+    let passphrase = prompt_passphrase().context("prompt passphrase")?;
+    Ok(SecretString::from(passphrase.unwrap_or_default()))
 }
 
-fn generate_mnemonic(short: bool) -> Mnemonic {
+fn generate_mnemonic(short: bool) -> Result<Mnemonic> {
     let entropy_bytes = if short { 16 } else { 32 };
     let mut entropy = vec![0u8; entropy_bytes];
     OsRng.fill_bytes(&mut entropy);
-    Mnemonic::from_entropy(&entropy).expect("mnemonic")
+    Mnemonic::from_entropy(&entropy).context("generate mnemonic")
 }
 
 fn run_generate(short: bool) -> Result<()> {
-    let mnemonic = generate_mnemonic(short);
+    let mnemonic = generate_mnemonic(short)?;
     println!("{}", mnemonic);
     Ok(())
 }
@@ -500,7 +503,7 @@ mod tests {
 
     #[test]
     fn generate_mnemonic_is_valid_12_words() {
-        let mnemonic = generate_mnemonic(true);
+        let mnemonic = generate_mnemonic(true).expect("generate mnemonic");
         assert_eq!(mnemonic.word_count(), 12);
         let parsed = Mnemonic::parse_in(Language::English, mnemonic.to_string()).expect("parse");
         assert_eq!(parsed.word_count(), 12);
@@ -508,7 +511,7 @@ mod tests {
 
     #[test]
     fn generate_mnemonic_is_valid_24_words() {
-        let mnemonic = generate_mnemonic(false);
+        let mnemonic = generate_mnemonic(false).expect("generate mnemonic");
         assert_eq!(mnemonic.word_count(), 24);
         let parsed = Mnemonic::parse_in(Language::English, mnemonic.to_string()).expect("parse");
         assert_eq!(parsed.word_count(), 24);

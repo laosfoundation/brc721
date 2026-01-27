@@ -85,9 +85,11 @@ fn run_register_collection(
         rebaseable,
     };
     let payload = Brc721Payload::RegisterCollection(msg);
-    let output = Brc721OpReturnOutput::new(payload).into_txout().unwrap();
+    let output = Brc721OpReturnOutput::new(payload)
+        .into_txout()
+        .context("build register-collection op_return output")?;
 
-    let passphrase = resolve_passphrase(passphrase);
+    let passphrase = resolve_passphrase(passphrase)?;
     let tx = wallet
         .build_tx(output, fee_rate, passphrase)
         .context("build tx")?;
@@ -126,9 +128,11 @@ fn run_register_ownership(
     )?;
     let payload = Brc721Payload::RegisterOwnership(ownership);
 
-    let output = Brc721OpReturnOutput::new(payload).into_txout().unwrap();
+    let output = Brc721OpReturnOutput::new(payload)
+        .into_txout()
+        .context("build register-ownership op_return output")?;
 
-    let passphrase = resolve_passphrase(passphrase);
+    let passphrase = resolve_passphrase(passphrase)?;
     let tx = wallet
         .build_tx_with_op_return_and_payments(
             output,
@@ -158,7 +162,7 @@ fn run_send_amount(
     let wallet = load_wallet(ctx)?;
     let amount = Amount::from_sat(amount_sat);
     let address = Address::from_str(to)?.require_network(ctx.network)?;
-    let passphrase = resolve_passphrase(passphrase);
+    let passphrase = resolve_passphrase(passphrase)?;
     let tx = wallet
         .build_payment_tx(&address, amount, fee_rate, passphrase)
         .context("build payment tx")?;
@@ -235,7 +239,7 @@ fn run_send_assets(
 
     let address = Address::from_str(to)?.require_network(ctx.network)?;
     let dust_amount = Amount::from_sat(dust_sat);
-    let passphrase = resolve_passphrase(passphrase);
+    let passphrase = resolve_passphrase(passphrase)?;
 
     let lock_outpoints =
         compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &token_outpoints)
@@ -372,7 +376,7 @@ fn run_mix(
         .into_txout()
         .context("build mix op_return output")?;
 
-    let passphrase = resolve_passphrase(passphrase);
+    let passphrase = resolve_passphrase(passphrase)?;
     let tx = wallet
         .build_mix_tx(
             &token_outpoints,
@@ -402,14 +406,13 @@ fn load_wallet(ctx: &context::Context) -> Result<Brc721Wallet> {
     Brc721Wallet::load(&ctx.data_dir, ctx.network, &ctx.rpc_url, ctx.auth.clone())
 }
 
-fn resolve_passphrase(passphrase: Option<String>) -> SecretString {
-    passphrase.map(SecretString::from).unwrap_or_else(|| {
-        SecretString::from(
-            prompt_passphrase_once()
-                .expect("prompt")
-                .unwrap_or_default(),
-        )
-    })
+fn resolve_passphrase(passphrase: Option<String>) -> Result<SecretString> {
+    if let Some(passphrase) = passphrase {
+        return Ok(SecretString::from(passphrase));
+    }
+
+    let passphrase = prompt_passphrase_once().context("prompt passphrase")?;
+    Ok(SecretString::from(passphrase.unwrap_or_default()))
 }
 
 fn parse_outpoints(outpoints: &[String]) -> Result<Vec<OutPoint>> {

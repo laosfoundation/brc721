@@ -49,7 +49,9 @@ impl Signer {
             .create_wallet_no_persist()
             .map_err(|e| Brc721Error::WalletError(e.to_string()))?;
 
-        let finalized = wallet.sign(psbt, Default::default()).expect("sign");
+        let finalized = wallet
+            .sign(psbt, Default::default())
+            .map_err(|e| Brc721Error::WalletError(e.to_string()))?;
         Ok(finalized)
     }
 }

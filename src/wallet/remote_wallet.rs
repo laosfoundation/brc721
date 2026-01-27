@@ -132,8 +132,16 @@ impl RemoteWallet {
                 ],
             )
             .context("watch wallet created")?;
-        if ans["name"].as_str().unwrap() != self.watch_name {
-            return Err(anyhow::anyhow!("Unexpected wallet name: {:?}", ans["name"]));
+        let created_name = ans
+            .get("name")
+            .and_then(|value| value.as_str())
+            .context("createwallet response missing name")?;
+        if created_name != self.watch_name {
+            return Err(anyhow::anyhow!(
+                "Unexpected wallet name: expected '{}', got '{}'",
+                self.watch_name,
+                created_name
+            ));
         }
         if !ans["warning"].is_null() {
             return Err(anyhow::anyhow!(
@@ -163,12 +171,15 @@ impl RemoteWallet {
             .call::<serde_json::Value>("importdescriptors", &[imports])
             .context("import descriptor")?;
 
-        let arr = ans.as_array().expect("array");
-        if !arr.iter().all(|e| e["success"].as_bool() == Some(true)) {
-            return Err(anyhow::anyhow!(
-                "Failed to import descriptors: {}",
-                serde_json::to_string_pretty(&ans).unwrap()
-            ));
+        let arr = ans
+            .as_array()
+            .context("importdescriptors response was not an array")?;
+        if !arr
+            .iter()
+            .all(|e| e.get("success").and_then(|v| v.as_bool()) == Some(true))
+        {
+            let pretty = serde_json::to_string_pretty(&ans).unwrap_or_else(|_| format!("{ans:?}"));
+            return Err(anyhow::anyhow!("Failed to import descriptors: {}", pretty));
         }
         Ok(())
     }
