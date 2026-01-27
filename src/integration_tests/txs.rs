@@ -4,7 +4,7 @@ use crate::{
 };
 use age::secrecy::SecretString;
 use bdk_wallet::bip39::{Language, Mnemonic};
-use bitcoin::{Amount, Network};
+use bitcoin::{Amount, Network, OutPoint};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use corepc_node::Node;
 use ethereum_types::H160;
@@ -48,10 +48,12 @@ fn test_build_tx_creates_signed_tx_with_custom_output() {
         output.script_pubkey.to_string(),
         "OP_RETURN OP_PUSHNUM_15 OP_PUSHBYTES_22 00000000000000000000000000000000000000000000"
     );
+    let lock_outpoints: Vec<OutPoint> = Vec::new();
     let tx = wallet
         .build_tx(
             output,
             Some(1.5),
+            &lock_outpoints,
             SecretString::from("passphrase".to_string()),
         )
         .expect("build tx");

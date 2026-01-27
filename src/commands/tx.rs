@@ -80,6 +80,20 @@ fn run_register_collection(
     passphrase: Option<String>,
 ) -> Result<()> {
     let wallet = load_wallet(ctx)?;
+    let mut lock_outpoints = Vec::new();
+    let db_path = ctx.data_dir.join("brc721.sqlite");
+    if db_path.exists() {
+        let storage = crate::storage::SqliteStorage::new(&db_path);
+        let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
+        lock_outpoints = compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &[])
+            .context("compute lock set")?;
+    } else {
+        log::warn!(
+            "scanner database not found at {} (proceeding without ownership UTXO locks)",
+            db_path.to_string_lossy()
+        );
+    }
+
     let msg = RegisterCollectionData {
         evm_collection_address,
         rebaseable,
@@ -91,7 +105,7 @@ fn run_register_collection(
 
     let passphrase = resolve_passphrase(passphrase)?;
     let tx = wallet
-        .build_tx(output, fee_rate, passphrase)
+        .build_tx(output, fee_rate, &lock_outpoints, passphrase)
         .context("build tx")?;
     let txid = wallet.broadcast(&tx)?;
 
@@ -112,6 +126,19 @@ fn run_register_ownership(
     passphrase: Option<String>,
 ) -> Result<()> {
     let mut wallet = load_wallet(ctx)?;
+    let mut lock_outpoints = Vec::new();
+    let db_path = ctx.data_dir.join("brc721.sqlite");
+    if db_path.exists() {
+        let storage = crate::storage::SqliteStorage::new(&db_path);
+        let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
+        lock_outpoints = compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &[])
+            .context("compute lock set")?;
+    } else {
+        log::warn!(
+            "scanner database not found at {} (proceeding without ownership UTXO locks)",
+            db_path.to_string_lossy()
+        );
+    }
 
     // Output 1 is the ownership UTXO tracked by the indexer for this registration.
     // Use a new wallet-derived address so the NFTs are spendable by this wallet.
@@ -138,6 +165,7 @@ fn run_register_ownership(
             output,
             vec![(ownership_address.clone(), ownership_amount)],
             fee_rate,
+            &lock_outpoints,
             passphrase,
         )
         .context("build tx")?;
