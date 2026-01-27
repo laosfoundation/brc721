@@ -5,15 +5,32 @@ use crate::types::{
 };
 use ethereum_types::H160;
 
-fn try_base_h160_from_input0<R: BitcoinRpc>(brc721_tx: &Brc721Tx<'_>, rpc: &R) -> Option<H160> {
-    let input0 = brc721_tx.input0()?;
+fn base_h160_from_input0<R: BitcoinRpc>(
+    brc721_tx: &Brc721Tx<'_>,
+    rpc: &R,
+) -> Result<H160, Brc721Error> {
+    let input0 = brc721_tx
+        .input0()
+        .ok_or_else(|| Brc721Error::TxError("register-ownership requires an input0".to_string()))?;
     let prevout = input0.previous_output;
     if prevout == bitcoin::OutPoint::null() {
-        return None;
+        return Err(Brc721Error::TxError(
+            "register-ownership input0 cannot be coinbase".to_string(),
+        ));
     }
-    let prev_tx = rpc.get_raw_transaction(&prevout.txid).ok()?;
-    let prev_txout = prev_tx.output.get(prevout.vout as usize)?;
-    Some(h160_from_script_pubkey(&prev_txout.script_pubkey))
+    let prev_tx = rpc.get_raw_transaction(&prevout.txid).map_err(|e| {
+        Brc721Error::TxError(format!(
+            "register-ownership requires txindex=1 or a node with access to input0; getrawtransaction({}) failed: {}",
+            prevout.txid, e
+        ))
+    })?;
+    let prev_txout = prev_tx.output.get(prevout.vout as usize).ok_or_else(|| {
+        Brc721Error::TxError(format!(
+            "register-ownership input0 vout {} out of range for tx {}",
+            prevout.vout, prevout.txid
+        ))
+    })?;
+    Ok(h160_from_script_pubkey(&prev_txout.script_pubkey))
 }
 
 fn token_id_decimal(slot_number: u128, base_address: H160) -> String {
@@ -92,16 +109,7 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
     const MAX_REGISTERED_TOKENS_PER_TX: u128 = 1_000_000;
 
     let collection_key = CollectionKey::new(payload.collection_height, payload.collection_tx_index);
-
     let input0_prevout = brc721_tx.input0().map(|input0| input0.previous_output);
-    let base_h160 = try_base_h160_from_input0(brc721_tx, rpc);
-    let (base_h160_log, asset_ids) = match base_h160 {
-        Some(base_h160) => (
-            format!("{:#x}", base_h160),
-            asset_ids_for_payload(payload, base_h160),
-        ),
-        None => ("<unknown>".to_string(), "<unknown>".to_string()),
-    };
 
     let collection = storage
         .load_collection(&collection_key)
@@ -109,28 +117,18 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
 
     if collection.is_none() {
         log::warn!(
-            "register-ownership references unknown collection {} (block {} tx {}, asset_ids={}, input0_prevout={:?}, base_address={})",
+            "register-ownership references unknown collection {} (block {} tx {}, input0_prevout={:?})",
             collection_key,
             block_height,
             tx_index,
-            asset_ids,
-            input0_prevout,
-            base_h160_log
-        );
-        return Ok(());
-    }
-
-    let Some(base_h160) = base_h160 else {
-        log::error!(
-            "register-ownership missing base address (block {} tx {}, collection {}, groups={}, input0_prevout={:?})",
-            block_height,
-            tx_index,
-            collection_key,
-            payload.groups.len(),
             input0_prevout
         );
         return Ok(());
     };
+
+    let base_h160 = base_h160_from_input0(brc721_tx, rpc)?;
+    let base_h160_log = format!("{:#x}", base_h160);
+    let asset_ids = asset_ids_for_payload(payload, base_h160);
 
     let total_slots = total_slots_in_payload(payload);
     if total_slots > MAX_REGISTERED_TOKENS_PER_TX {
@@ -219,4 +217,189 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::traits::{
+        Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup, OwnershipUtxo,
+        OwnershipUtxoSave, StorageRead, StorageWrite,
+    };
+    use crate::types::{Brc721OpReturnOutput, Brc721Payload, SlotRanges};
+    use anyhow::Result as AnyResult;
+    use bitcoin::blockdata::transaction::Version;
+    use bitcoin::{
+        absolute, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
+    };
+    use bitcoincore_rpc::Error as RpcError;
+    use ethereum_types::H160;
+    use std::str::FromStr;
+
+    struct DummyRpc;
+
+    impl BitcoinRpc for DummyRpc {
+        fn get_block_count(&self) -> Result<u64, RpcError> {
+            unimplemented!()
+        }
+        fn get_block_hash(&self, _height: u64) -> Result<bitcoin::BlockHash, RpcError> {
+            unimplemented!()
+        }
+        fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
+            unimplemented!()
+        }
+        fn get_raw_transaction(
+            &self,
+            _txid: &bitcoin::Txid,
+        ) -> Result<bitcoin::Transaction, RpcError> {
+            Err(RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
+                bitcoincore_rpc::jsonrpc::error::RpcError {
+                    code: -5,
+                    message: "No such mempool or blockchain transaction. Use -txindex or provide a block hash.".into(),
+                    data: None,
+                },
+            )))
+        }
+        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+            unimplemented!()
+        }
+    }
+
+    struct DummyStorage {
+        collection: CollectionKey,
+    }
+
+    impl StorageRead for DummyStorage {
+        fn load_last(&self) -> AnyResult<Option<crate::storage::Block>> {
+            Ok(None)
+        }
+        fn load_collection(&self, id: &CollectionKey) -> AnyResult<Option<Collection>> {
+            if id == &self.collection {
+                Ok(Some(Collection {
+                    key: self.collection.clone(),
+                    evm_collection_address: H160::zero(),
+                    rebaseable: false,
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+        fn list_collections(&self) -> AnyResult<Vec<Collection>> {
+            Ok(Vec::new())
+        }
+        fn list_unspent_ownership_utxos_by_outpoint(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> AnyResult<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+        fn list_unspent_ownership_ranges_by_outpoint(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+        ) -> AnyResult<Vec<OwnershipRangeWithGroup>> {
+            Ok(vec![])
+        }
+        fn list_ownership_ranges(&self, _utxo: &OwnershipUtxo) -> AnyResult<Vec<OwnershipRange>> {
+            Ok(vec![])
+        }
+        fn find_unspent_ownership_utxo_for_slot(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot: u128,
+        ) -> AnyResult<Option<OwnershipUtxo>> {
+            Ok(None)
+        }
+        fn list_unspent_ownership_utxos_by_owner(
+            &self,
+            _owner_h160: H160,
+        ) -> AnyResult<Vec<OwnershipUtxo>> {
+            Ok(vec![])
+        }
+    }
+
+    impl StorageWrite for DummyStorage {
+        fn save_last(&self, _height: u64, _hash: &str) -> AnyResult<()> {
+            Ok(())
+        }
+        fn save_collection(
+            &self,
+            _key: CollectionKey,
+            _evm_collection_address: H160,
+            _rebaseable: bool,
+        ) -> AnyResult<()> {
+            Ok(())
+        }
+        fn save_ownership_utxo(&self, _utxo: OwnershipUtxoSave<'_>) -> AnyResult<()> {
+            Ok(())
+        }
+        fn save_ownership_range(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> AnyResult<()> {
+            Ok(())
+        }
+        fn mark_ownership_utxo_spent(
+            &self,
+            _reg_txid: &str,
+            _reg_vout: u32,
+            _spent_txid: &str,
+            _spent_height: u64,
+            _spent_tx_index: u32,
+        ) -> AnyResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn register_ownership_requires_txindex_for_input0_lookup() {
+        let slots = SlotRanges::from_str("0").expect("slots parse");
+        let payload = RegisterOwnershipData::for_single_output(1, 2, slots)
+            .expect("valid register ownership payload");
+        let op_return =
+            Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(payload.clone()))
+                .into_txout()
+                .expect("opreturn txout");
+
+        let prev_txid = bitcoin::Txid::from_str(&"11".repeat(32)).unwrap();
+        let tx = Transaction {
+            version: Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: prev_txid,
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::default(),
+            }],
+            output: vec![
+                op_return,
+                TxOut {
+                    value: Amount::from_sat(546),
+                    script_pubkey: ScriptBuf::new(),
+                },
+            ],
+        };
+
+        let brc721_tx = crate::types::parse_brc721_tx(&tx)
+            .expect("parse should succeed")
+            .expect("expected Some(Brc721Tx)");
+
+        let storage = DummyStorage {
+            collection: CollectionKey::new(1, 2),
+        };
+        let rpc = DummyRpc;
+
+        let err = digest(&payload, &brc721_tx, &rpc, &storage, 10, 0).unwrap_err();
+        assert!(format!("{err}").contains("txindex"));
+    }
 }
