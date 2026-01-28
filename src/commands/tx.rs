@@ -145,8 +145,7 @@ fn run_register_ownership(
 
     // Output 1 is the ownership UTXO tracked by the indexer for this registration.
     // Use a new wallet-derived address so the NFTs are spendable by this wallet.
-    let ownership_address =
-        resolve_register_ownership_address(ctx, &mut wallet, register_address)?;
+    let ownership_address = resolve_register_ownership_address(ctx, &mut wallet, register_address)?;
     let ownership_amount = Amount::from_sat(546);
 
     let ownership = RegisterOwnershipData::for_single_output(
@@ -459,7 +458,10 @@ fn resolve_register_ownership_address(
     let trimmed = raw.trim();
     if let Ok(address) = Address::from_str(trimmed) {
         let address = address.require_network(ctx.network).with_context(|| {
-            format!("register-address '{trimmed}' does not match network {}", ctx.network)
+            format!(
+                "register-address '{trimmed}' does not match network {}",
+                ctx.network
+            )
         })?;
         let known = wallet
             .revealed_payment_addresses()
