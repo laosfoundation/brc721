@@ -3,8 +3,8 @@ use std::str::FromStr;
 use super::CommandRunner;
 use crate::storage::traits::{CollectionKey, StorageRead};
 use crate::types::{
-    Brc721OpReturnOutput, Brc721Payload, IndexRanges, MixData, RegisterCollectionData,
-    RegisterOwnershipData, SlotRanges,
+    h160_from_script_pubkey, Brc721OpReturnOutput, Brc721Payload, IndexRanges, MixData,
+    RegisterCollectionData, RegisterOwnershipData, SlotRanges,
 };
 use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
@@ -37,12 +37,14 @@ impl CommandRunner for cli::TxCmd {
             } => run_send_amount(ctx, to, *amount_sat, *fee_rate, passphrase.clone()),
             cli::TxCmd::RegisterOwnership {
                 collection_id,
+                register_address,
                 slots,
                 fee_rate,
                 passphrase,
             } => run_register_ownership(
                 ctx,
                 collection_id,
+                register_address.clone(),
                 slots.clone(),
                 *fee_rate,
                 passphrase.clone(),
@@ -121,6 +123,7 @@ fn run_register_collection(
 fn run_register_ownership(
     ctx: &context::Context,
     collection_id: &CollectionKey,
+    register_address: Option<String>,
     slots: SlotRanges,
     fee_rate: Option<f64>,
     passphrase: Option<String>,
@@ -142,10 +145,8 @@ fn run_register_ownership(
 
     // Output 1 is the ownership UTXO tracked by the indexer for this registration.
     // Use a new wallet-derived address so the NFTs are spendable by this wallet.
-    let ownership_address = wallet
-        .reveal_next_payment_address()
-        .context("derive ownership address")?
-        .address;
+    let ownership_address =
+        resolve_register_ownership_address(ctx, &mut wallet, register_address)?;
     let ownership_amount = Amount::from_sat(546);
 
     let ownership = RegisterOwnershipData::for_single_output(
@@ -441,6 +442,68 @@ fn resolve_passphrase(passphrase: Option<String>) -> Result<SecretString> {
 
     let passphrase = prompt_passphrase_once().context("prompt passphrase")?;
     Ok(SecretString::from(passphrase.unwrap_or_default()))
+}
+
+fn resolve_register_ownership_address(
+    ctx: &context::Context,
+    wallet: &mut Brc721Wallet,
+    register_address: Option<String>,
+) -> Result<Address> {
+    let Some(raw) = register_address else {
+        return Ok(wallet
+            .reveal_next_payment_address()
+            .context("derive ownership address")?
+            .address);
+    };
+
+    let trimmed = raw.trim();
+    if let Ok(address) = Address::from_str(trimmed) {
+        let address = address.require_network(ctx.network).with_context(|| {
+            format!("register-address '{trimmed}' does not match network {}", ctx.network)
+        })?;
+        let known = wallet
+            .revealed_payment_addresses()
+            .iter()
+            .any(|info| info.address == address);
+        if !known {
+            log::warn!(
+                "register-address '{}' is not a revealed wallet address; ownership will be assigned to an external address",
+                address
+            );
+        }
+        return Ok(address);
+    }
+
+    let h160 = parse_address_h160(trimmed)?;
+    let address = wallet
+        .revealed_payment_addresses()
+        .into_iter()
+        .find(|info| h160_from_script_pubkey(&info.address.script_pubkey()) == h160)
+        .map(|info| info.address)
+        .ok_or_else(|| {
+            anyhow!(
+                "register-address '{}' not found in wallet addresses (run `brc721 wallet address` to generate one)",
+                trimmed
+            )
+        })?;
+
+    Ok(address)
+}
+
+fn parse_address_h160(raw: &str) -> Result<H160> {
+    let trimmed = raw.trim();
+    let trimmed = trimmed.strip_prefix("addressH160=").unwrap_or(trimmed);
+    let formatted = if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
+        trimmed.to_string()
+    } else {
+        format!("0x{trimmed}")
+    };
+    H160::from_str(&formatted).map_err(|_| {
+        anyhow!(
+            "invalid register-address '{}' (expected a Bitcoin address or 0x + 40 hex chars)",
+            raw
+        )
+    })
 }
 
 fn parse_outpoints(outpoints: &[String]) -> Result<Vec<OutPoint>> {

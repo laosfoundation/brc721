@@ -52,6 +52,13 @@ pub enum TxCmd {
         )]
         collection_id: CollectionKey,
         #[arg(
+            long = "register-address",
+            value_name = "ADDRESS|ADDRESS_H160",
+            required = false,
+            help = "Ownership output address (Bitcoin address or addressH160 from `wallet address`); defaults to a new wallet address"
+        )]
+        register_address: Option<String>,
+        #[arg(
             long = "slots",
             value_name = "RANGES",
             help = "Comma-separated slot ranges (inclusive) and/or single slots, e.g. '0..=9,10..=19' or '42' (ranges require start < end)",

@@ -68,6 +68,10 @@ impl Brc721Wallet {
         self.local.reveal_next_payment_address()
     }
 
+    pub fn revealed_payment_addresses(&self) -> Vec<AddressInfo> {
+        self.local.revealed_payment_addresses()
+    }
+
     pub fn balances(&self) -> Result<json::GetBalancesResult> {
         self.remote.balances()
     }
