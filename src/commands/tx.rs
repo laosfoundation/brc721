@@ -10,6 +10,7 @@ use crate::wallet::passphrase::prompt_passphrase_once;
 use crate::{cli, context, wallet::brc721_wallet::Brc721Wallet};
 use age::secrecy::SecretString;
 use anyhow::{anyhow, Context, Result};
+use bdk_wallet::AddressInfo;
 use bitcoin::{Address, Amount, OutPoint};
 use ethereum_types::H160;
 use std::collections::BTreeSet;
@@ -37,14 +38,16 @@ impl CommandRunner for cli::TxCmd {
             } => run_send_amount(ctx, to, *amount_sat, *fee_rate, passphrase.clone()),
             cli::TxCmd::RegisterOwnership {
                 collection_id,
-                register_address,
+                init_owner,
+                target_owner,
                 slots,
                 fee_rate,
                 passphrase,
             } => run_register_ownership(
                 ctx,
                 collection_id,
-                register_address.clone(),
+                init_owner.clone(),
+                target_owner.clone(),
                 slots.clone(),
                 *fee_rate,
                 passphrase.clone(),
@@ -123,17 +126,18 @@ fn run_register_collection(
 fn run_register_ownership(
     ctx: &context::Context,
     collection_id: &CollectionKey,
-    register_address: Option<String>,
+    init_owner: Option<String>,
+    target_owner: Option<String>,
     slots: SlotRanges,
     fee_rate: Option<f64>,
     passphrase: Option<String>,
 ) -> Result<()> {
     let mut wallet = load_wallet(ctx)?;
+    let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
     let mut lock_outpoints = Vec::new();
     let db_path = ctx.data_dir.join("brc721.sqlite");
     if db_path.exists() {
         let storage = crate::storage::SqliteStorage::new(&db_path);
-        let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
         lock_outpoints = compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &[])
             .context("compute lock set")?;
     } else {
@@ -144,8 +148,51 @@ fn run_register_ownership(
     }
 
     // Output 1 is the ownership UTXO tracked by the indexer for this registration.
-    // Use a new wallet-derived address so the NFTs are spendable by this wallet.
-    let ownership_address = resolve_register_ownership_address(ctx, &mut wallet, register_address)?;
+    let revealed_addresses = wallet.revealed_payment_addresses();
+    let mut init_spec = init_owner
+        .as_deref()
+        .map(|raw| resolve_owner_spec(ctx, &revealed_addresses, raw, true, "--init-owner"))
+        .transpose()?;
+    let target_spec = target_owner
+        .as_deref()
+        .map(|raw| resolve_owner_spec(ctx, &revealed_addresses, raw, false, "--target-owner"))
+        .transpose()?;
+
+    if init_spec.is_none() {
+        if let Some(spec) = &target_spec {
+            if spec.is_wallet {
+                init_spec = Some(spec.clone());
+            } else {
+                let raw = target_owner.as_deref().unwrap_or_default();
+                return Err(anyhow!(
+                    "--target-owner '{}' is not a revealed wallet address; provide --init-owner to select input0",
+                    raw
+                ));
+            }
+        }
+    }
+
+    let ownership_address = match &target_spec {
+        Some(spec) => spec.address.clone(),
+        None => match &init_spec {
+            Some(spec) => spec.address.clone(),
+            None => {
+                wallet
+                    .reveal_next_payment_address()
+                    .context("derive ownership address")?
+                    .address
+            }
+        },
+    };
+    let lock_set = lock_outpoints.iter().cloned().collect::<BTreeSet<_>>();
+    let mandatory_inputs = match &init_spec {
+        Some(spec) => vec![select_init_owner_outpoint(
+            &wallet_utxos,
+            &spec.address,
+            &lock_set,
+        )?],
+        None => Vec::new(),
+    };
     let ownership_amount = Amount::from_sat(546);
 
     let ownership = RegisterOwnershipData::for_single_output(
@@ -166,6 +213,7 @@ fn run_register_ownership(
             vec![(ownership_address.clone(), ownership_amount)],
             fee_rate,
             &lock_outpoints,
+            &mandatory_inputs,
             passphrase,
         )
         .context("build tx")?;
@@ -443,56 +491,96 @@ fn resolve_passphrase(passphrase: Option<String>) -> Result<SecretString> {
     Ok(SecretString::from(passphrase.unwrap_or_default()))
 }
 
-fn resolve_register_ownership_address(
-    ctx: &context::Context,
-    wallet: &mut Brc721Wallet,
-    register_address: Option<String>,
-) -> Result<Address> {
-    let Some(raw) = register_address else {
-        return Ok(wallet
-            .reveal_next_payment_address()
-            .context("derive ownership address")?
-            .address);
-    };
+#[derive(Clone)]
+struct OwnerSpec {
+    address: Address,
+    is_wallet: bool,
+}
 
+fn resolve_owner_spec(
+    ctx: &context::Context,
+    revealed: &[AddressInfo],
+    raw: &str,
+    require_wallet: bool,
+    flag_name: &str,
+) -> Result<OwnerSpec> {
     let trimmed = raw.trim();
     if let Ok(address) = Address::from_str(trimmed) {
         let address = address.require_network(ctx.network).with_context(|| {
             format!(
-                "register-address '{trimmed}' does not match network {}",
+                "{flag_name} '{trimmed}' does not match network {}",
                 ctx.network
             )
         })?;
-        let known = wallet
-            .revealed_payment_addresses()
-            .iter()
-            .any(|info| info.address == address);
-        if !known {
-            log::warn!(
-                "register-address '{}' is not a revealed wallet address; ownership will be assigned to an external address",
-                address
-            );
+        let is_wallet = revealed.iter().any(|info| info.address == address);
+        if require_wallet && !is_wallet {
+            return Err(anyhow!(
+                "{flag_name} '{trimmed}' is not a revealed wallet address (run `brc721 wallet address` to generate one)"
+            ));
         }
-        return Ok(address);
+        return Ok(OwnerSpec { address, is_wallet });
     }
 
-    let h160 = parse_address_h160(trimmed)?;
-    let address = wallet
-        .revealed_payment_addresses()
-        .into_iter()
+    let h160 = parse_address_h160(trimmed, flag_name)?;
+    let address = revealed
+        .iter()
         .find(|info| h160_from_script_pubkey(&info.address.script_pubkey()) == h160)
-        .map(|info| info.address)
+        .map(|info| info.address.clone())
         .ok_or_else(|| {
             anyhow!(
-                "register-address '{}' not found in wallet addresses (run `brc721 wallet address` to generate one)",
-                trimmed
+                "{flag_name} '{trimmed}' not found in wallet addresses (run `brc721 wallet address` to generate one)"
             )
         })?;
 
-    Ok(address)
+    Ok(OwnerSpec {
+        address,
+        is_wallet: true,
+    })
 }
 
-fn parse_address_h160(raw: &str) -> Result<H160> {
+fn select_init_owner_outpoint(
+    wallet_utxos: &[bitcoincore_rpc::json::ListUnspentResultEntry],
+    owner_address: &Address,
+    disallowed: &BTreeSet<OutPoint>,
+) -> Result<OutPoint> {
+    let script_pubkey = owner_address.script_pubkey();
+    let mut best: Option<&bitcoincore_rpc::json::ListUnspentResultEntry> = None;
+
+    for utxo in wallet_utxos {
+        if utxo.script_pub_key != script_pubkey {
+            continue;
+        }
+        let outpoint = OutPoint {
+            txid: utxo.txid,
+            vout: utxo.vout,
+        };
+        if disallowed.contains(&outpoint) {
+            continue;
+        }
+        match best {
+            None => best = Some(utxo),
+            Some(current) => {
+                if utxo.amount.to_sat() > current.amount.to_sat() {
+                    best = Some(utxo);
+                }
+            }
+        }
+    }
+
+    let Some(utxo) = best else {
+        return Err(anyhow!(
+            "no spendable UTXO found for init-owner address {} (fund it with a non-NFT UTXO)",
+            owner_address
+        ));
+    };
+
+    Ok(OutPoint {
+        txid: utxo.txid,
+        vout: utxo.vout,
+    })
+}
+
+fn parse_address_h160(raw: &str, flag_name: &str) -> Result<H160> {
     let trimmed = raw.trim();
     let trimmed = trimmed.strip_prefix("addressH160=").unwrap_or(trimmed);
     let formatted = if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
@@ -502,7 +590,7 @@ fn parse_address_h160(raw: &str) -> Result<H160> {
     };
     H160::from_str(&formatted).map_err(|_| {
         anyhow!(
-            "invalid register-address '{}' (expected a Bitcoin address or 0x + 40 hex chars)",
+            "invalid {flag_name} '{}' (expected a Bitcoin address or 0x + 40 hex chars)",
             raw
         )
     })

@@ -52,12 +52,19 @@ pub enum TxCmd {
         )]
         collection_id: CollectionKey,
         #[arg(
-            long = "register-address",
+            long = "init-owner",
             value_name = "ADDRESS|ADDRESS_H160",
             required = false,
-            help = "Ownership output address (Bitcoin address or addressH160 from `wallet address`); defaults to a new wallet address"
+            help = "Init owner (addressH160 or revealed wallet address). Input0 must spend a UTXO from this address."
         )]
-        register_address: Option<String>,
+        init_owner: Option<String>,
+        #[arg(
+            long = "target-owner",
+            value_name = "ADDRESS|ADDRESS_H160",
+            required = false,
+            help = "Ownership output address (Bitcoin address or addressH160). Defaults to init-owner or a new wallet address."
+        )]
+        target_owner: Option<String>,
         #[arg(
             long = "slots",
             value_name = "RANGES",
