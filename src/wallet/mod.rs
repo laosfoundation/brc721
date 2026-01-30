@@ -4,3 +4,4 @@ mod master_key_store;
 pub mod passphrase;
 mod remote_wallet;
 mod signer;
+pub(crate) mod utxo_selection;
