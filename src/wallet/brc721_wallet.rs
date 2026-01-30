@@ -107,11 +107,30 @@ impl Brc721Wallet {
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
+        lock_outpoints: &[OutPoint],
         passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
-        let psbt: Psbt = self
+        let locked = self.remote.list_locked_unspent()?;
+        let to_lock = lock_outpoints
+            .iter()
+            .filter(|outpoint| !locked.contains(outpoint))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.remote
+            .lock_unspent_outpoints(&to_lock)
+            .context("lock token outpoints")?;
+
+        let psbt_res = self
             .remote
-            .create_psbt_for_payment(target_address, amount, fee_rate)?;
+            .create_psbt_for_payment(target_address, amount, fee_rate);
+
+        let unlock_res = self.remote.unlock_unspent_outpoints(&to_lock);
+        if let Err(unlock_err) = unlock_res {
+            log::warn!("Failed to unlock outpoints: {unlock_err:#}");
+        }
+
+        let psbt: Psbt = psbt_res.context("create psbt for payment")?;
 
         self.sign(psbt, &passphrase)
     }

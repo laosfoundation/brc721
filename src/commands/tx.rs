@@ -241,11 +241,24 @@ fn run_send_amount(
     passphrase: Option<String>,
 ) -> Result<()> {
     let wallet = load_wallet(ctx)?;
+    let mut lock_outpoints = Vec::new();
+    let db_path = ctx.data_dir.join("brc721.sqlite");
+    if db_path.exists() {
+        let storage = crate::storage::SqliteStorage::new(&db_path);
+        let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
+        lock_outpoints = compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &[])
+            .context("compute lock set")?;
+    } else {
+        log::warn!(
+            "scanner database not found at {} (proceeding without ownership UTXO locks)",
+            db_path.to_string_lossy()
+        );
+    }
     let amount = Amount::from_sat(amount_sat);
     let address = Address::from_str(to)?.require_network(ctx.network)?;
     let passphrase = resolve_passphrase(passphrase)?;
     let tx = wallet
-        .build_payment_tx(&address, amount, fee_rate, passphrase)
+        .build_payment_tx(&address, amount, fee_rate, &lock_outpoints, passphrase)
         .context("build payment tx")?;
     let txid = wallet.broadcast(&tx)?;
     log::info!("✅ Sent {} sat to {} (txid: {})", amount_sat, to, txid);

@@ -132,8 +132,15 @@ fn test_send_amount_between_wallets_via_psbt() {
     let amount = Amount::from_btc(1.0).expect("valid amount");
     let fee = 2.5;
     // Send from wallet0 to wallet1 via PSBT flow
+    let lock_outpoints: Vec<OutPoint> = Vec::new();
     let tx = wallet0
-        .build_payment_tx(address1, amount, Some(fee), SecretString::from(passphrase))
+        .build_payment_tx(
+            address1,
+            amount,
+            Some(fee),
+            &lock_outpoints,
+            SecretString::from(passphrase),
+        )
         .expect("build payment tx");
     wallet0.broadcast(&tx).expect("broadcast");
 
