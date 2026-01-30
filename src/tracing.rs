@@ -18,11 +18,9 @@ pub fn init(log_file: Option<&Path>) {
             .open(log_file)
             .ok()
             .map(|file| {
-                let (writer, guard) = tracing_appender::non_blocking(file);
-                std::mem::forget(guard);
                 tracing_subscriber::fmt::layer()
                     .with_ansi(false)
-                    .with_writer(writer)
+                    .with_writer(file)
             })
     });
 
@@ -33,4 +31,39 @@ pub fn init(log_file: Option<&Path>) {
         .with(stderr_layer)
         .with(file_layer)
         .try_init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::thread::sleep;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use tempfile::TempDir;
+
+    #[test]
+    fn init_writes_logs_to_file() {
+        let dir = TempDir::new().expect("temp dir");
+        let log_path = dir.path().join("brc721.log");
+
+        init(Some(&log_path));
+
+        let marker = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        log::info!("file log test marker={}", marker);
+
+        for _ in 0..20 {
+            if let Ok(contents) = fs::read_to_string(&log_path) {
+                if contents.contains(&format!("marker={}", marker)) {
+                    return;
+                }
+            }
+            sleep(Duration::from_millis(50));
+        }
+
+        let contents = fs::read_to_string(&log_path).unwrap_or_default();
+        panic!("expected log marker in file, got: {}", contents);
+    }
 }

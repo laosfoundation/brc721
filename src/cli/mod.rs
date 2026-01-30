@@ -8,4 +8,4 @@ pub use command::Command;
 pub use tx_cmd::TxCmd;
 pub use wallet_cmd::WalletCmd;
 
-pub use args::parse;
+pub use args::{load_dotenv, parse};

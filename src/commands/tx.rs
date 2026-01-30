@@ -140,6 +140,11 @@ fn run_register_ownership(
         let storage = crate::storage::SqliteStorage::new(&db_path);
         lock_outpoints = compute_wallet_token_outpoints_to_lock(&storage, &wallet_utxos, &[])
             .context("compute lock set")?;
+    } else if init_owner.is_some() {
+        return Err(anyhow!(
+            "scanner database not found at {} (required when using --init-owner)",
+            db_path.to_string_lossy()
+        ));
     } else {
         log::warn!(
             "scanner database not found at {} (proceeding without ownership UTXO locks)",
@@ -692,10 +697,76 @@ fn parse_mix_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::{Amount, Network, Txid};
+    use bitcoincore_rpc::json::ListUnspentResultEntry;
 
     #[test]
     fn parse_outpoints_rejects_invalid() {
         let res = parse_outpoints(&["not-an-outpoint".to_string()]);
+        assert!(res.is_err());
+    }
+
+    fn make_utxo(
+        txid_hex: &str,
+        vout: u32,
+        script_pub_key: bitcoin::ScriptBuf,
+        amount_sat: u64,
+    ) -> ListUnspentResultEntry {
+        ListUnspentResultEntry {
+            txid: Txid::from_str(txid_hex).unwrap(),
+            vout,
+            address: None,
+            label: None,
+            redeem_script: None,
+            witness_script: None,
+            script_pub_key,
+            amount: Amount::from_sat(amount_sat),
+            confirmations: 1,
+            spendable: true,
+            solvable: true,
+            descriptor: None,
+            safe: true,
+        }
+    }
+
+    #[test]
+    fn select_init_owner_outpoint_skips_disallowed() {
+        let address = Address::from_str("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh")
+            .unwrap()
+            .require_network(Network::Bitcoin)
+            .unwrap();
+        let script_pub_key = address.script_pubkey();
+        let utxo_nft = make_utxo(&"00".repeat(32), 0, script_pub_key.clone(), 1000);
+        let utxo_ok = make_utxo(&"11".repeat(32), 1, script_pub_key.clone(), 2000);
+
+        let mut disallowed = BTreeSet::new();
+        disallowed.insert(OutPoint {
+            txid: utxo_nft.txid,
+            vout: utxo_nft.vout,
+        });
+
+        let selected =
+            select_init_owner_outpoint(&[utxo_nft, utxo_ok], &address, &disallowed).unwrap();
+        assert_eq!(selected.txid, Txid::from_str(&"11".repeat(32)).unwrap());
+        assert_eq!(selected.vout, 1);
+    }
+
+    #[test]
+    fn select_init_owner_outpoint_errors_when_only_disallowed() {
+        let address = Address::from_str("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh")
+            .unwrap()
+            .require_network(Network::Bitcoin)
+            .unwrap();
+        let script_pub_key = address.script_pubkey();
+        let utxo_nft = make_utxo(&"00".repeat(32), 0, script_pub_key.clone(), 1000);
+
+        let mut disallowed = BTreeSet::new();
+        disallowed.insert(OutPoint {
+            txid: utxo_nft.txid,
+            vout: utxo_nft.vout,
+        });
+
+        let res = select_init_owner_outpoint(&[utxo_nft], &address, &disallowed);
         assert!(res.is_err());
     }
 }
