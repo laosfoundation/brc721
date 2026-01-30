@@ -31,6 +31,10 @@ fn e2e_send_amount() {
     // Mine coins to wallet A so it has UTXOs
     root_client.generate_to_address(101, &addr_a).expect("mine");
 
+    let mut daemon = common::start_daemon(&rpc_url, &data_dir_a, None);
+    common::wait_for_scanner_db(&data_dir_a);
+    daemon.stop();
+
     // Wallet B: create and get receive address
     let data_dir_b = TempDir::new().expect("temp dir");
     let output = common::base_cmd(&rpc_url, &data_dir_b)

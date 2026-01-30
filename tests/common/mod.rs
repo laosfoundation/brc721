@@ -1,6 +1,9 @@
 use bitcoin::Address;
-use std::process::Command as ProcCommand;
+use std::path::Path;
+use std::process::{Child, Command as ProcCommand, ExitStatus, Stdio};
 use std::str::FromStr;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::{Container, ContainerRequest, GenericImage, ImageExt};
@@ -49,6 +52,68 @@ pub fn base_cmd(rpc_url: &String, data_dir: &TempDir) -> ProcCommand {
         .arg("dev");
 
     command
+}
+
+#[allow(dead_code)]
+pub struct DaemonGuard {
+    child: Child,
+}
+
+#[allow(dead_code)]
+impl DaemonGuard {
+    fn new(child: Child) -> Self {
+        Self { child }
+    }
+
+    pub fn try_wait(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().expect("try_wait")
+    }
+
+    pub fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[allow(dead_code)]
+impl Drop for DaemonGuard {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+#[allow(dead_code)]
+pub fn start_daemon(
+    rpc_url: &String,
+    data_dir: &TempDir,
+    log_path: Option<&Path>,
+) -> DaemonGuard {
+    let mut cmd = base_cmd(rpc_url, data_dir);
+    cmd.arg("--start").arg("0").arg("--confirmations").arg("0");
+    if let Some(path) = log_path {
+        cmd.arg("--log-file").arg(path);
+    }
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+    DaemonGuard::new(cmd.spawn().expect("start daemon"))
+}
+
+#[allow(dead_code)]
+pub fn wait_for_scanner_db(data_dir: &TempDir) {
+    let db_path = data_dir.path().join("regtest").join("brc721.sqlite");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if db_path.exists() {
+            return;
+        }
+        if Instant::now() > deadline {
+            panic!(
+                "timed out waiting for scanner database at {}",
+                db_path.display()
+            );
+        }
+        sleep(Duration::from_millis(50));
+    }
 }
 
 pub fn wallet_address(rpc_url: &String, data_dir: &TempDir) -> Address {

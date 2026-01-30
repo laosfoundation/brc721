@@ -86,21 +86,12 @@ fn run_register_collection(
     passphrase: Option<String>,
 ) -> Result<()> {
     let wallet = load_wallet(ctx)?;
-    let mut lock_outpoints = Vec::new();
-    let db_path = ctx.data_dir.join("brc721.sqlite");
-    if db_path.exists() {
-        let storage = crate::storage::SqliteStorage::new(&db_path);
-        let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
-        let ownership_outpoints =
-            utxo_selection::ownership_outpoints_for_wallet(&storage, &wallet_utxos)
-                .context("compute ownership outpoints")?;
-        lock_outpoints = utxo_selection::lock_outpoints_for_fees(&ownership_outpoints, &[]);
-    } else {
-        log::warn!(
-            "scanner database not found at {} (proceeding without ownership UTXO locks)",
-            db_path.to_string_lossy()
-        );
-    }
+    let storage = require_scanner_storage(ctx)?;
+    let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
+    let ownership_outpoints =
+        utxo_selection::ownership_outpoints_for_wallet(&storage, &wallet_utxos)
+            .context("compute ownership outpoints")?;
+    let lock_outpoints = utxo_selection::lock_outpoints_for_fees(&ownership_outpoints, &[]);
 
     let msg = RegisterCollectionData {
         evm_collection_address,
@@ -137,26 +128,11 @@ fn run_register_ownership(
 ) -> Result<()> {
     let mut wallet = load_wallet(ctx)?;
     let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
-    let mut lock_outpoints = Vec::new();
-    let mut ownership_outpoints = BTreeSet::new();
-    let db_path = ctx.data_dir.join("brc721.sqlite");
-    if db_path.exists() {
-        let storage = crate::storage::SqliteStorage::new(&db_path);
-        ownership_outpoints =
-            utxo_selection::ownership_outpoints_for_wallet(&storage, &wallet_utxos)
-                .context("compute ownership outpoints")?;
-        lock_outpoints = utxo_selection::lock_outpoints_for_fees(&ownership_outpoints, &[]);
-    } else if init_owner.is_some() {
-        return Err(anyhow!(
-            "scanner database not found at {} (required when using --init-owner)",
-            db_path.to_string_lossy()
-        ));
-    } else {
-        log::warn!(
-            "scanner database not found at {} (proceeding without ownership UTXO locks)",
-            db_path.to_string_lossy()
-        );
-    }
+    let storage = require_scanner_storage(ctx)?;
+    let ownership_outpoints =
+        utxo_selection::ownership_outpoints_for_wallet(&storage, &wallet_utxos)
+            .context("compute ownership outpoints")?;
+    let lock_outpoints = utxo_selection::lock_outpoints_for_fees(&ownership_outpoints, &[]);
 
     // Output 1 is the ownership UTXO tracked by the indexer for this registration.
     let revealed_addresses = wallet.revealed_payment_addresses();
@@ -246,21 +222,12 @@ fn run_send_amount(
     passphrase: Option<String>,
 ) -> Result<()> {
     let wallet = load_wallet(ctx)?;
-    let mut lock_outpoints = Vec::new();
-    let db_path = ctx.data_dir.join("brc721.sqlite");
-    if db_path.exists() {
-        let storage = crate::storage::SqliteStorage::new(&db_path);
-        let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
-        let ownership_outpoints =
-            utxo_selection::ownership_outpoints_for_wallet(&storage, &wallet_utxos)
-                .context("compute ownership outpoints")?;
-        lock_outpoints = utxo_selection::lock_outpoints_for_fees(&ownership_outpoints, &[]);
-    } else {
-        log::warn!(
-            "scanner database not found at {} (proceeding without ownership UTXO locks)",
-            db_path.to_string_lossy()
-        );
-    }
+    let storage = require_scanner_storage(ctx)?;
+    let wallet_utxos = wallet.list_unspent(0).context("list wallet UTXOs")?;
+    let ownership_outpoints =
+        utxo_selection::ownership_outpoints_for_wallet(&storage, &wallet_utxos)
+            .context("compute ownership outpoints")?;
+    let lock_outpoints = utxo_selection::lock_outpoints_for_fees(&ownership_outpoints, &[]);
     let amount = Amount::from_sat(amount_sat);
     let address = Address::from_str(to)?.require_network(ctx.network)?;
     let passphrase = resolve_passphrase(passphrase)?;
@@ -280,14 +247,7 @@ fn run_send_assets(
     fee_rate: Option<f64>,
     passphrase: Option<String>,
 ) -> Result<()> {
-    let db_path = ctx.data_dir.join("brc721.sqlite");
-    if !db_path.exists() {
-        return Err(anyhow!(
-            "scanner database not found at {} (run the daemon to build an index)",
-            db_path.to_string_lossy()
-        ));
-    }
-
+    let storage = require_scanner_storage(ctx)?;
     let token_outpoints = parse_outpoints(outpoints)?;
     if token_outpoints.is_empty() {
         return Err(anyhow!("at least one --outpoint is required"));
@@ -296,8 +256,6 @@ fn run_send_assets(
     if unique.len() != token_outpoints.len() {
         return Err(anyhow!("duplicate --outpoint provided"));
     }
-
-    let storage = crate::storage::SqliteStorage::new(&db_path);
 
     for outpoint in &token_outpoints {
         let groups = storage
@@ -385,14 +343,7 @@ fn run_mix(
     fee_rate: Option<f64>,
     passphrase: Option<String>,
 ) -> Result<()> {
-    let db_path = ctx.data_dir.join("brc721.sqlite");
-    if !db_path.exists() {
-        return Err(anyhow!(
-            "scanner database not found at {} (run the daemon to build an index)",
-            db_path.to_string_lossy()
-        ));
-    }
-
+    let storage = require_scanner_storage(ctx)?;
     let token_outpoints = parse_outpoints(outpoints)?;
     if token_outpoints.is_empty() {
         return Err(anyhow!("at least one --outpoint is required"));
@@ -403,8 +354,6 @@ fn run_mix(
     }
 
     let (output_addresses, mix_data) = parse_mix_outputs(outputs, ctx.network)?;
-
-    let storage = crate::storage::SqliteStorage::new(&db_path);
 
     let mut total_tokens = 0u128;
     for outpoint in &token_outpoints {
@@ -505,6 +454,17 @@ fn run_mix(
         ctx.confirmations
     );
     Ok(())
+}
+
+fn require_scanner_storage(ctx: &context::Context) -> Result<crate::storage::SqliteStorage> {
+    let db_path = ctx.data_dir.join("brc721.sqlite");
+    if !db_path.exists() {
+        return Err(anyhow!(
+            "scanner database not found at {} (run the daemon to build an index)",
+            db_path.to_string_lossy()
+        ));
+    }
+    Ok(crate::storage::SqliteStorage::new(&db_path))
 }
 
 fn load_wallet(ctx: &context::Context) -> Result<Brc721Wallet> {

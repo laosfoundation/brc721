@@ -2,7 +2,7 @@ use bitcoin::Address;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use serde_json::json;
 use std::fs;
-use std::process::{Child, ExitStatus, Output, Stdio};
+use std::process::Output;
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -80,31 +80,6 @@ fn collection_id_for_confirmed_tx(root: &Client, txid: &bitcoin::Txid) -> (u64, 
     (height, tx_index)
 }
 
-struct DaemonGuard {
-    child: Child,
-}
-
-impl DaemonGuard {
-    fn new(child: Child) -> Self {
-        Self { child }
-    }
-
-    fn try_wait(&mut self) -> Option<ExitStatus> {
-        self.child.try_wait().expect("try_wait")
-    }
-
-    fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
 #[test]
 fn e2e_register_ownership_init_owner_rejects_nft_utxo() {
     let image = common::bitcoind_image();
@@ -129,6 +104,10 @@ fn e2e_register_ownership_init_owner_rejects_nft_utxo() {
 
     let addr = common::wallet_address(&rpc_url, &data_dir);
     root_client.generate_to_address(101, &addr).expect("mine");
+
+    let log_path = data_dir.path().join("daemon.log");
+    let mut daemon = common::start_daemon(&rpc_url, &data_dir, Some(&log_path));
+    common::wait_for_scanner_db(&data_dir);
 
     // Register a collection so we can use a real collection id (HEIGHT:TX_INDEX)
     let output = common::base_cmd(&rpc_url, &data_dir)
@@ -173,21 +152,6 @@ fn e2e_register_ownership_init_owner_rejects_nft_utxo() {
         .expect("mine confirm ownership");
     let (ownership_height, ownership_tx_index) =
         collection_id_for_confirmed_tx(&root_client, &ownership_txid);
-
-    // Start the daemon to build the scanner DB and index the ownership UTXO.
-    let log_path = data_dir.path().join("daemon.log");
-    let mut daemon_cmd = common::base_cmd(&rpc_url, &data_dir);
-    daemon_cmd
-        .arg("--start")
-        .arg("0")
-        .arg("--confirmations")
-        .arg("0")
-        .arg("--log-file")
-        .arg(&log_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    let mut daemon = DaemonGuard::new(daemon_cmd.spawn().expect("start daemon"));
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let needle = format!(
