@@ -356,6 +356,48 @@ fn db_find_unspent_ownership_utxo_for_slot(
     .optional()
 }
 
+fn db_has_unspent_ownership_overlap(
+    conn: &Connection,
+    collection_id: &CollectionKey,
+    base_h160: H160,
+    slot_start: u128,
+    slot_end: u128,
+) -> rusqlite::Result<bool> {
+    if slot_start > slot_end {
+        return Ok(false);
+    }
+    let start_blob = encode_slot96(slot_start);
+    let end_blob = encode_slot96(slot_end);
+    let found: Option<i64> = conn
+        .query_row(
+            r#"
+        SELECT 1
+        FROM ownership_utxos u
+        JOIN ownership_ranges r
+            ON r.reg_txid = u.reg_txid
+            AND r.reg_vout = u.reg_vout
+            AND r.collection_id = u.collection_id
+            AND r.base_h160 = u.base_h160
+        WHERE
+            u.collection_id = ?1
+            AND u.base_h160 = ?2
+            AND u.spent_txid IS NULL
+            AND r.slot_start <= ?3
+            AND r.slot_end >= ?4
+        LIMIT 1
+        "#,
+            params![
+                collection_id.to_string(),
+                format!("0x{:x}", base_h160),
+                end_blob.as_slice(),
+                start_blob.as_slice()
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
 fn db_list_unspent_ownership_utxos_by_owner(
     conn: &Connection,
     owner_h160: H160,
@@ -520,6 +562,22 @@ impl StorageRead for SqliteTx {
             collection_id,
             base_h160,
             slot,
+        )?)
+    }
+
+    fn has_unspent_ownership_overlap(
+        &self,
+        collection_id: &CollectionKey,
+        base_h160: H160,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool> {
+        Ok(db_has_unspent_ownership_overlap(
+            &self.conn,
+            collection_id,
+            base_h160,
+            slot_start,
+            slot_end,
         )?)
     }
 
@@ -796,6 +854,19 @@ impl StorageRead for SqliteStorage {
             db_find_unspent_ownership_utxo_for_slot(conn, collection_id, base_h160, slot)
         })?;
         Ok(row)
+    }
+
+    fn has_unspent_ownership_overlap(
+        &self,
+        collection_id: &CollectionKey,
+        base_h160: H160,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool> {
+        let found = self.with_conn(|conn| {
+            db_has_unspent_ownership_overlap(conn, collection_id, base_h160, slot_start, slot_end)
+        })?;
+        Ok(found)
     }
 
     fn list_unspent_ownership_utxos_by_owner(
