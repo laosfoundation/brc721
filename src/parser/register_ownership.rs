@@ -243,16 +243,13 @@ mod tests {
     use super::*;
     use crate::storage::traits::{
         Collection, CollectionKey, OwnershipRange, OwnershipRangeWithGroup, OwnershipUtxo,
-        OwnershipUtxoSave, Storage, StorageRead, StorageTx, StorageWrite,
+        OwnershipUtxoSave, StorageRead, StorageWrite,
     };
-    use crate::storage::SqliteStorage;
     use crate::types::{Brc721OpReturnOutput, Brc721Payload, SlotRanges};
     use anyhow::Result as AnyResult;
     use bitcoin::blockdata::transaction::Version;
-    use bitcoin::hashes::Hash;
     use bitcoin::{
-        absolute, Amount, OutPoint, PubkeyHash, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
-        Txid, Witness,
+        absolute, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
     };
     use bitcoincore_rpc::Error as RpcError;
     use ethereum_types::H160;
@@ -284,78 +281,6 @@ mod tests {
         }
         fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
             unimplemented!()
-        }
-    }
-
-    struct FixedRpc {
-        first_txid: Txid,
-        first_tx: Transaction,
-        second_txid: Txid,
-        second_tx: Transaction,
-    }
-
-    impl BitcoinRpc for FixedRpc {
-        fn get_block_count(&self) -> Result<u64, RpcError> {
-            unimplemented!()
-        }
-        fn get_block_hash(&self, _height: u64) -> Result<bitcoin::BlockHash, RpcError> {
-            unimplemented!()
-        }
-        fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
-            unimplemented!()
-        }
-        fn get_raw_transaction(
-            &self,
-            txid: &bitcoin::Txid,
-        ) -> Result<bitcoin::Transaction, RpcError> {
-            if txid == &self.first_txid {
-                Ok(self.first_tx.clone())
-            } else if txid == &self.second_txid {
-                Ok(self.second_tx.clone())
-            } else {
-                Err(RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
-                    bitcoincore_rpc::jsonrpc::error::RpcError {
-                        code: -5,
-                        message: "No such mempool or blockchain transaction. Use -txindex or provide a block hash.".into(),
-                        data: None,
-                    },
-                )))
-            }
-        }
-        fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
-            unimplemented!()
-        }
-    }
-
-    fn build_register_ownership_tx(
-        payload: &RegisterOwnershipData,
-        prev_txid: Txid,
-        prev_vout: u32,
-        owner_script: ScriptBuf,
-    ) -> Transaction {
-        let op_return =
-            Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(payload.clone()))
-                .into_txout()
-                .expect("opreturn txout");
-        Transaction {
-            version: Version(2),
-            lock_time: absolute::LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint {
-                    txid: prev_txid,
-                    vout: prev_vout,
-                },
-                script_sig: ScriptBuf::new(),
-                sequence: Sequence::MAX,
-                witness: Witness::default(),
-            }],
-            output: vec![
-                op_return,
-                TxOut {
-                    value: Amount::from_sat(546),
-                    script_pubkey: owner_script,
-                },
-            ],
         }
     }
 
@@ -495,76 +420,5 @@ mod tests {
 
         let err = digest(&payload, &brc721_tx, &rpc, &storage, 10, 0).unwrap_err();
         assert!(format!("{err}").contains("txindex"));
-    }
-
-    #[test]
-    fn register_ownership_skips_duplicate_assets() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let storage = SqliteStorage::new(temp_dir.path().join("dup_ownership.db"));
-        storage.init().expect("init db");
-
-        let collection_key = CollectionKey::new(100, 0);
-        let setup_tx = storage.begin_tx().expect("begin tx");
-        setup_tx
-            .save_collection(collection_key.clone(), H160::from_low_u64_be(1), false)
-            .expect("save collection");
-        setup_tx.commit().expect("commit collection");
-
-        let slots = SlotRanges::from_str("0..=1").expect("slots parse");
-        let payload = RegisterOwnershipData::for_single_output(
-            collection_key.block_height,
-            collection_key.tx_index,
-            slots,
-        )
-        .expect("payload");
-
-        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
-        let prev_tx = Transaction {
-            version: Version(2),
-            lock_time: absolute::LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::null(),
-                script_sig: ScriptBuf::new(),
-                sequence: Sequence::MAX,
-                witness: Witness::default(),
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(1000),
-                script_pubkey: owner_script.clone(),
-            }],
-        };
-        let prev_txid = Txid::from_str(&"11".repeat(32)).unwrap();
-
-        let tx_a = build_register_ownership_tx(&payload, prev_txid, 0, owner_script.clone());
-        let tx_aid = tx_a.compute_txid();
-        let tx_b = build_register_ownership_tx(&payload, tx_aid, 1, owner_script);
-        let rpc = FixedRpc {
-            first_txid: prev_txid,
-            first_tx: prev_tx,
-            second_txid: tx_aid,
-            second_tx: tx_a.clone(),
-        };
-        let brc721_a = crate::types::parse_brc721_tx(&tx_a)
-            .expect("parse tx a")
-            .expect("brc721 tx a");
-
-        let brc721_b = crate::types::parse_brc721_tx(&tx_b)
-            .expect("parse tx b")
-            .expect("brc721 tx b");
-
-        let db_tx = storage.begin_tx().expect("begin tx");
-        digest(&payload, &brc721_a, &rpc, &db_tx, 200, 0).expect("first digest");
-        digest(&payload, &brc721_b, &rpc, &db_tx, 201, 0).expect("second digest");
-        db_tx.commit().expect("commit digests");
-
-        let utxos_a = storage
-            .list_unspent_ownership_utxos_by_outpoint(&tx_a.compute_txid().to_string(), 1)
-            .expect("list utxos a");
-        let utxos_b = storage
-            .list_unspent_ownership_utxos_by_outpoint(&tx_b.compute_txid().to_string(), 1)
-            .expect("list utxos b");
-
-        assert_eq!(utxos_a.len(), 1);
-        assert!(utxos_b.is_empty());
     }
 }

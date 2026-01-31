@@ -1661,8 +1661,7 @@ mod tests {
 
         let block_height = 900_000;
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let storage =
-            crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_overlap.db"));
+        let storage = crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_overlap.db"));
         storage.init().expect("init db");
 
         let collection_payload = RegisterCollectionData {
