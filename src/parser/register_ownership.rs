@@ -147,7 +147,7 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
 
     for range in payload.groups.iter().flat_map(|group| group.ranges.iter()) {
         let overlaps = storage
-            .has_unspent_ownership_overlap(&collection_key, base_h160, range.start, range.end)
+            .has_ownership_overlap(&collection_key, base_h160, range.start, range.end)
             .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
         if overlaps {
             log::warn!(
@@ -336,6 +336,16 @@ mod tests {
             _owner_h160: H160,
         ) -> AnyResult<Vec<OwnershipUtxo>> {
             Ok(vec![])
+        }
+
+        fn has_ownership_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> AnyResult<bool> {
+            Ok(false)
         }
     }
 

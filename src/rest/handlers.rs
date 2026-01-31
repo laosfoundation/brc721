@@ -885,6 +885,27 @@ mod tests {
                 .cloned()
                 .collect())
         }
+
+        fn has_ownership_overlap(
+            &self,
+            collection_id: &CollectionKey,
+            base_h160: H160,
+            slot_start: u128,
+            slot_end: u128,
+        ) -> anyhow::Result<bool> {
+            if slot_start > slot_end {
+                return Ok(false);
+            }
+            let ranges = self.ownership_ranges.read().unwrap();
+            Ok(ranges.iter().any(
+                |(_, _, range_collection_id, range_base_h160, range)| {
+                    range_collection_id == collection_id
+                        && *range_base_h160 == base_h160
+                        && range.slot_start <= slot_end
+                        && range.slot_end >= slot_start
+                },
+            ))
+        }
     }
 
     impl Storage for TestStorage {
@@ -946,6 +967,16 @@ mod tests {
             &self,
             _owner_h160: H160,
         ) -> anyhow::Result<Vec<OwnershipUtxo>> {
+            Err(anyhow!("not implemented"))
+        }
+
+        fn has_ownership_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<bool> {
             Err(anyhow!("not implemented"))
         }
     }

@@ -1530,6 +1530,16 @@ mod tests {
         ) -> anyhow::Result<Vec<OwnershipUtxo>> {
             Ok(vec![])
         }
+
+        fn has_ownership_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
     }
 
     impl StorageWrite for DummyStorage {

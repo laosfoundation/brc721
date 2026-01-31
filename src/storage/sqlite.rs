@@ -356,7 +356,7 @@ fn db_find_unspent_ownership_utxo_for_slot(
     .optional()
 }
 
-fn db_has_unspent_ownership_overlap(
+fn db_has_ownership_overlap(
     conn: &Connection,
     collection_id: &CollectionKey,
     base_h160: H160,
@@ -372,16 +372,10 @@ fn db_has_unspent_ownership_overlap(
         .query_row(
             r#"
         SELECT 1
-        FROM ownership_utxos u
-        JOIN ownership_ranges r
-            ON r.reg_txid = u.reg_txid
-            AND r.reg_vout = u.reg_vout
-            AND r.collection_id = u.collection_id
-            AND r.base_h160 = u.base_h160
+        FROM ownership_ranges r
         WHERE
-            u.collection_id = ?1
-            AND u.base_h160 = ?2
-            AND u.spent_txid IS NULL
+            r.collection_id = ?1
+            AND r.base_h160 = ?2
             AND r.slot_start <= ?3
             AND r.slot_end >= ?4
         LIMIT 1
@@ -565,14 +559,14 @@ impl StorageRead for SqliteTx {
         )?)
     }
 
-    fn has_unspent_ownership_overlap(
+    fn has_ownership_overlap(
         &self,
         collection_id: &CollectionKey,
         base_h160: H160,
         slot_start: u128,
         slot_end: u128,
     ) -> Result<bool> {
-        Ok(db_has_unspent_ownership_overlap(
+        Ok(db_has_ownership_overlap(
             &self.conn,
             collection_id,
             base_h160,
@@ -856,7 +850,7 @@ impl StorageRead for SqliteStorage {
         Ok(row)
     }
 
-    fn has_unspent_ownership_overlap(
+    fn has_ownership_overlap(
         &self,
         collection_id: &CollectionKey,
         base_h160: H160,
@@ -864,7 +858,7 @@ impl StorageRead for SqliteStorage {
         slot_end: u128,
     ) -> Result<bool> {
         let found = self.with_conn(|conn| {
-            db_has_unspent_ownership_overlap(conn, collection_id, base_h160, slot_start, slot_end)
+            db_has_ownership_overlap(conn, collection_id, base_h160, slot_start, slot_end)
         })?;
         Ok(found)
     }
