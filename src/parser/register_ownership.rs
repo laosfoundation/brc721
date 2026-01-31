@@ -288,7 +288,10 @@ mod tests {
     }
 
     struct FixedRpc {
-        prev_tx: Transaction,
+        first_txid: Txid,
+        first_tx: Transaction,
+        second_txid: Txid,
+        second_tx: Transaction,
     }
 
     impl BitcoinRpc for FixedRpc {
@@ -303,9 +306,21 @@ mod tests {
         }
         fn get_raw_transaction(
             &self,
-            _txid: &bitcoin::Txid,
+            txid: &bitcoin::Txid,
         ) -> Result<bitcoin::Transaction, RpcError> {
-            Ok(self.prev_tx.clone())
+            if txid == &self.first_txid {
+                Ok(self.first_tx.clone())
+            } else if txid == &self.second_txid {
+                Ok(self.second_tx.clone())
+            } else {
+                Err(RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
+                    bitcoincore_rpc::jsonrpc::error::RpcError {
+                        code: -5,
+                        message: "No such mempool or blockchain transaction. Use -txindex or provide a block hash.".into(),
+                        data: None,
+                    },
+                )))
+            }
         }
         fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
             unimplemented!()
@@ -504,7 +519,6 @@ mod tests {
         .expect("payload");
 
         let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
-        let prev_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"base"));
         let prev_tx = Transaction {
             version: Version(2),
             lock_time: absolute::LockTime::ZERO,
@@ -516,27 +530,24 @@ mod tests {
             }],
             output: vec![TxOut {
                 value: Amount::from_sat(1000),
-                script_pubkey: prev_script,
+                script_pubkey: owner_script.clone(),
             }],
         };
-        let rpc = FixedRpc { prev_tx };
+        let prev_txid = Txid::from_str(&"11".repeat(32)).unwrap();
 
-        let tx_a = build_register_ownership_tx(
-            &payload,
-            Txid::from_str(&"11".repeat(32)).unwrap(),
-            0,
-            owner_script.clone(),
-        );
+        let tx_a = build_register_ownership_tx(&payload, prev_txid, 0, owner_script.clone());
+        let tx_aid = tx_a.compute_txid();
+        let tx_b = build_register_ownership_tx(&payload, tx_aid, 1, owner_script);
+        let rpc = FixedRpc {
+            first_txid: prev_txid,
+            first_tx: prev_tx,
+            second_txid: tx_aid,
+            second_tx: tx_a.clone(),
+        };
         let brc721_a = crate::types::parse_brc721_tx(&tx_a)
             .expect("parse tx a")
             .expect("brc721 tx a");
 
-        let tx_b = build_register_ownership_tx(
-            &payload,
-            Txid::from_str(&"22".repeat(32)).unwrap(),
-            0,
-            owner_script,
-        );
         let brc721_b = crate::types::parse_brc721_tx(&tx_b)
             .expect("parse tx b")
             .expect("brc721 tx b");
