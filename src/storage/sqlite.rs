@@ -11,7 +11,7 @@ use super::{
     Block,
 };
 
-const DB_SCHEMA_VERSION: i64 = 7;
+const DB_SCHEMA_VERSION: i64 = 8;
 
 #[derive(Clone)]
 pub struct SqliteStorage {

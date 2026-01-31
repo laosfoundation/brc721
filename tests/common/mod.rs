@@ -83,11 +83,7 @@ impl Drop for DaemonGuard {
 }
 
 #[allow(dead_code)]
-pub fn start_daemon(
-    rpc_url: &String,
-    data_dir: &TempDir,
-    log_path: Option<&Path>,
-) -> DaemonGuard {
+pub fn start_daemon(rpc_url: &String, data_dir: &TempDir, log_path: Option<&Path>) -> DaemonGuard {
     let mut cmd = base_cmd(rpc_url, data_dir);
     cmd.arg("--start").arg("0").arg("--confirmations").arg("0");
     if let Some(path) = log_path {

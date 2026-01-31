@@ -36,8 +36,8 @@ pub fn digest<S: StorageRead + StorageWrite>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::SqliteStorage;
     use crate::storage::traits::{Storage, StorageTx};
+    use crate::storage::SqliteStorage;
     use crate::types::{parse_brc721_tx, Brc721OpReturnOutput, Brc721Payload};
     use bitcoin::absolute;
     use bitcoin::{transaction, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, Witness};
