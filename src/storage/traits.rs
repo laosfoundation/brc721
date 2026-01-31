@@ -80,7 +80,6 @@ pub trait StorageRead {
         slot_start: u128,
         slot_end: u128,
     ) -> Result<bool>;
-
 }
 
 pub trait StorageWrite {

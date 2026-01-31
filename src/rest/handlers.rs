@@ -897,14 +897,14 @@ mod tests {
                 return Ok(false);
             }
             let ranges = self.ownership_ranges.read().unwrap();
-            Ok(ranges.iter().any(
-                |(_, _, range_collection_id, range_base_h160, range)| {
+            Ok(ranges
+                .iter()
+                .any(|(_, _, range_collection_id, range_base_h160, range)| {
                     range_collection_id == collection_id
                         && *range_base_h160 == base_h160
                         && range.slot_start <= slot_end
                         && range.slot_end >= slot_start
-                },
-            ))
+                }))
         }
     }
 
