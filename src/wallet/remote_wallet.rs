@@ -312,6 +312,7 @@ impl RemoteWallet {
         op_return: TxOut,
         payments: Vec<(Address, Amount)>,
         fee_rate: Option<f64>,
+        mandatory_inputs: &[OutPoint],
     ) -> Result<Psbt> {
         let client = self.watch_client()?;
 
@@ -325,6 +326,7 @@ impl RemoteWallet {
         }
         let change_position = outputs_vec.len();
         let outputs = serde_json::Value::Array(outputs_vec);
+        let inputs = serde_json::Value::Array(mandatory_inputs.iter().map(outpoint_json).collect());
 
         let mut options = serde_json::json!({});
         if let Some(fr) = fee_rate {
@@ -332,12 +334,15 @@ impl RemoteWallet {
         }
         // Keep all user-specified outputs at the front, so indices in the OP_RETURN mapping remain stable.
         options["changePosition"] = serde_json::json!(change_position);
+        if !mandatory_inputs.is_empty() {
+            options["add_inputs"] = serde_json::json!(true);
+        }
 
         let funded: serde_json::Value = client
             .call(
                 "walletcreatefundedpsbt",
                 &[
-                    serde_json::json!([]),
+                    inputs,
                     outputs,
                     serde_json::json!(0),
                     options,
@@ -351,6 +356,9 @@ impl RemoteWallet {
 
         psbt = substitute_first_opreturn_script(psbt, script).context("dummy not found")?;
         psbt = move_opreturn_first(psbt);
+        if !mandatory_inputs.is_empty() {
+            psbt = reorder_psbt_inputs(psbt, mandatory_inputs)?;
+        }
         Ok(psbt)
     }
 

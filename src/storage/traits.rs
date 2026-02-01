@@ -73,6 +73,13 @@ pub trait StorageRead {
     ) -> Result<Option<OwnershipUtxo>>;
     fn list_unspent_ownership_utxos_by_owner(&self, owner_h160: H160)
         -> Result<Vec<OwnershipUtxo>>;
+    fn has_ownership_overlap(
+        &self,
+        collection_id: &CollectionKey,
+        base_h160: H160,
+        slot_start: u128,
+        slot_end: u128,
+    ) -> Result<bool>;
 }
 
 pub trait StorageWrite {

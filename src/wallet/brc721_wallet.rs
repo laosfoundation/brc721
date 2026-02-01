@@ -68,6 +68,10 @@ impl Brc721Wallet {
         self.local.reveal_next_payment_address()
     }
 
+    pub fn revealed_payment_addresses(&self) -> Vec<AddressInfo> {
+        self.local.revealed_payment_addresses()
+    }
+
     pub fn balances(&self) -> Result<json::GetBalancesResult> {
         self.remote.balances()
     }
@@ -103,11 +107,30 @@ impl Brc721Wallet {
         target_address: &Address,
         amount: Amount,
         fee_rate: Option<f64>,
+        lock_outpoints: &[OutPoint],
         passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
-        let psbt: Psbt = self
+        let locked = self.remote.list_locked_unspent()?;
+        let to_lock = lock_outpoints
+            .iter()
+            .filter(|outpoint| !locked.contains(outpoint))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.remote
+            .lock_unspent_outpoints(&to_lock)
+            .context("lock token outpoints")?;
+
+        let psbt_res = self
             .remote
-            .create_psbt_for_payment(target_address, amount, fee_rate)?;
+            .create_psbt_for_payment(target_address, amount, fee_rate);
+
+        let unlock_res = self.remote.unlock_unspent_outpoints(&to_lock);
+        if let Err(unlock_err) = unlock_res {
+            log::warn!("Failed to unlock outpoints: {unlock_err:#}");
+        }
+
+        let psbt: Psbt = psbt_res.context("create psbt for payment")?;
 
         self.sign(psbt, &passphrase)
     }
@@ -148,6 +171,7 @@ impl Brc721Wallet {
         payments: Vec<(Address, Amount)>,
         fee_rate: Option<f64>,
         lock_outpoints: &[OutPoint],
+        mandatory_inputs: &[OutPoint],
         passphrase: SecretString,
     ) -> Result<bitcoin::Transaction> {
         let locked = self.remote.list_locked_unspent()?;
@@ -161,9 +185,12 @@ impl Brc721Wallet {
             .lock_unspent_outpoints(&to_lock)
             .context("lock token outpoints")?;
 
-        let psbt_res = self
-            .remote
-            .create_psbt_from_opreturn_and_payments(op_return, payments, fee_rate);
+        let psbt_res = self.remote.create_psbt_from_opreturn_and_payments(
+            op_return,
+            payments,
+            fee_rate,
+            mandatory_inputs,
+        );
 
         let unlock_res = self.remote.unlock_unspent_outpoints(&to_lock);
         if let Err(unlock_err) = unlock_res {

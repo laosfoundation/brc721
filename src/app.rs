@@ -147,15 +147,15 @@ fn determine_start_block<S: Storage>(storage: &S, default: u64) -> Result<u64> {
 
 // --- Entry Point ---
 pub async fn run() -> Result<()> {
-    crate::tracing::init(None);
-    log::info!("🚀 Starting brc721");
-
+    let dotenv_path = crate::cli::load_dotenv();
     let cli = crate::cli::parse();
+    crate::tracing::init(cli.log_file.as_deref().map(Path::new));
+    log::info!("Loaded env from {}", dotenv_path);
+    log::info!("🚀 Starting brc721");
     let ctx = context::Context::from_cli(&cli)?;
 
     if let Some(path) = ctx.log_file.as_deref() {
         log::info!("📝 Log file: {}", path.to_string_lossy());
-        crate::tracing::init(ctx.log_file.as_deref().map(Path::new));
     }
 
     log::info!("🔗 Bitcoin Core RPC URL: {}", ctx.rpc_url);
@@ -254,6 +254,16 @@ mod tests {
             _owner_h160: H160,
         ) -> Result<Vec<OwnershipUtxo>> {
             Ok(vec![])
+        }
+
+        fn has_ownership_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> Result<bool> {
+            Ok(false)
         }
     }
 

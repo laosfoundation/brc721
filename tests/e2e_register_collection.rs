@@ -34,6 +34,10 @@ fn e2e_register_collection() {
     // Fund wallet so it can broadcast
     root_client.generate_to_address(101, &addr).expect("mine");
 
+    let mut daemon = common::start_daemon(&rpc_url, &data_dir, None);
+    common::wait_for_scanner_db(&data_dir);
+    daemon.stop();
+
     // Send register-collection
     let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("tx")

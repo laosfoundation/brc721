@@ -104,11 +104,13 @@ pub struct Cli {
     pub cmd: Option<Command>,
 }
 
-pub fn parse() -> Cli {
+pub fn load_dotenv() -> String {
     let dotenv_path = env::var("DOTENV_PATH").unwrap_or(".env".into());
     dotenvy::from_filename(&dotenv_path).ok();
+    dotenv_path
+}
 
-    log::info!("Loaded env from {}", dotenv_path);
+pub fn parse() -> Cli {
     Cli::parse()
 }
 

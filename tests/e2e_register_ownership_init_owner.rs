@@ -1,11 +1,11 @@
-use bitcoin::blockdata::script::Instruction;
-use bitcoin::consensus::encode::deserialize;
-use bitcoin::opcodes;
-use bitcoin::{Address, Transaction, Txid};
+use bitcoin::Address;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use serde_json::json;
+use std::fs;
 use std::process::Output;
 use std::str::FromStr;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use testcontainers::runners::SyncRunner;
 
@@ -20,7 +20,7 @@ fn combined_output(output: &Output) -> String {
     format!("{}{}", out, err)
 }
 
-fn parse_txid(output: &Output) -> Txid {
+fn parse_txid(output: &Output) -> bitcoin::Txid {
     let combined = combined_output(output);
     for line in combined.lines() {
         if line.contains("txid:") {
@@ -49,7 +49,7 @@ fn parse_owner_output_address(output: &Output) -> Address {
     panic!("owner_output not found in output:\n{}", combined);
 }
 
-fn collection_id_for_confirmed_tx(root: &Client, txid: &Txid) -> (u64, u32) {
+fn collection_id_for_confirmed_tx(root: &Client, txid: &bitcoin::Txid) -> (u64, u32) {
     let txid_str = txid.to_string();
     let tx_verbose: serde_json::Value = root
         .call("getrawtransaction", &[json!(txid_str), json!(true)])
@@ -81,7 +81,7 @@ fn collection_id_for_confirmed_tx(root: &Client, txid: &Txid) -> (u64, u32) {
 }
 
 #[test]
-fn e2e_register_ownership_broadcasts_and_has_expected_outputs() {
+fn e2e_register_ownership_init_owner_rejects_nft_utxo() {
     let image = common::bitcoind_image();
     let container = image.start().expect("start bitcoind container");
     let rpc_url = common::rpc_url(&container);
@@ -103,13 +103,11 @@ fn e2e_register_ownership_broadcasts_and_has_expected_outputs() {
     assert!(output.status.success(), "{:?}", output);
 
     let addr = common::wallet_address(&rpc_url, &data_dir);
-
-    // Fund wallet so it can broadcast
     root_client.generate_to_address(101, &addr).expect("mine");
 
-    let mut daemon = common::start_daemon(&rpc_url, &data_dir, None);
+    let log_path = data_dir.path().join("daemon.log");
+    let mut daemon = common::start_daemon(&rpc_url, &data_dir, Some(&log_path));
     common::wait_for_scanner_db(&data_dir);
-    daemon.stop();
 
     // Register a collection so we can use a real collection id (HEIGHT:TX_INDEX)
     let output = common::base_cmd(&rpc_url, &data_dir)
@@ -132,14 +130,14 @@ fn e2e_register_ownership_broadcasts_and_has_expected_outputs() {
         collection_id_for_confirmed_tx(&root_client, &collection_txid);
     let collection_id = format!("{collection_height}:{collection_tx_index}");
 
-    // Send register-ownership
+    // Register ownership to create an ownership UTXO (vout1).
     let output = common::base_cmd(&rpc_url, &data_dir)
         .arg("tx")
         .arg("register-ownership")
         .arg("--collection-id")
-        .arg(collection_id)
+        .arg(&collection_id)
         .arg("--slots")
-        .arg("0..=9,42,10..=19")
+        .arg("0")
         .arg("--passphrase")
         .arg("passphrase")
         .output()
@@ -148,79 +146,63 @@ fn e2e_register_ownership_broadcasts_and_has_expected_outputs() {
     let ownership_txid = parse_txid(&output);
     let owner_address = parse_owner_output_address(&output);
 
-    // Ensure the tx is in mempool (broadcast succeeded)
-    let _: serde_json::Value = root_client
-        .call("getmempoolentry", &[json!(ownership_txid.to_string())])
-        .expect("mempool entry exists");
-
-    // Fetch and decode the broadcast tx, then assert output ordering:
-    // vout0 = OP_RETURN (BRC-721), vout1 = spendable ownership output.
-    let raw_hex: String = root_client
-        .call("getrawtransaction", &[json!(ownership_txid.to_string())])
-        .expect("getrawtransaction");
-    let raw = hex::decode(raw_hex).expect("raw tx hex");
-    let tx: Transaction = deserialize(&raw).expect("decode tx");
-
-    assert!(
-        tx.output.len() >= 2,
-        "expected at least 2 outputs (op_return + ownership), got {}",
-        tx.output.len()
-    );
-
-    let out0 = &tx.output[0];
-    assert!(out0.script_pubkey.is_op_return(), "vout0 must be OP_RETURN");
-
-    // Basic BRC-721 script shape: OP_RETURN OP_15 <pushbytes payload>
-    let mut instructions = out0.script_pubkey.instructions();
-    assert!(
-        matches!(
-            instructions.next(),
-            Some(Ok(Instruction::Op(opcodes::all::OP_RETURN)))
-        ),
-        "script[0] must be OP_RETURN"
-    );
-    assert!(
-        matches!(
-            instructions.next(),
-            Some(Ok(Instruction::Op(opcodes::all::OP_PUSHNUM_15)))
-        ),
-        "script[1] must be OP_15"
-    );
-    let payload = match instructions.next() {
-        Some(Ok(Instruction::PushBytes(bytes))) => bytes.as_bytes().to_vec(),
-        other => panic!("expected pushbytes payload, got {:?}", other),
-    };
-    assert_eq!(
-        payload.first().copied(),
-        Some(0x01),
-        "payload must be register-ownership (0x01)"
-    );
-
-    let out1 = &tx.output[1];
-    assert!(
-        !out1.script_pubkey.is_op_return(),
-        "vout1 must be spendable"
-    );
-    assert_eq!(
-        out1.script_pubkey,
-        owner_address.script_pubkey(),
-        "vout1 must pay to the owner_output address printed by the CLI"
-    );
-    assert_eq!(out1.value.to_sat(), 546, "ownership output amount");
-
-    // Confirm it can be mined
+    // Confirm the ownership tx so the scanner can index it.
     root_client
         .generate_to_address(1, &addr)
         .expect("mine confirm ownership");
-    let tx_verbose: serde_json::Value = root_client
-        .call(
-            "getrawtransaction",
-            &[json!(ownership_txid.to_string()), json!(true)],
-        )
-        .expect("getrawtransaction verbose after mining");
-    let confirmations = tx_verbose
-        .get("confirmations")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    assert!(confirmations >= 1, "expected confirmations >= 1");
+    let (ownership_height, ownership_tx_index) =
+        collection_id_for_confirmed_tx(&root_client, &ownership_txid);
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let needle = format!(
+        "register-ownership indexed (block {} tx {}",
+        ownership_height, ownership_tx_index
+    );
+    loop {
+        if let Ok(contents) = fs::read_to_string(&log_path) {
+            if contents.contains(&needle) {
+                break;
+            }
+        }
+        if let Some(status) = daemon.try_wait() {
+            panic!("daemon exited early: {}", status);
+        }
+        if Instant::now() > deadline {
+            panic!(
+                "timed out waiting for scanner to index ownership tx at {}#{} (log={})",
+                ownership_height,
+                ownership_tx_index,
+                log_path.display()
+            );
+        }
+        sleep(Duration::from_millis(100));
+    }
+
+    daemon.stop();
+
+    // Attempt to reuse the ownership address as init-owner. This must fail because
+    // it only has an ownership UTXO, which is disallowed for input0.
+    let output = common::base_cmd(&rpc_url, &data_dir)
+        .arg("tx")
+        .arg("register-ownership")
+        .arg("--collection-id")
+        .arg(&collection_id)
+        .arg("--slots")
+        .arg("1")
+        .arg("--init-owner")
+        .arg(owner_address.to_string())
+        .arg("--passphrase")
+        .arg("passphrase")
+        .output()
+        .expect("run tx register-ownership with init-owner");
+    assert!(
+        !output.status.success(),
+        "expected failure when init-owner only has an ownership UTXO"
+    );
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("no spendable UTXO found for init-owner address"),
+        "unexpected output:\n{}",
+        combined
+    );
 }

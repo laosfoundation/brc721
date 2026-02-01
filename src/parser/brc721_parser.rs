@@ -1530,6 +1530,16 @@ mod tests {
         ) -> anyhow::Result<Vec<OwnershipUtxo>> {
             Ok(vec![])
         }
+
+        fn has_ownership_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
     }
 
     impl StorageWrite for DummyStorage {
@@ -1614,6 +1624,198 @@ mod tests {
 
         assert_eq!(*storage.inner.last_height.lock().unwrap(), None);
         assert_eq!(*storage.inner.last_hash.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn register_ownership_overlap_after_spend_is_not_skipped() {
+        use crate::types::{
+            Brc721OpReturnOutput, Brc721Payload, RegisterCollectionData, RegisterOwnershipData,
+            SlotRanges,
+        };
+        use bitcoin::{absolute, transaction, PubkeyHash, Sequence, Txid, Witness};
+        use std::collections::BTreeMap;
+        use std::str::FromStr;
+
+        struct MapRpc {
+            txs: BTreeMap<Txid, Transaction>,
+        }
+
+        impl crate::bitcoin_rpc::BitcoinRpc for MapRpc {
+            fn get_block_count(&self) -> Result<u64, RpcError> {
+                unimplemented!()
+            }
+            fn get_block_hash(&self, _height: u64) -> Result<bitcoin::BlockHash, RpcError> {
+                unimplemented!()
+            }
+            fn get_block(&self, _hash: &bitcoin::BlockHash) -> Result<bitcoin::Block, RpcError> {
+                unimplemented!()
+            }
+            fn get_raw_transaction(
+                &self,
+                txid: &bitcoin::Txid,
+            ) -> Result<bitcoin::Transaction, RpcError> {
+                self.txs.get(txid).cloned().ok_or_else(|| {
+                    RpcError::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
+                        bitcoincore_rpc::jsonrpc::error::RpcError {
+                            code: -5,
+                            message: "No such mempool or blockchain transaction. Use -txindex or provide a block hash.".into(),
+                            data: None,
+                        },
+                    ))
+                })
+            }
+            fn wait_for_new_block(&self, _timeout: u64) -> Result<(), RpcError> {
+                unimplemented!()
+            }
+        }
+
+        let block_height = 900_000;
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage = crate::storage::SqliteStorage::new(temp_dir.path().join("brc721_overlap.db"));
+        storage.init().expect("init db");
+
+        let collection_payload = RegisterCollectionData {
+            evm_collection_address: H160::from_low_u64_be(1),
+            rebaseable: false,
+        };
+        let collection_op_return =
+            Brc721OpReturnOutput::new(Brc721Payload::RegisterCollection(collection_payload))
+                .into_txout()
+                .expect("collection op_return");
+        let collection_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::default(),
+            }],
+            output: vec![collection_op_return],
+        };
+
+        let owner_script = ScriptBuf::new_p2pkh(&PubkeyHash::hash(b"owner"));
+        let prev_tx = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::default(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(1000),
+                script_pubkey: owner_script.clone(),
+            }],
+        };
+        let prev_txid = Txid::from_str(&"11".repeat(32)).unwrap();
+
+        let payload_a = RegisterOwnershipData::for_single_output(
+            block_height,
+            0,
+            SlotRanges::from_str("0").expect("slots parse"),
+        )
+        .expect("payload a");
+        let op_return_a =
+            Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(payload_a.clone()))
+                .into_txout()
+                .expect("op_return a");
+        let tx_a = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: prev_txid,
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::default(),
+            }],
+            output: vec![
+                op_return_a,
+                TxOut {
+                    value: Amount::from_sat(546),
+                    script_pubkey: owner_script.clone(),
+                },
+            ],
+        };
+        let tx_aid = tx_a.compute_txid();
+
+        let payload_b = RegisterOwnershipData::for_single_output(
+            block_height,
+            0,
+            SlotRanges::from_str("0..=1").expect("slots parse"),
+        )
+        .expect("payload b");
+        let op_return_b =
+            Brc721OpReturnOutput::new(Brc721Payload::RegisterOwnership(payload_b.clone()))
+                .into_txout()
+                .expect("op_return b");
+        let tx_b = Transaction {
+            version: transaction::Version(2),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: tx_aid,
+                    vout: 1,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::default(),
+            }],
+            output: vec![
+                op_return_b,
+                TxOut {
+                    value: Amount::from_sat(546),
+                    script_pubkey: owner_script,
+                },
+            ],
+        };
+        let tx_bid = tx_b.compute_txid();
+
+        let mut txs = BTreeMap::new();
+        txs.insert(prev_txid, prev_tx);
+        txs.insert(tx_aid, tx_a.clone());
+        let rpc = MapRpc { txs };
+
+        let header = bitcoin::block::Header {
+            version: bitcoin::block::Version::ONE,
+            prev_blockhash: bitcoin::BlockHash::from_raw_hash(
+                bitcoin::hashes::sha256d::Hash::all_zeros(),
+            ),
+            merkle_root: bitcoin::TxMerkleNode::from_raw_hash(
+                bitcoin::hashes::sha256d::Hash::all_zeros(),
+            ),
+            time: 0,
+            bits: bitcoin::CompactTarget::from_consensus(0),
+            nonce: 0,
+        };
+        let block = Block {
+            header,
+            txdata: vec![collection_tx, tx_a, tx_b],
+        };
+
+        let parser = Brc721Parser::new();
+        let tx = storage.begin_tx().expect("begin tx");
+        parser
+            .parse_block(&tx, &block, block_height, &rpc)
+            .expect("parse block");
+        tx.commit().expect("commit");
+
+        let mut ranges = storage
+            .list_unspent_ownership_ranges_by_outpoint(&tx_bid.to_string(), 1)
+            .expect("list ranges");
+        ranges.sort_by(|a, b| {
+            a.slot_start
+                .cmp(&b.slot_start)
+                .then_with(|| a.slot_end.cmp(&b.slot_end))
+        });
+
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].slot_start, 0);
+        assert_eq!(ranges[0].slot_end, 0);
     }
 
     #[test]

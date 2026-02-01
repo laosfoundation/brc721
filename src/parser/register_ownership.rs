@@ -145,6 +145,25 @@ pub fn digest<S: StorageRead + StorageWrite, R: BitcoinRpc>(
         return Ok(());
     }
 
+    for range in payload.groups.iter().flat_map(|group| group.ranges.iter()) {
+        let overlaps = storage
+            .has_ownership_overlap(&collection_key, base_h160, range.start, range.end)
+            .map_err(|e| Brc721Error::StorageError(e.to_string()))?;
+        if overlaps {
+            log::warn!(
+                "register-ownership overlaps existing assets (block {} tx {}, collection {}, slots {}..={}, input0_prevout={:?}, base_address={})",
+                block_height,
+                tx_index,
+                collection_key,
+                range.start,
+                range.end,
+                input0_prevout,
+                base_h160_log
+            );
+            return Ok(());
+        }
+    }
+
     let txid = brc721_tx.txid().to_string();
 
     for (group_index, group) in payload.groups.iter().enumerate() {
@@ -317,6 +336,16 @@ mod tests {
             _owner_h160: H160,
         ) -> AnyResult<Vec<OwnershipUtxo>> {
             Ok(vec![])
+        }
+
+        fn has_ownership_overlap(
+            &self,
+            _collection_id: &CollectionKey,
+            _base_h160: H160,
+            _slot_start: u128,
+            _slot_end: u128,
+        ) -> AnyResult<bool> {
+            Ok(false)
         }
     }
 
